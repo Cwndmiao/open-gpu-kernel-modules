@@ -171,7 +171,7 @@ static NV_STATUS test_semaphore_acquire(uvm_gpu_t *gpu)
     gpu_sema_va_C = mem.gpu_va + 2 * sema_size;
 
     cpu_ptr = (NvU32 *)mem.cpu_va;
-    memset(cpu_ptr, 0, size);
+    nv_memset(cpu_ptr, 0, size);
     cpu_sema_A = cpu_ptr;
     cpu_sema_B = cpu_ptr + 1;
     cpu_sema_C = cpu_ptr + 2;
@@ -239,7 +239,7 @@ static NV_STATUS test_semaphore_timestamp(uvm_gpu_t *gpu)
 
     timestamp = (NvU64 *)mem.cpu_va;
     TEST_CHECK_GOTO(timestamp != NULL, done);
-    memset(timestamp, 0, size);
+    nv_memset(timestamp, 0, size);
 
     // Shift the timestamp pointer to where the semaphore timestamp info is.
     timestamp += 1;

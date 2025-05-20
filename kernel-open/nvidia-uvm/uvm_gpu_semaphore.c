@@ -138,7 +138,7 @@ static NV_STATUS pool_alloc_page(uvm_gpu_semaphore_pool_t *pool)
         goto error;
 
     // All semaphores are initially free
-    bitmap_fill(pool_page->free_semaphores, UVM_SEMAPHORE_COUNT_PER_PAGE);
+    nv_bitmap_fill(pool_page->free_semaphores, UVM_SEMAPHORE_COUNT_PER_PAGE);
 
     list_add(&pool_page->all_pages_node, &pool->pages);
     pool->free_semaphores_count += UVM_SEMAPHORE_COUNT_PER_PAGE;
@@ -192,7 +192,7 @@ NV_STATUS uvm_gpu_semaphore_alloc(uvm_gpu_semaphore_pool_t *pool, uvm_gpu_semaph
     NV_STATUS status = NV_OK;
     uvm_gpu_semaphore_pool_page_t *page;
 
-    memset(semaphore, 0, sizeof(*semaphore));
+    nv_memset(semaphore, 0, sizeof(*semaphore));
 
     uvm_mutex_lock(&pool->mutex);
 
@@ -413,7 +413,7 @@ NV_STATUS uvm_gpu_tracking_semaphore_alloc(uvm_gpu_semaphore_pool_t *pool, uvm_g
 {
     NV_STATUS status;
 
-    memset(tracking_sem, 0, sizeof(*tracking_sem));
+    nv_memset(tracking_sem, 0, sizeof(*tracking_sem));
 
     status = uvm_gpu_semaphore_alloc(pool, &tracking_sem->semaphore);
     if (status != NV_OK)

@@ -691,7 +691,7 @@ static NV_STATUS internal_channel_create(uvm_channel_t *channel, unsigned engine
 
     }
 
-    memset(&channel_alloc_params, 0, sizeof(channel_alloc_params));
+    nv_memset(&channel_alloc_params, 0, sizeof(channel_alloc_params));
     channel_alloc_params.numGpFifoEntries = manager->conf.num_gpfifo_entries;
     channel_alloc_params.gpFifoLoc = manager->conf.gpfifo_loc;
     channel_alloc_params.gpPutLoc = manager->conf.gpput_loc;
@@ -742,7 +742,7 @@ static NV_STATUS proxy_channel_create(uvm_channel_t *channel, unsigned ce_index)
 
     UVM_ASSERT(uvm_channel_is_proxy(channel));
 
-    memset(&channel_alloc_params, 0, sizeof(channel_alloc_params));
+    nv_memset(&channel_alloc_params, 0, sizeof(channel_alloc_params));
     channel_alloc_params.engineIndex = ce_index;
 
     status = uvm_rm_locked_call(nvUvmInterfacePagingChannelAllocate(uvm_gpu_device_handle(gpu),
@@ -1123,7 +1123,7 @@ static NV_STATUS channel_manager_pick_copy_engines(uvm_channel_manager_t *manage
                                   UVM_CHANNEL_TYPE_GPU_TO_GPU,
                                   UVM_CHANNEL_TYPE_MEMOPS};
 
-    memset(&ces_caps, 0, sizeof(ces_caps));
+    nv_memset(&ces_caps, 0, sizeof(ces_caps));
     status = uvm_rm_locked_call(nvUvmInterfaceQueryCopyEnginesCaps(uvm_gpu_device_handle(manager->gpu), &ces_caps));
     if (status != NV_OK)
         return status;
@@ -1249,8 +1249,8 @@ static void init_channel_manager_conf(uvm_channel_manager_t *manager)
 
     // Override the default value if requested by the user
     if (strcmp(pushbuffer_loc_value, "vid") == 0) {
-        // aarch64 requires memset_io/memcpy_io instead of memset/memcpy for
-        // mapped GPU memory. The existing push paths only use memset/memcpy,
+        // aarch64 requires nv_memset_io/memcpy_io instead of nv_memset/memcpy for
+        // mapped GPU memory. The existing push paths only use nv_memset/memcpy,
         // so force the location to sys for now.
         // TODO: Bug 2904133: Remove the following "if" after the bug is fixed.
         if (NVCPU_IS_AARCH64) {

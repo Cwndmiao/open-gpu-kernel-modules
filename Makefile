@@ -24,7 +24,7 @@ nv_modeset_kernel_o_binary = kernel-open/nvidia-modeset/nv-modeset-kernel.o_bina
 ###########################################################################
 
 $(nv_kernel_o):
-	$(MAKE) -C src/nvidia
+	$(MAKE) -C src/nvidia DEBUG=1
 
 $(nv_kernel_o_binary): $(nv_kernel_o)
 	cd $(dir $@) && ln -sf ../../$^ $(notdir $@)

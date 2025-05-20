@@ -54,7 +54,7 @@ static NV_STATUS check_reverse_map_block_page(uvm_va_block_t *va_block,
     for_each_va_block_page(page_index, va_block) {
         size_t num_pages;
 
-        memset(g_sysmem_translations, 0, sizeof(g_sysmem_translations));
+        nv_memset(g_sysmem_translations, 0, sizeof(g_sysmem_translations));
         num_pages = uvm_pmm_sysmem_mappings_dma_to_virt(&g_reverse_map,
                                                         base_dma_addr + page_index * PAGE_SIZE,
                                                         PAGE_SIZE,
@@ -90,7 +90,7 @@ static NV_STATUS check_reverse_map_block_batch(uvm_va_block_t *va_block,
     size_t num_pages;
     size_t reverse_map_index;
 
-    memset(g_sysmem_translations, 0, sizeof(g_sysmem_translations));
+    nv_memset(g_sysmem_translations, 0, sizeof(g_sysmem_translations));
     num_translations = uvm_pmm_sysmem_mappings_dma_to_virt(&g_reverse_map,
                                                            base_dma_addr,
                                                            uvm_va_block_size(va_block),
@@ -133,7 +133,7 @@ static NV_STATUS check_reverse_map_two_blocks_batch(NvU64 base_dma_addr,
     size_t num_translations;
     size_t reverse_map_index;
 
-    memset(g_sysmem_translations, 0, sizeof(g_sysmem_translations));
+    nv_memset(g_sysmem_translations, 0, sizeof(g_sysmem_translations));
     num_translations = uvm_pmm_sysmem_mappings_dma_to_virt(&g_reverse_map,
                                                            base_dma_addr,
                                                            UVM_VA_BLOCK_SIZE,

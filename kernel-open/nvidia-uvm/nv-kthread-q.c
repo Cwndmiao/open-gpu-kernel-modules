@@ -219,9 +219,10 @@ static struct task_struct *thread_create_on_node(int (*threadfn)(void *data),
 }
 #endif
 
+void *nv_memset(void *s, int c, size_t n);
 int nv_kthread_q_init_on_node(nv_kthread_q_t *q, const char *q_name, int preferred_node)
 {
-    memset(q, 0, sizeof(*q));
+    nv_memset(q, 0, sizeof(*q));
 
     INIT_LIST_HEAD(&q->q_list_head);
     spin_lock_init(&q->q_lock);

@@ -444,7 +444,7 @@ static void enqueue_event(const UvmEventEntry *entry, uvm_tools_queue_t *queue)
         goto unlock;
     }
 
-    memcpy(queue->queue + sn.put_behind, entry, sizeof(*entry));
+    nv_memcpy(queue->queue + sn.put_behind, entry, sizeof(*entry));
 
     sn.put_behind = sn.put_ahead;
     // put_ahead and put_behind will always be the same outside of queue->lock
@@ -723,7 +723,7 @@ static void record_gpu_fault_instance(uvm_gpu_t *gpu,
 {
     UvmEventEntry entry;
     UvmEventGpuFaultInfo *info = &entry.eventData.gpuFault;
-    memset(&entry, 0, sizeof(entry));
+    nv_memset(&entry, 0, sizeof(entry));
 
     info->eventType     = UvmEventTypeGpuFault;
     info->gpuIndex      = uvm_id_value(gpu->id);
@@ -761,7 +761,7 @@ static void uvm_tools_record_fault(uvm_perf_event_t event_id, uvm_perf_event_dat
         if (tools_is_event_enabled(va_space, UvmEventTypeCpuFault)) {
             UvmEventEntry entry;
             UvmEventCpuFaultInfo *info = &entry.eventData.cpuFault;
-            memset(&entry, 0, sizeof(entry));
+            nv_memset(&entry, 0, sizeof(entry));
 
             info->eventType = UvmEventTypeCpuFault;
             if (event_data->fault.cpu.is_write)
@@ -846,7 +846,7 @@ static void record_migration_events(void *args)
     NvU64 gpu_timestamp = block_mig->start_timestamp_gpu;
 
     // Initialize fields that are constant throughout the whole block
-    memset(&entry, 0, sizeof(entry));
+    nv_memset(&entry, 0, sizeof(entry));
     info->eventType      = UvmEventTypeMigration;
     info->srcIndex       = uvm_id_value(block_mig->src);
     info->dstIndex       = uvm_id_value(block_mig->dst);
@@ -911,7 +911,7 @@ static void record_replay_event_helper(uvm_gpu_id_t gpu_id,
 {
     UvmEventEntry entry;
 
-    memset(&entry, 0, sizeof(entry));
+    nv_memset(&entry, 0, sizeof(entry));
     entry.eventData.gpuFaultReplay.eventType    = UvmEventTypeGpuFaultReplay;
     entry.eventData.gpuFaultReplay.gpuIndex     = uvm_id_value(gpu_id);
     entry.eventData.gpuFaultReplay.batchId      = batch_id;
@@ -1092,7 +1092,7 @@ void uvm_tools_broadcast_access_counter(uvm_gpu_t *gpu,
     if (!buffer_entry->address.is_virtual)
         UVM_ASSERT(UVM_ID_IS_VALID(buffer_entry->physical_info.resident_id));
 
-    memset(&entry, 0, sizeof(entry));
+    nv_memset(&entry, 0, sizeof(entry));
 
     info->eventType           = UvmEventTypeTestAccessCounter;
     info->srcIndex            = uvm_id_value(gpu->id);
@@ -1199,7 +1199,7 @@ void uvm_tools_record_read_duplicate(uvm_va_block_t *va_block,
         UvmEventEntry entry;
         UvmEventReadDuplicateInfo *info_read_duplicate = &entry.eventData.readDuplicate;
         uvm_page_index_t page_index;
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info_read_duplicate->eventType = UvmEventTypeReadDuplicate;
         info_read_duplicate->size      = PAGE_SIZE;
@@ -1237,7 +1237,7 @@ void uvm_tools_record_read_duplicate_invalidate(uvm_va_block_t *va_block,
         UvmEventEntry entry;
         uvm_page_index_t page_index;
         UvmEventReadDuplicateInvalidateInfo *info = &entry.eventData.readDuplicateInvalidate;
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType     = UvmEventTypeReadDuplicateInvalidate;
         info->residentIndex = uvm_id_value(dst);
@@ -1307,7 +1307,7 @@ void uvm_tools_record_cpu_fatal_fault(uvm_va_space_t *va_space,
     if (tools_is_event_enabled(va_space, UvmEventTypeFatalFault)) {
         UvmEventEntry entry;
         UvmEventFatalFaultInfo *info = &entry.eventData.fatalFault;
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType      = UvmEventTypeFatalFault;
         info->processorIndex = UVM_ID_CPU_VALUE;
@@ -1336,7 +1336,7 @@ void uvm_tools_record_gpu_fatal_fault(uvm_gpu_id_t gpu_id,
     if (tools_is_event_enabled(va_space, UvmEventTypeFatalFault)) {
         UvmEventEntry entry;
         UvmEventFatalFaultInfo *info = &entry.eventData.fatalFault;
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType      = UvmEventTypeFatalFault;
         info->processorIndex = uvm_id_value(gpu_id);
@@ -1369,7 +1369,7 @@ void uvm_tools_record_thrashing(uvm_va_space_t *va_space,
     if (tools_is_event_enabled(va_space, UvmEventTypeThrashingDetected)) {
         UvmEventEntry entry;
         UvmEventThrashingDetectedInfo *info = &entry.eventData.thrashing;
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType = UvmEventTypeThrashingDetected;
         info->address   = address;
@@ -1397,7 +1397,7 @@ void uvm_tools_record_throttling_start(uvm_va_space_t *va_space, NvU64 address, 
     if (tools_is_event_enabled(va_space, UvmEventTypeThrottlingStart)) {
         UvmEventEntry entry;
         UvmEventThrottlingStartInfo *info = &entry.eventData.throttlingStart;
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType      = UvmEventTypeThrottlingStart;
         info->processorIndex = uvm_id_value(processor);
@@ -1424,7 +1424,7 @@ void uvm_tools_record_throttling_end(uvm_va_space_t *va_space, NvU64 address, uv
     if (tools_is_event_enabled(va_space, UvmEventTypeThrottlingEnd)) {
         UvmEventEntry entry;
         UvmEventThrottlingEndInfo *info = &entry.eventData.throttlingEnd;
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType      = UvmEventTypeThrottlingEnd;
         info->processorIndex = uvm_id_value(processor);
@@ -1443,7 +1443,7 @@ static void record_map_remote_events(void *args)
     UvmEventEntry entry;
     uvm_va_space_t *va_space = block_map_remote->va_space;
 
-    memset(&entry, 0, sizeof(entry));
+    nv_memset(&entry, 0, sizeof(entry));
 
     entry.eventData.mapRemote.eventType      = UvmEventTypeMapRemote;
     entry.eventData.mapRemote.srcIndex       = uvm_id_value(block_map_remote->src);
@@ -1516,7 +1516,7 @@ void uvm_tools_record_map_remote(uvm_va_block_t *va_block,
 
     if (UVM_ID_IS_CPU(processor)) {
         UvmEventEntry entry;
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         entry.eventData.mapRemote.eventType      = UvmEventTypeMapRemote;
         entry.eventData.mapRemote.srcIndex       = uvm_id_value(processor);

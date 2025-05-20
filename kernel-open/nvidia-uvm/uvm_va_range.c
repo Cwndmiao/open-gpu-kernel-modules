@@ -1968,7 +1968,7 @@ NV_STATUS uvm_test_va_range_info(UVM_TEST_VA_RANGE_INFO_PARAMS *params, struct f
     params->read_duplication = uvm_va_range_get_policy(va_range)->read_duplication;
 
     if (UVM_ID_IS_INVALID(uvm_va_range_get_policy(va_range)->preferred_location))
-        memset(&params->preferred_location, 0, sizeof(params->preferred_location));
+        nv_memset(&params->preferred_location, 0, sizeof(params->preferred_location));
     else
         uvm_va_space_processor_uuid(va_space,
                                     &params->preferred_location,

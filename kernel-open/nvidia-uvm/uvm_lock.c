@@ -376,5 +376,5 @@ NV_STATUS uvm_bit_locks_init(uvm_bit_locks_t *bit_locks, size_t count, uvm_lock_
 void uvm_bit_locks_deinit(uvm_bit_locks_t *bit_locks)
 {
     kfree(bit_locks->bits);
-    memset(bit_locks, 0, sizeof(*bit_locks));
+    nv_memset(bit_locks, 0, sizeof(*bit_locks));
 }

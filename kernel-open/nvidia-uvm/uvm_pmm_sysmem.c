@@ -50,7 +50,7 @@ void uvm_pmm_sysmem_exit(void)
 
 NV_STATUS uvm_pmm_sysmem_mappings_init(uvm_gpu_t *gpu, uvm_pmm_sysmem_mappings_t *sysmem_mappings)
 {
-    memset(sysmem_mappings, 0, sizeof(*sysmem_mappings));
+    nv_memset(sysmem_mappings, 0, sizeof(*sysmem_mappings));
 
     sysmem_mappings->gpu = gpu;
 

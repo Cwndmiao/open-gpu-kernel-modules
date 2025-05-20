@@ -128,7 +128,7 @@ static void uvm_ibm_npu_destroy(uvm_ibm_npu_t *npu)
         iounmap(npu->atsd_regs.io_addrs[i]);
     }
 
-    memset(npu, 0, sizeof(*npu));
+    nv_memset(npu, 0, sizeof(*npu));
 }
 
 static NV_STATUS uvm_ibm_npu_init(uvm_ibm_npu_t *npu, struct pci_dev *npu_dev)

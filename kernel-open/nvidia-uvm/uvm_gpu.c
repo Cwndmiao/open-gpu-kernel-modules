@@ -111,7 +111,7 @@ static NV_STATUS get_gpu_caps(uvm_parent_gpu_t *parent_gpu)
     NV_STATUS status;
     UvmGpuCaps gpu_caps;
 
-    memset(&gpu_caps, 0, sizeof(gpu_caps));
+    nv_memset(&gpu_caps, 0, sizeof(gpu_caps));
 
     status = uvm_rm_locked_call(nvUvmInterfaceQueryCaps(parent_gpu->rm_device, &gpu_caps));
     if (status != NV_OK)
@@ -312,7 +312,7 @@ static void gpu_info_print_ce_caps(uvm_gpu_t *gpu, struct seq_file *s)
     UvmGpuCopyEnginesCaps ces_caps;
     NV_STATUS status;
 
-    memset(&ces_caps, 0, sizeof(ces_caps));
+    nv_memset(&ces_caps, 0, sizeof(ces_caps));
     status = uvm_rm_locked_call(nvUvmInterfaceQueryCopyEnginesCaps(uvm_gpu_device_handle(gpu), &ces_caps));
 
     if (status != NV_OK) {
@@ -2070,7 +2070,7 @@ static NV_STATUS get_p2p_caps(uvm_gpu_t *gpu0,
         rm_device1 = uvm_gpu_device_handle(gpu0);
     }
 
-    memset(p2p_caps_params, 0, sizeof(*p2p_caps_params));
+    nv_memset(p2p_caps_params, 0, sizeof(*p2p_caps_params));
     status = uvm_rm_locked_call(nvUvmInterfaceGetP2PCaps(rm_device0, rm_device1, p2p_caps_params));
     if (status != NV_OK) {
         UVM_ERR_PRINT("nvUvmInterfaceGetP2PCaps() failed with error: %s, for GPU0:%s and GPU1:%s\n",
@@ -2555,7 +2555,7 @@ static void disable_peer_access(uvm_gpu_t *gpu0, uvm_gpu_t *gpu1)
     if (gpu1->parent->access_counters_supported)
         uvm_gpu_access_counter_buffer_flush(gpu1);
 
-    memset(peer_caps, 0, sizeof(*peer_caps));
+    nv_memset(peer_caps, 0, sizeof(*peer_caps));
 }
 
 void uvm_gpu_release_pcie_peer_access(uvm_gpu_t *gpu0, uvm_gpu_t *gpu1)

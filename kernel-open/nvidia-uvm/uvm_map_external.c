@@ -97,7 +97,7 @@ static NV_STATUS uvm_pte_buffer_init(uvm_va_range_t *va_range,
     uvm_page_tree_t *tree = &gpu_va_space->page_tables;
     size_t num_all_ptes;
 
-    memset(pte_buffer, 0, sizeof(*pte_buffer));
+    nv_memset(pte_buffer, 0, sizeof(*pte_buffer));
 
     pte_buffer->va_range = va_range;
     pte_buffer->gpu = gpu;

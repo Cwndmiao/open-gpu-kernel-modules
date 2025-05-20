@@ -293,7 +293,7 @@ static NV_STATUS random_test(NvU32 iters, NvU32 seed, bool verbose)
     random_test_state_t state;
     int i;
 
-    memset(&state, 0, sizeof(state));
+    nv_memset(&state, 0, sizeof(state));
 
     state.free_size = RANDOM_TEST_SIZE;
     uvm_test_rng_init(&state.rng, seed);

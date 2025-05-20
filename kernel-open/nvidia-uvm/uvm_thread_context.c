@@ -282,7 +282,7 @@ static void thread_context_non_interrupt_init(uvm_thread_context_t *thread_conte
         thread_context_wrapper = container_of(thread_context, uvm_thread_context_wrapper_t, context);
         context_lock = &thread_context_wrapper->context_lock;
 
-        memset(context_lock, 0, sizeof(*context_lock));
+        nv_memset(context_lock, 0, sizeof(*context_lock));
 
         // If this allocation fails, the lock context will appear as not
         // present, but the rest of the thread context is usable.
@@ -624,7 +624,7 @@ static void thread_context_move(uvm_thread_context_t *dst, uvm_thread_context_t 
                     UVM_LOCK_ORDER_COUNT);
         bitmap_zero(src_context_lock->out_of_order_acquired_lock_orders, UVM_LOCK_ORDER_COUNT);
 
-        memcpy(dst_context_lock->acquired, src_context_lock->acquired, acquired_size);
+        nv_memcpy(dst_context_lock->acquired, src_context_lock->acquired, acquired_size);
     }
 }
 

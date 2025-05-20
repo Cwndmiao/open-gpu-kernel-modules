@@ -71,9 +71,10 @@ static uvm_rb_tree_node_t *uvm_rb_tree_find_node(uvm_rb_tree_t *tree,
     return node;
 }
 
+void *nv_memset(void *s, int c, size_t n);
 void uvm_rb_tree_init(uvm_rb_tree_t *tree)
 {
-    memset(tree, 0, sizeof(*tree));
+    nv_memset(tree, 0, sizeof(*tree));
     tree->rb_root = RB_ROOT;
     INIT_LIST_HEAD(&tree->head);
 }

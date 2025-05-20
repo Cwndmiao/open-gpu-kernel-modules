@@ -37,7 +37,7 @@
 #if !defined(NV_ADDRESS_SPACE_INIT_ONCE_PRESENT)
 void address_space_init_once(struct address_space *mapping)
 {
-    memset(mapping, 0, sizeof(*mapping));
+    nv_memset(mapping, 0, sizeof(*mapping));
     INIT_RADIX_TREE(&mapping->page_tree, GFP_ATOMIC);
 
 #if defined(NV_ADDRESS_SPACE_HAS_RWLOCK_TREE_LOCK)
@@ -62,7 +62,7 @@ void address_space_init_once(struct address_space *mapping)
 #if UVM_CGROUP_ACCOUNTING_SUPPORTED()
 void uvm_memcg_context_start(uvm_memcg_context_t *context, struct mm_struct *mm)
 {
-    memset(context, 0, sizeof(*context));
+    nv_memset(context, 0, sizeof(*context));
     if (!mm)
         return;
 

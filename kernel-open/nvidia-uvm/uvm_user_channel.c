@@ -65,7 +65,7 @@ static NV_STATUS get_rm_channel_resources(uvm_user_channel_t *user_channel, UvmG
     if (!resources)
         return NV_ERR_NO_MEMORY;
 
-    memcpy(resources, channel_info->resourceInfo, num_resources * sizeof(resources[0]));
+    nv_memcpy(resources, channel_info->resourceInfo, num_resources * sizeof(resources[0]));
 
     // Info fix-up
     for (i = 0; i < num_resources; i++) {
@@ -115,7 +115,7 @@ static NV_STATUS uvm_user_channel_create(uvm_va_space_t *va_space,
         return NV_ERR_NO_MEMORY;
 
     user_channel->gpu = gpu;
-    memcpy(&user_channel->user_rm_channel, user_rm_channel, sizeof(*user_rm_channel));
+    nv_memcpy(&user_channel->user_rm_channel, user_rm_channel, sizeof(*user_rm_channel));
     INIT_LIST_HEAD(&user_channel->list_node);
     UVM_RB_TREE_CLEAR_NODE(&user_channel->instance_ptr.node);
     nv_kref_init(&user_channel->kref);
@@ -937,7 +937,7 @@ static NV_STATUS uvm_test_check_channel_va_space_get_info(uvm_va_space_t *va_spa
     // Look up the instance pointer
     //
     // TODO: Bug 1624521: This interface needs to use rmCtrlFd to do validation
-    memset(channel_info, 0, sizeof(*channel_info));
+    nv_memset(channel_info, 0, sizeof(*channel_info));
     status = uvm_rm_locked_call(nvUvmInterfaceRetainChannel(gpu_va_space->duped_gpu_va_space,
                                                             params->client,
                                                             params->channel,
@@ -963,7 +963,7 @@ NV_STATUS uvm_test_check_channel_va_space(UVM_TEST_CHECK_CHANNEL_VA_SPACE_PARAMS
     UvmGpuChannelInstanceInfo *channel_info;
     NV_STATUS status;
 
-    memset(&fault_entry, 0, sizeof(fault_entry));
+    nv_memset(&fault_entry, 0, sizeof(fault_entry));
 
     channel_info = uvm_kvmalloc_zero(sizeof(*channel_info));
     if (!channel_info) {

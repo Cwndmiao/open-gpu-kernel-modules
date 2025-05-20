@@ -398,12 +398,12 @@ static const char *uvm_va_space_processor_name(uvm_va_space_t *va_space, uvm_pro
 static void uvm_va_space_processor_uuid(uvm_va_space_t *va_space, NvProcessorUuid *uuid, uvm_processor_id_t id)
 {
     if (UVM_ID_IS_CPU(id)) {
-        memcpy(uuid, &NV_PROCESSOR_UUID_CPU_DEFAULT, sizeof(*uuid));
+        nv_memcpy(uuid, &NV_PROCESSOR_UUID_CPU_DEFAULT, sizeof(*uuid));
     }
     else {
         uvm_gpu_t *gpu = uvm_va_space_get_gpu(va_space, id);
         UVM_ASSERT(gpu);
-        memcpy(uuid, uvm_gpu_uuid(gpu), sizeof(*uuid));
+        nv_memcpy(uuid, uvm_gpu_uuid(gpu), sizeof(*uuid));
     }
 }
 

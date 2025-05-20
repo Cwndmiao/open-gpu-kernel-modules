@@ -101,7 +101,7 @@ static NV_STATUS test_uvm_kvmalloc(void)
             }
             else {
                 expected = (uint8_t)(current->pid + i);
-                memset(p, expected, size);
+                nv_memset(p, expected, size);
             }
 
             for (j = 0; j < size; j++) {
@@ -145,7 +145,7 @@ static NV_STATUS test_uvm_kvrealloc(void)
             MEM_NV_CHECK_RET(check_alloc(old_p, old_size), NV_OK);
 
             ++expected;
-            memset(old_p, expected, old_size);
+            nv_memset(old_p, expected, old_size);
 
             new_p = uvm_kvrealloc(old_p, new_size);
             if (!new_p) {

@@ -16,7 +16,7 @@
 # $(obj) : The directory where the output from this build is written.
 #
 
-NV_BUILD_TYPE ?= release
+NV_BUILD_TYPE ?= debug
 
 #
 # Utility macro ASSIGN_PER_OBJ_CFLAGS: to control CFLAGS on a

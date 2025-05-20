@@ -78,7 +78,7 @@ NV_STATUS uvm_tracker_init_from(uvm_tracker_t *dst, uvm_tracker_t *src)
 void uvm_tracker_deinit(uvm_tracker_t *tracker)
 {
     free_entries(tracker);
-    memset(tracker, 0, sizeof(*tracker));
+    nv_memset(tracker, 0, sizeof(*tracker));
 }
 
 NV_STATUS uvm_tracker_overwrite(uvm_tracker_t *dst, uvm_tracker_t *src)

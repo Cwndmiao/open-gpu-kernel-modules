@@ -633,7 +633,7 @@ static void uvm_va_block_context_init(uvm_va_block_context_t *va_block_context, 
     // Write garbage into the VA Block context to ensure that the UVM code
     // clears masks appropriately
     if (UVM_IS_DEBUG())
-        memset(va_block_context, 0xff, sizeof(*va_block_context));
+        nv_memset(va_block_context, 0xff, sizeof(*va_block_context));
 
     va_block_context->mm = mm;
 }
@@ -1476,7 +1476,7 @@ static void uvm_page_mask_region_clear_outside(uvm_page_mask_t *mask, uvm_va_blo
 
 static void uvm_page_mask_zero(uvm_page_mask_t *mask)
 {
-    bitmap_zero(mask->bitmap, PAGES_PER_UVM_VA_BLOCK);
+    nv_bitmap_zero(mask->bitmap, PAGES_PER_UVM_VA_BLOCK);
 }
 
 static bool uvm_page_mask_empty(const uvm_page_mask_t *mask)
@@ -1511,7 +1511,7 @@ static void uvm_page_mask_complement(uvm_page_mask_t *mask_out, const uvm_page_m
 
 static void uvm_page_mask_copy(uvm_page_mask_t *mask_out, const uvm_page_mask_t *mask_in)
 {
-    bitmap_copy(mask_out->bitmap, mask_in->bitmap, PAGES_PER_UVM_VA_BLOCK);
+    nv_bitmap_copy(mask_out->bitmap, mask_in->bitmap, PAGES_PER_UVM_VA_BLOCK);
 }
 
 static NvU32 uvm_page_mask_weight(const uvm_page_mask_t *mask)

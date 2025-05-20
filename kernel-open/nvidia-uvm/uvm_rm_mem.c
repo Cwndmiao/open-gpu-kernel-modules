@@ -200,6 +200,7 @@ NV_STATUS uvm_rm_mem_alloc(uvm_gpu_t *gpu, uvm_rm_mem_type_t type, NvLength size
 
 
 
+    UVM_ERR_PRINT("cwndmiao debug, uvm_rm_mem_alloc\n");
 
     if (type == UVM_RM_MEM_TYPE_SYS)
         status = uvm_rm_locked_call(nvUvmInterfaceMemoryAllocSys(gpu->rm_address_space, size, &gpu_va, &alloc_info));

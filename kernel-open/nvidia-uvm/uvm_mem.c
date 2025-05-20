@@ -808,6 +808,7 @@ static NV_STATUS mem_map_cpu_to_sysmem_user(uvm_mem_t *mem, struct vm_area_struc
     // are semaphore pools (which typically use a single page).
     for (offset = 0; offset < mem->physical_allocation_size; offset += PAGE_SIZE) {
         int ret = vm_insert_page(vma, (unsigned long)mem->user->addr + offset, mem_cpu_page(mem, offset));
+        UVM_ERR_PRINT("cwndmiao debug, mem_map_cpu_to_sysmem_user\n");
         if (ret) {
             UVM_ASSERT_MSG(ret == -ENOMEM, "ret: %d\n", ret);
             status = errno_to_nv_status(ret);

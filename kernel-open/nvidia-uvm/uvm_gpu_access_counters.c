@@ -1503,7 +1503,7 @@ static NV_STATUS access_counters_config_from_test_params(const UVM_TEST_RECONFIG
                                                          UvmGpuAccessCntrConfig *config)
 {
     NvU64 tracking_size;
-    memset(config, 0, sizeof(*config));
+    nv_memset(config, 0, sizeof(*config));
 
     if (params->threshold == 0 || params->threshold > g_uvm_access_counters_threshold_max)
         return NV_ERR_INVALID_ARGUMENT;

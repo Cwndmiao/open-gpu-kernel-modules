@@ -80,5 +80,5 @@ void uvm_perf_tree_clear(uvm_perf_tree_t *tree, size_t node_size)
     UVM_ASSERT(tree);
     UVM_ASSERT(tree->nodes);
 
-    memset(tree->nodes, 0, tree->node_count * node_size);
+    nv_memset(tree->nodes, 0, tree->node_count * node_size);
 }

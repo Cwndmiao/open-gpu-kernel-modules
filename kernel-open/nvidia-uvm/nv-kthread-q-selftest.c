@@ -102,6 +102,7 @@ static void _basic_start_stop_callback(void *args)
     *start_stop_args->where_to_write = start_stop_args->value_to_write;
 }
 
+void *nv_memset(void *s, int c, size_t n);
 static int _basic_start_stop_test(void)
 {
     int i, was_scheduled;
@@ -113,7 +114,7 @@ static int _basic_start_stop_test(void)
 
     // Do a redudant stop to ensure stop is supported on zero initialized memory
     // No crash should occur
-    memset(&local_q, 0, sizeof(nv_kthread_q_t));
+    nv_memset(&local_q, 0, sizeof(nv_kthread_q_t));
     nv_kthread_q_stop(&local_q);
 
     // Do a quick start-stop cycle first:
@@ -124,8 +125,8 @@ static int _basic_start_stop_test(void)
     // call another q_stop and it shouldn't crash and should return fine
     nv_kthread_q_stop(&local_q);
 
-    memset(&start_stop_args, 0, sizeof(start_stop_args));
-    memset(callback_values_written, 0, sizeof(callback_values_written));
+    nv_memset(&start_stop_args, 0, sizeof(start_stop_args));
+    nv_memset(callback_values_written, 0, sizeof(callback_values_written));
 
     // All the callback arguments point to the same nv_kthread_q:
     for (i = 0; i < NUM_Q_ITEMS_IN_BASIC_TEST; ++i) {
@@ -211,7 +212,7 @@ static int _multithreaded_q_kthread_function(void *args)
         goto done;
     }
 
-    memset(q_items, 0, alloc_size);
+    nv_memset(q_items, 0, alloc_size);
 
     for (i = 0; i < NUM_TEST_Q_ITEMS; ++i) {
         nv_kthread_q_item_init(&q_items[i],
@@ -258,8 +259,8 @@ static int _multithreaded_q_test(void)
     nv_kthread_q_t local_q;
     atomic_t       local_accumulator;
 
-    memset(multithread_args, 0, sizeof(multithread_args));
-    memset(kthreads, 0, sizeof(kthreads));
+    nv_memset(multithread_args, 0, sizeof(multithread_args));
+    nv_memset(kthreads, 0, sizeof(kthreads));
     atomic_set(&local_accumulator, 0);
 
     result = nv_kthread_q_init(&local_q, "multithread_test_q");
@@ -346,7 +347,7 @@ static int _reschedule_same_item_from_its_own_callback_test(void)
     int result = 0;
     resched_args_t resched_args;
 
-    memset(&resched_args, 0, sizeof(resched_args));
+    nv_memset(&resched_args, 0, sizeof(resched_args));
 
     result = nv_kthread_q_init(&resched_args.test_q, "resched_test_q");
     TEST_CHECK_RET(result == 0);
@@ -399,7 +400,7 @@ static int _same_q_item_test(void)
     nv_kthread_q_t      local_q;
     nv_kthread_q_item_t q_item;
 
-    memset(&same_q_item_args, 0, sizeof(same_q_item_args));
+    nv_memset(&same_q_item_args, 0, sizeof(same_q_item_args));
 
     result = nv_kthread_q_init(&local_q, "same_q_item_test_q");
     TEST_CHECK_RET(result == 0);

@@ -60,10 +60,10 @@ else
     )
   endif
 
-  NV_KERNEL_MODULES ?= $(wildcard nvidia nvidia-uvm nvidia-vgpu-vfio nvidia-modeset nvidia-drm nvidia-peermem)
+  NV_KERNEL_MODULES ?= $(wildcard nvidia nvidia-uvm nvidia-peermem)
   NV_KERNEL_MODULES := $(filter-out $(NV_EXCLUDE_KERNEL_MODULES), \
                                     $(NV_KERNEL_MODULES))
-  NV_VERBOSE ?=
+  NV_VERBOSE ?= 1
   SPECTRE_V2_RETPOLINE ?= 0
 
   ifeq ($(NV_VERBOSE),1)

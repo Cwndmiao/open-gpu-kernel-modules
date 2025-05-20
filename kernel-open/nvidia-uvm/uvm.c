@@ -501,6 +501,8 @@ static vm_fault_t uvm_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
     if (status != NV_OK)
         goto convert_error;
 
+    UVM_ERR_PRINT("cwndmiao debug, uvm_vm_fault\n");
+
     // TODO: Bug 2583279: Lock tracking is disabled for the power management
     // lock in order to suppress reporting of a lock policy violation.
     // The violation consists in acquiring the power management lock multiple

@@ -59,7 +59,7 @@ static NV_STATUS migrate_vma_page_copy_address(struct page *page,
 
     UVM_ASSERT(page_index < state->num_pages);
 
-    memset(gpu_addr, 0, sizeof(*gpu_addr));
+    nv_memset(gpu_addr, 0, sizeof(*gpu_addr));
 
     if (owning_gpu == copying_gpu) {
         // Local vidmem address
@@ -397,7 +397,7 @@ static NV_STATUS migrate_vma_populate_anon_pages(struct vm_area_struct *vma,
 
         lock_page(dst_page);
 
-        // We'll push one membar later for all memsets in this loop
+        // We'll push one membar later for all nv_memsets in this loop
         uvm_push_set_flag(&push, UVM_PUSH_FLAG_NEXT_MEMBAR_NONE);
         copying_gpu->parent->ce_hal->memset_8(&push, dst_address, 0, PAGE_SIZE);
 

@@ -125,7 +125,7 @@ static NV_STATUS check_accessible_from_gpu(uvm_gpu_t *gpu, uvm_mem_t *mem)
 
     TEST_NV_CHECK_GOTO(uvm_tracker_wait(&tracker), done);
 
-    memset(sys_verif, 0, verif_size);
+    nv_memset(sys_verif, 0, verif_size);
 
     // Copy back to sys_mem from mem (in sys_mem->page_size chunks) using:
     //   - physical access for sys_mem, unless the channel only supports virtual
@@ -248,7 +248,7 @@ static NV_STATUS test_map_cpu(uvm_mem_t *mem)
     cpu_addr = uvm_mem_get_cpu_addr_kernel(mem);
     TEST_CHECK_RET(cpu_addr != NULL);
 
-    memset(cpu_addr, 3, mem->size);
+    nv_memset(cpu_addr, 3, mem->size);
 
     return NV_OK;
 }

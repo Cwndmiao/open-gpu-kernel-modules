@@ -31,7 +31,7 @@ static bool uvm_gpu_phys_address_eq(uvm_gpu_phys_address_t pa1, uvm_gpu_phys_add
 
 void uvm_pte_batch_begin(uvm_push_t *push, uvm_pte_batch_t *batch)
 {
-    memset(batch, 0, sizeof(*batch));
+    nv_memset(batch, 0, sizeof(*batch));
 
     batch->membar = UVM_MEMBAR_GPU;
     batch->push = push;
@@ -101,7 +101,7 @@ static void uvm_pte_batch_write_consecutive_inline(uvm_pte_batch_t *batch, NvU64
 
     // And zero out the rest of the entry if anything remaining
     if (extra_size != 0)
-        memset(uvm_push_inline_data_get(&batch->inline_data, extra_size), 0, extra_size);
+        nv_memset(uvm_push_inline_data_get(&batch->inline_data, extra_size), 0, extra_size);
 }
 
 static void uvm_pte_batch_write_consecutive(uvm_pte_batch_t *batch, NvU64 pte_bits)

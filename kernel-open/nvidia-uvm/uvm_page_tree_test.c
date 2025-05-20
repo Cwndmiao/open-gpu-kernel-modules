@@ -1544,7 +1544,7 @@ static NV_STATUS entry_test_maxwell(uvm_gpu_t *gpu)
         big_page_size = big_page_sizes[i];
         hal = gpu->parent->arch_hal->mmu_mode_hal(big_page_size);
 
-        memset(phys_allocs, 0, sizeof(phys_allocs));
+        nv_memset(phys_allocs, 0, sizeof(phys_allocs));
 
         hal->make_pde(&pde_bits, phys_allocs, 0);
         TEST_CHECK_RET(pde_bits == 0x0L);
@@ -1636,7 +1636,7 @@ static NV_STATUS entry_test_pascal(uvm_gpu_t *gpu, entry_test_page_size_func ent
     hal->make_pde(pde_bits, phys_allocs, 0);
     TEST_CHECK_RET(pde_bits[0] == 0);
 
-    memset(pde_bits, 0xFF, sizeof(pde_bits));
+    nv_memset(pde_bits, 0xFF, sizeof(pde_bits));
     hal->make_pde(pde_bits, phys_allocs, 3);
     TEST_CHECK_RET(pde_bits[0] == 0 && pde_bits[1] == 0);
 
@@ -1724,7 +1724,7 @@ static NV_STATUS entry_test_volta(uvm_gpu_t *gpu, entry_test_page_size_func entr
     hal->make_pde(pde_bits, phys_allocs, 0);
     TEST_CHECK_RET(pde_bits[0] == 0);
 
-    memset(pde_bits, 0xFF, sizeof(pde_bits));
+    nv_memset(pde_bits, 0xFF, sizeof(pde_bits));
     hal->make_pde(pde_bits, phys_allocs, 3);
     TEST_CHECK_RET(pde_bits[0] == 0 && pde_bits[1] == 0);
 

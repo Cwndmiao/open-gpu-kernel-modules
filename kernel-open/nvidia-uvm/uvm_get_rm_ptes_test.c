@@ -186,7 +186,7 @@ static NV_STATUS test_get_rm_ptes_single_gpu(uvm_va_space_t *va_space, UVM_TEST_
 
     size = params->size;
 
-    memset(&ext_mapping_info, 0, sizeof(ext_mapping_info));
+    nv_memset(&ext_mapping_info, 0, sizeof(ext_mapping_info));
 
     ext_mapping_info.pteBuffer = pte_buffer;
 
@@ -287,9 +287,9 @@ static NV_STATUS test_get_rm_ptes_multi_gpu(uvm_va_space_t *va_space, UVM_TEST_G
    if (status != NV_OK)
        return status;
 
-    memset(&ext_mapping_info, 0, sizeof(ext_mapping_info));
+    nv_memset(&ext_mapping_info, 0, sizeof(ext_mapping_info));
 
-    memset(pte_buffer, 0, sizeof(pte_buffer));
+    nv_memset(pte_buffer, 0, sizeof(pte_buffer));
 
     ext_mapping_info.pteBuffer = pte_buffer;
 

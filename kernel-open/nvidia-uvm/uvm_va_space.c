@@ -206,7 +206,7 @@ NV_STATUS uvm_va_space_create(struct inode *inode, struct file *filp)
     INIT_RADIX_TREE(&va_space->range_groups, NV_UVM_GFP_FLAGS);
     uvm_range_tree_init(&va_space->range_group_ranges);
 
-    bitmap_zero(va_space->enabled_peers, UVM_MAX_UNIQUE_GPU_PAIRS);
+    nv_bitmap_zero(va_space->enabled_peers, UVM_MAX_UNIQUE_GPU_PAIRS);
 
     // CPU is not explicitly registered in the va space
     processor_mask_array_set(va_space->can_access, UVM_ID_CPU, UVM_ID_CPU);
@@ -445,7 +445,7 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
 
     uvm_va_space_global_gpus(va_space, &retained_gpus);
 
-    bitmap_copy(va_space->enabled_peers_teardown, va_space->enabled_peers, UVM_MAX_UNIQUE_GPU_PAIRS);
+    nv_bitmap_copy(va_space->enabled_peers_teardown, va_space->enabled_peers, UVM_MAX_UNIQUE_GPU_PAIRS);
 
     uvm_va_space_detach_all_user_channels(va_space, &deferred_free_list);
 

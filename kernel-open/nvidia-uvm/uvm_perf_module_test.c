@@ -166,7 +166,7 @@ static NV_STATUS test_module_replace(uvm_va_space_t *va_space, NvU64 addr)
         { UVM_PERF_EVENT_FAULT, module2_fault},
     };
 
-    memset(&event_data, 0, sizeof(event_data));
+    nv_memset(&event_data, 0, sizeof(event_data));
 
     // Use CPU id to avoid triggering the GPU stats update code
     event_data.fault.proc_id = UVM_ID_CPU;

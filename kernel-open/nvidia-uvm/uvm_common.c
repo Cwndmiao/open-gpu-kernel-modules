@@ -303,7 +303,7 @@ int format_uuid_to_buffer(char *buffer, unsigned bufferLength, const NvProcessor
     unsigned i;
     unsigned dashMask = 1 << 4 | 1 << 6 | 1 << 8 | 1 << 10;
 
-    memcpy(buffer, "UVM-GPU-", 8);
+    nv_memcpy(buffer, "UVM-GPU-", 8);
     if (bufferLength < (8 /*prefix*/+ 16 * 2 /*digits*/ + 4 * 1 /*dashes*/ + 1 /*null*/))
         return *buffer = 0;
 

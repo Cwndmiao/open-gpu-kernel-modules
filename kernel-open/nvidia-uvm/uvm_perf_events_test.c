@@ -50,7 +50,7 @@ static NV_STATUS test_events(uvm_va_space_t *va_space)
 
     test_data = 0;
 
-    memset(&event_data, 0, sizeof(event_data));
+    nv_memset(&event_data, 0, sizeof(event_data));
 
     // Use CPU id to avoid triggering the GPU stats update code
     event_data.fault.proc_id = UVM_ID_CPU;

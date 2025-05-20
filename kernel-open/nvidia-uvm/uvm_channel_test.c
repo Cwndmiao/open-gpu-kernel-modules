@@ -64,9 +64,9 @@ static NV_STATUS test_ordering(uvm_va_space_t *va_space)
     TEST_CHECK_GOTO(status == NV_OK, done);
 
     host_mem = (NvU32*)uvm_rm_mem_get_cpu_va(mem);
-    memset(host_mem, 0, buffer_size);
+    nv_memset(host_mem, 0, buffer_size);
 
-    status = uvm_push_begin(gpu->channel_manager, UVM_CHANNEL_TYPE_GPU_TO_CPU, &push, "Initial memset");
+    status = uvm_push_begin(gpu->channel_manager, UVM_CHANNEL_TYPE_GPU_TO_CPU, &push, "Initial nv_memset");
     TEST_CHECK_GOTO(status == NV_OK, done);
 
     gpu_va = uvm_rm_mem_get_gpu_va(mem, gpu, uvm_channel_is_proxy(push.channel));
@@ -181,7 +181,7 @@ static NV_STATUS uvm_test_rc_for_gpu(uvm_gpu_t *gpu)
     }
 
     // Check RC on a proxy channel (SR-IOV heavy) or internal channel (any other
-    // mode). It is not allowed to use a virtual address in a memset pushed to
+    // mode). It is not allowed to use a virtual address in a nv_memset pushed to
     // a proxy channel, so we use a physical address instead.
     if (uvm_gpu_uses_proxy_channel_pool(gpu)) {
         uvm_gpu_address_t dst_address;
@@ -402,11 +402,11 @@ static void test_memset_rm_mem(uvm_push_t *push, uvm_rm_mem_t *rm_mem, NvU32 val
     gpu->parent->ce_hal->memset_v_4(push, gpu_va, value, rm_mem->size);
 }
 
-// This test schedules a randomly sized memset on a random channel and GPU in a
+// This test schedules a randomly sized nv_memset on a random channel and GPU in a
 // "stream" that has operations ordered by acquiring the tracker of the previous
-// operation. It also snapshots the memset done by the previous operation in the
+// operation. It also snapshots the nv_memset done by the previous operation in the
 // stream to verify it later on the CPU. Each iteration also optionally acquires
-// a different stream and snapshots its memset.
+// a different stream and snapshots its nv_memset.
 // The test ioctl is expected to be called at the same time from multiple
 // threads and contains some schedule() calls to help get as many threads
 // through the init phase before other threads continue. It also has a random
