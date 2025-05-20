@@ -164,6 +164,8 @@ static void push_set_description(uvm_push_t *push, const char *format, va_list a
 
     push_info = uvm_push_info_from_push(push);
     vsnprintf(push_info->description, sizeof(push_info->description), format, args);
+    push_info->description[sizeof(push_info->description) - 1] = '\0';
+    UVM_ERR_PRINT("cwndmiao debug, push_set_description %s\n", push_info->description);
 }
 
 void uvm_push_set_description(uvm_push_t *push, const char *format, ...)

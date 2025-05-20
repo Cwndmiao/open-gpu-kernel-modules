@@ -558,8 +558,10 @@ static void uvm_vm_close_managed_entry(struct vm_area_struct *vma)
 static vm_fault_t uvm_vm_fault(struct vm_fault *vmf)
 {
     uvm_va_space_t *va_space = uvm_va_space_get(vmf->vma->vm_file);
-    UVM_ERR_PRINT("cwndmiao debug, uvm_vm_fault\n");
-    return uvm_va_space_cpu_fault_managed(va_space, vmf);
+    UVM_ERR_PRINT("cwndmiao debug, uvm_vm_fault enter\n");
+    vm_fault_t ret = uvm_va_space_cpu_fault_managed(va_space, vmf);
+    UVM_ERR_PRINT("cwndmiao debug, uvm_vm_fault leave\n");
+    return ret;
 }
 
 static vm_fault_t uvm_vm_fault_entry(struct vm_fault *vmf)
