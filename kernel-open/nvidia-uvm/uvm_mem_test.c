@@ -114,7 +114,7 @@ static NV_STATUS check_accessible_from_gpu(uvm_gpu_t *gpu, uvm_mem_t *mem)
 
     TEST_NV_CHECK_GOTO(uvm_tracker_wait(&tracker), done);
 
-    memset(sys_verif, 0, verif_size);
+    nv_memset(sys_verif, 0, verif_size);
 
     // Copy back to sys_mem from mem (in sys_mem->page_size chunks) using:
     //   - physical access for sys_mem, unless the channel only supports virtual
@@ -237,7 +237,7 @@ static NV_STATUS test_map_cpu(uvm_mem_t *mem)
     cpu_addr = uvm_mem_get_cpu_addr_kernel(mem);
     TEST_CHECK_RET(cpu_addr != NULL);
 
-    memset(cpu_addr, 3, mem->size);
+    nv_memset(cpu_addr, 3, mem->size);
 
     return NV_OK;
 }
@@ -591,7 +591,7 @@ static NV_STATUS check_huge_page_from_gpu(uvm_gpu_t *gpu, uvm_mem_t *mem, NvU64 
 
     TEST_NV_CHECK_GOTO(mem_alloc_sysmem_and_map_cpu_kernel(verif_size, gpu, &sys_mem), done);
     sys_verif = uvm_mem_get_cpu_addr_kernel(sys_mem);
-    memset(sys_verif, 0x0, mem->size);
+    nv_memset(sys_verif, 0x0, mem->size);
 
     TEST_NV_CHECK_GOTO(uvm_mem_map_gpu_kernel(sys_mem, gpu), done);
 
@@ -645,7 +645,7 @@ static NV_STATUS test_huge_page_size(uvm_va_space_t *va_space, uvm_gpu_t *gpu, N
 
     TEST_NV_CHECK_GOTO(mem_alloc_sysmem_and_map_cpu_kernel(size, gpu, &mem), cleanup);
     cpu_addr = uvm_mem_get_cpu_addr_kernel(mem);
-    memset(cpu_addr, value, mem->size);
+    nv_memset(cpu_addr, value, mem->size);
 
     // Map it on the GPU (uvm_mem base area), it creates GPU physical address
     // for the sysmem mapping.

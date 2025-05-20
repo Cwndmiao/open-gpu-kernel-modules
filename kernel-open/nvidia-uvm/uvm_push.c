@@ -223,7 +223,7 @@ static NV_STATUS push_begin_acquire_with_info(uvm_channel_t *channel,
 {
     NV_STATUS status;
 
-    memset(push, 0, sizeof(*push));
+    nv_memset(push, 0, sizeof(*push));
 
     push->gpu = uvm_channel_get_gpu(channel);
 
@@ -366,7 +366,7 @@ NV_STATUS uvm_push_end_and_wait(uvm_push_t *push)
 
 NV_STATUS uvm_push_begin_fake(uvm_gpu_t *gpu, uvm_push_t *push)
 {
-    memset(push, 0, sizeof(*push));
+    nv_memset(push, 0, sizeof(*push));
     push->begin = (NvU32 *)uvm_kvmalloc(UVM_MAX_PUSH_SIZE);
     if (!push->begin)
         return NV_ERR_NO_MEMORY;

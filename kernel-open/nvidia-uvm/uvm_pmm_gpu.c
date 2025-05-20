@@ -591,7 +591,7 @@ error:
         free_chunk(pmm, chunks[i]);
 
     // Reset the array to make error handling easier for callers.
-    memset(chunks, 0, sizeof(chunks[0]) * num_chunks);
+    nv_memset(chunks, 0, sizeof(chunks[0]) * num_chunks);
 
     return status;
 }

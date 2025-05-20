@@ -2196,7 +2196,7 @@ NV_STATUS uvm_test_va_range_info(UVM_TEST_VA_RANGE_INFO_PARAMS *params, struct f
     params->type = va_range->type;
 
     params->read_duplication = 0;
-    memset(&params->preferred_location, 0, sizeof(params->preferred_location));
+    nv_memset(&params->preferred_location, 0, sizeof(params->preferred_location));
     params->preferred_cpu_nid = NUMA_NO_NODE;
     params->accessed_by_count = 0;
 

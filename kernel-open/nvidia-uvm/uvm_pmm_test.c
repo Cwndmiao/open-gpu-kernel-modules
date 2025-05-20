@@ -321,7 +321,7 @@ static NV_STATUS gpu_mem_check(uvm_gpu_t *gpu,
     // Confidential Computing.
     TEST_CHECK_RET(!g_uvm_global.conf_computing_enabled);
 
-    memset(verif_cpu_addr, 0, size);
+    nv_memset(verif_cpu_addr, 0, size);
 
     status = uvm_push_begin_acquire(gpu->channel_manager,
                                     UVM_CHANNEL_TYPE_GPU_TO_CPU,
@@ -541,7 +541,7 @@ static NV_STATUS basic_test(uvm_va_space_t *va_space, uvm_gpu_t *gpu,
     // tables, but that would require re-allocating the entire GPU address
     // space.
 
-    memset(&test_state, 0, sizeof(test_state));
+    nv_memset(&test_state, 0, sizeof(test_state));
     INIT_LIST_HEAD(&test_state.list);
     test_state.va_space = va_space;
     test_state.pmm = &gpu->pmm;
@@ -620,20 +620,20 @@ static NV_STATUS get_subchunks_test(uvm_pmm_gpu_t *pmm,
     }
 
     // Verify all
-    memset(subchunks, 0, size);
+    nv_memset(subchunks, 0, size);
     TEST_CHECK_GOTO(uvm_pmm_gpu_get_subchunks(pmm, parent, 0, num_children, subchunks) == num_children, out);
     TEST_CHECK_GOTO(memcmp(expected_children, subchunks, num_children * sizeof(subchunks[0])) == 0, out);
 
     // Get first half
     count = num_children / 2;
-    memset(subchunks, 0, size);
+    nv_memset(subchunks, 0, size);
     TEST_CHECK_GOTO(uvm_pmm_gpu_get_subchunks(pmm, parent, 0, count, subchunks) == count, out);
     TEST_CHECK_GOTO(memcmp(expected_children, subchunks, count * sizeof(subchunks[0])) == 0, out);
 
     // Get second half, intentionally requesting more subchunks than available
     start_index = num_children / 2;
     count = num_children - start_index;
-    memset(subchunks, 0, size);
+    nv_memset(subchunks, 0, size);
     TEST_CHECK_GOTO(uvm_pmm_gpu_get_subchunks(pmm, parent, start_index, num_children, subchunks) == count, out);
     TEST_CHECK_GOTO(memcmp(&expected_children[start_index], subchunks, count * sizeof(subchunks[0])) == 0, out);
 
@@ -911,7 +911,7 @@ static NV_STATUS test_pmm_async_alloc(uvm_va_space_t *va_space,
     if (!chunks)
         return NV_ERR_NO_MEMORY;
 
-    memset(&mem_params, 0, sizeof(mem_params));
+    nv_memset(&mem_params, 0, sizeof(mem_params));
     mem_params.backing_gpu = NULL;
     mem_params.size        = 1024*1024;
     mem_params.mm = current->mm;

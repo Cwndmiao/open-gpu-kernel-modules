@@ -3634,7 +3634,7 @@ NV_STATUS uvm_hmm_va_block_evict_pages_from_gpu(uvm_va_block_t *va_block,
     UVM_ASSERT(gpu_state->chunks);
 
     // Fill in the src_pfns[] with the ZONE_DEVICE private PFNs of the GPU.
-    memset(src_pfns, 0, sizeof(block_context->hmm.src_pfns));
+    nv_memset(src_pfns, 0, sizeof(block_context->hmm.src_pfns));
 
     // TODO: Bug 3368756: add support for large GPU pages.
     for_each_va_block_page_in_region_mask(page_index, pages_to_evict, region) {
@@ -3865,7 +3865,7 @@ NV_STATUS uvm_hmm_va_range_info(uvm_va_space_t *va_space,
     params->va_range_start = 0;
     params->va_range_end = ULONG_MAX;
     params->read_duplication = UVM_TEST_READ_DUPLICATION_UNSET;
-    memset(&params->preferred_location, 0, sizeof(params->preferred_location));
+    nv_memset(&params->preferred_location, 0, sizeof(params->preferred_location));
     params->preferred_cpu_nid = NUMA_NO_NODE;
     params->accessed_by_count = 0;
     params->managed.vma_start = 0;

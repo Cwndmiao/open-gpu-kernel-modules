@@ -163,7 +163,7 @@ static bool prefix_fn_mask##_test_and_clear(mask_t *mask, proc_id_t id)         
                                                                                                              \
 static void prefix_fn_mask##_zero(mask_t *mask)                                                              \
 {                                                                                                            \
-    bitmap_zero(mask->bitmap, (maxval));                                                                     \
+    nv_bitmap_zero(mask->bitmap, (maxval));                                                                     \
 }                                                                                                            \
                                                                                                              \
 static bool prefix_fn_mask##_empty(const mask_t *mask)                                                       \
@@ -721,7 +721,7 @@ static bool uvm_uuid_eq(const NvProcessorUuid *uuid0, const NvProcessorUuid *uui
 // Copies a UUID from source (src) to destination (dst).
 static void uvm_uuid_copy(NvProcessorUuid *dst, const NvProcessorUuid *src)
 {
-    memcpy(dst, src, sizeof(*dst));
+    nv_memcpy(dst, src, sizeof(*dst));
 }
 
 static inline NvBool uvm_uuid_is_cpu(const NvProcessorUuid *uuid)

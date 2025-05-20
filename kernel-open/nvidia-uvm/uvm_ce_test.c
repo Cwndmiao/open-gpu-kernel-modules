@@ -62,7 +62,7 @@ static NV_STATUS test_non_pipelined(uvm_gpu_t *gpu)
     status = uvm_rm_mem_alloc_and_map_cpu(gpu, UVM_RM_MEM_TYPE_SYS, CE_TEST_MEM_SIZE, 0, &host_mem);
     TEST_CHECK_GOTO(status == NV_OK, done);
     host_ptr = (NvU32 *)uvm_rm_mem_get_cpu_va(host_mem);
-    memset(host_ptr, 0, CE_TEST_MEM_SIZE);
+    nv_memset(host_ptr, 0, CE_TEST_MEM_SIZE);
 
     for (i = 0; i < CE_TEST_MEM_COUNT; ++i) {
         uvm_rm_mem_type_t type;
@@ -106,7 +106,7 @@ static NV_STATUS test_non_pipelined(uvm_gpu_t *gpu)
         src_va = uvm_rm_mem_get_gpu_va(mem[i], gpu, is_proxy).address;
 
         // The first memcpy needs to be non-pipelined as otherwise the previous
-        // memset/memcpy to the source may not be done yet.
+        // nv_memset/memcpy to the source may not be done yet.
 
         // Alternate the order of copying the beginning and the end
         if (i % 2 == 0) {
@@ -253,7 +253,7 @@ static NV_STATUS test_unaligned_memset(uvm_gpu_t *gpu,
     dst = gpu_verif_addr;
     dst.address += offset;
 
-    memset(cpu_verif_addr, (NvU8)(~value64), size);
+    nv_memset(cpu_verif_addr, (NvU8)(~value64), size);
 
     status = uvm_push_begin(gpu->channel_manager, UVM_CHANNEL_TYPE_GPU_INTERNAL, &push,
                             "memset_%zu offset %zu",
@@ -266,7 +266,7 @@ static NV_STATUS test_unaligned_memset(uvm_gpu_t *gpu,
 
     // Make sure all bytes of element are present
     test_value = 0;
-    memcpy(&test_value, cpu_verif_addr + offset, element_size);
+    nv_memcpy(&test_value, cpu_verif_addr + offset, element_size);
 
     switch (element_size) {
         case 1:
@@ -547,7 +547,7 @@ error:
 
 // test_semaphore_reduction_inc is similar in concept to test_membar(). It uses
 // uvm_mem (instead of uvm_rm_mem) as the semaphore, i.e., it assumes that the
-// CE HAL has been validated, since uvm_mem needs the CE memset/memcopy to be
+// CE HAL has been validated, since uvm_mem needs the CE nv_memset/memcopy to be
 // operational as a pre-requisite for GPU PTE writes. The purpose of
 // test_semaphore_reduction_inc is to validate the reduction inc operation on
 // semaphores with their VA's upper-bit set.
@@ -680,7 +680,7 @@ static NV_STATUS test_semaphore_timestamp(uvm_gpu_t *gpu)
 
     timestamp = uvm_mem_get_cpu_addr_kernel(mem);
     TEST_CHECK_GOTO(timestamp != NULL, done);
-    memset(timestamp, 0, size);
+    nv_memset(timestamp, 0, size);
 
     // Shift the timestamp pointer to where the semaphore timestamp info is.
     timestamp += 1;
@@ -790,7 +790,7 @@ static NV_STATUS alloc_sysmem_unprotected(uvm_gpu_t *gpu, uvm_mem_t **mem, size_
     TEST_NV_CHECK_GOTO(uvm_mem_map_cpu_kernel(*mem), err);
     TEST_NV_CHECK_GOTO(uvm_mem_map_gpu_kernel(*mem, gpu), err);
 
-    memset(uvm_mem_get_cpu_addr_kernel(*mem), 0, (*mem)->size);
+    nv_memset(uvm_mem_get_cpu_addr_kernel(*mem), 0, (*mem)->size);
 
     return NV_OK;
 

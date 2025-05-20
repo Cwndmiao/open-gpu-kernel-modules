@@ -26,7 +26,7 @@
 
 void uvm_tlb_batch_begin(uvm_page_tree_t *tree, uvm_tlb_batch_t *batch)
 {
-    memset(batch, 0, sizeof(*batch));
+    nv_memset(batch, 0, sizeof(*batch));
     batch->tree = tree;
 }
 

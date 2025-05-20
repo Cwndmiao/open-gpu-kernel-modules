@@ -474,7 +474,7 @@ static void enqueue_event(const void *entry, size_t entry_size, NvU8 eventType, 
         goto unlock;
     }
 
-    memcpy((char *)queue->queue_buffer + sn.put_behind * entry_size, entry, entry_size);
+    nv_memcpy((char *)queue->queue_buffer + sn.put_behind * entry_size, entry, entry_size);
 
     sn.put_behind = sn.put_ahead;
 
@@ -779,7 +779,7 @@ static void record_gpu_fault_instance(uvm_gpu_t *gpu,
     if (tools_is_event_enabled_v1(va_space, UvmEventTypeGpuFault)) {
         UvmEventEntry entry;
         UvmEventGpuFaultInfo *info = &entry.eventData.gpuFault;
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType     = UvmEventTypeGpuFault;
         info->gpuIndex      = uvm_parent_id_value_from_processor_id(gpu->id);
@@ -801,7 +801,7 @@ static void record_gpu_fault_instance(uvm_gpu_t *gpu,
     if (tools_is_event_enabled_v2(va_space, UvmEventTypeGpuFault)) {
         UvmEventEntry_V2 entry;
         UvmEventGpuFaultInfo_V2 *info = &entry.eventData.gpuFault;
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType     = UvmEventTypeGpuFault;
         info->gpuIndex      = uvm_id_value(gpu->id);
@@ -856,7 +856,7 @@ static void uvm_tools_record_fault(uvm_va_space_t *va_space,
     if (UVM_ID_IS_CPU(event_data->fault.proc_id)) {
         if (tools_is_event_enabled_v1(va_space, UvmEventTypeCpuFault)) {
             UvmEventEntry entry;
-            memset(&entry, 0, sizeof(entry));
+            nv_memset(&entry, 0, sizeof(entry));
 
             record_cpu_fault(&entry.eventData.cpuFault, event_data);
 
@@ -864,7 +864,7 @@ static void uvm_tools_record_fault(uvm_va_space_t *va_space,
         }
         if (tools_is_event_enabled_v2(va_space, UvmEventTypeCpuFault)) {
             UvmEventEntry_V2 entry;
-            memset(&entry, 0, sizeof(entry));
+            nv_memset(&entry, 0, sizeof(entry));
 
             record_cpu_fault(&entry.eventData.cpuFault, event_data);
 
@@ -943,7 +943,7 @@ static void record_migration_events(void *args)
             UvmEventMigrationInfo *info = &entry.eventData.migration;
 
             // Initialize fields that are constant throughout the whole block
-            memset(&entry, 0, sizeof(entry));
+            nv_memset(&entry, 0, sizeof(entry));
             info->eventType         = UvmEventTypeMigration;
             info->srcIndex          = uvm_parent_id_value_from_processor_id(block_mig->src);
             info->dstIndex          = uvm_parent_id_value_from_processor_id(block_mig->dst);
@@ -964,7 +964,7 @@ static void record_migration_events(void *args)
             UvmEventMigrationInfo_V2 *info = &entry.eventData.migration;
 
             // Initialize fields that are constant throughout the whole block
-            memset(&entry, 0, sizeof(entry));
+            nv_memset(&entry, 0, sizeof(entry));
             info->eventType         = UvmEventTypeMigration;
             info->srcIndex          = uvm_id_value(block_mig->src);
             info->srcNid            = block_mig->src_nid;
@@ -1031,7 +1031,7 @@ static void record_replay_event_helper(uvm_va_space_t *va_space,
     if (tools_is_event_enabled_v1(va_space, UvmEventTypeGpuFaultReplay)) {
         UvmEventEntry entry;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
         entry.eventData.gpuFaultReplay.eventType    = UvmEventTypeGpuFaultReplay;
         entry.eventData.gpuFaultReplay.gpuIndex     = uvm_parent_id_value_from_processor_id(gpu_id);
         entry.eventData.gpuFaultReplay.batchId      = batch_id;
@@ -1044,7 +1044,7 @@ static void record_replay_event_helper(uvm_va_space_t *va_space,
     if (tools_is_event_enabled_v2(va_space, UvmEventTypeGpuFaultReplay)) {
         UvmEventEntry_V2 entry;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
         entry.eventData.gpuFaultReplay.eventType    = UvmEventTypeGpuFaultReplay;
         entry.eventData.gpuFaultReplay.gpuIndex     = uvm_id_value(gpu_id);
         entry.eventData.gpuFaultReplay.batchId      = batch_id;
@@ -1133,7 +1133,7 @@ static void uvm_tools_record_migration_cpu_to_cpu(uvm_va_space_t *va_space, uvm_
         UvmEventMigrationInfo *info = &entry.eventData.migration;
 
         // CPU-to-CPU migration events can be added directly to the queue.
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
         info->eventType = UvmEventTypeMigration;
         info->srcIndex = uvm_parent_id_value_from_processor_id(event_data->migration.src);
         info->dstIndex = uvm_parent_id_value_from_processor_id(event_data->migration.dst);
@@ -1159,7 +1159,7 @@ static void uvm_tools_record_migration_cpu_to_cpu(uvm_va_space_t *va_space, uvm_
         UvmEventMigrationInfo_V2 *info = &entry.eventData.migration;
 
         // CPU-to-CPU migration events can be added directly to the queue.
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
         info->eventType = UvmEventTypeMigration;
         info->srcIndex = uvm_id_value(event_data->migration.src);
         info->dstIndex = uvm_id_value(event_data->migration.dst);
@@ -1318,7 +1318,7 @@ void uvm_tools_record_access_counter(uvm_va_space_t *va_space,
         UvmEventEntry entry;
         UvmEventTestAccessCounterInfo *info = &entry.testEventData.accessCounter;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType           = UvmEventTypeTestAccessCounter;
         info->srcIndex            = uvm_parent_id_value_from_processor_id(gpu_id);
@@ -1337,7 +1337,7 @@ void uvm_tools_record_access_counter(uvm_va_space_t *va_space,
         UvmEventEntry_V2 entry;
         UvmEventTestAccessCounterInfo_V2 *info = &entry.testEventData.accessCounter;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType           = UvmEventTypeTestAccessCounter;
         info->srcIndex            = uvm_id_value(gpu_id);
@@ -1469,7 +1469,7 @@ void uvm_tools_record_read_duplicate(uvm_va_block_t *va_block,
         UvmEventReadDuplicateInfo *info_read_duplicate = &entry.eventData.readDuplicate;
         uvm_page_index_t page_index;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info_read_duplicate->eventType = UvmEventTypeReadDuplicate;
         info_read_duplicate->size      = PAGE_SIZE;
@@ -1495,7 +1495,7 @@ void uvm_tools_record_read_duplicate(uvm_va_block_t *va_block,
         UvmEventReadDuplicateInfo_V2 *info_read_duplicate = &entry.eventData.readDuplicate;
         uvm_page_index_t page_index;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info_read_duplicate->eventType = UvmEventTypeReadDuplicate;
         info_read_duplicate->size      = PAGE_SIZE;
@@ -1505,7 +1505,7 @@ void uvm_tools_record_read_duplicate(uvm_va_block_t *va_block,
             uvm_processor_id_t id;
 
             info_read_duplicate->address = uvm_va_block_cpu_page_address(va_block, page_index);
-            memset(info_read_duplicate->processors, 0, sizeof(info_read_duplicate->processors));
+            nv_memset(info_read_duplicate->processors, 0, sizeof(info_read_duplicate->processors));
 
             uvm_va_block_page_resident_processors(va_block, page_index, resident_processors);
 
@@ -1537,7 +1537,7 @@ void uvm_tools_record_read_duplicate_invalidate(uvm_va_block_t *va_block,
         uvm_page_index_t page_index;
         UvmEventReadDuplicateInvalidateInfo *info = &entry.eventData.readDuplicateInvalidate;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType     = UvmEventTypeReadDuplicateInvalidate;
         info->residentIndex = uvm_parent_id_value_from_processor_id(dst);
@@ -1556,7 +1556,7 @@ void uvm_tools_record_read_duplicate_invalidate(uvm_va_block_t *va_block,
         uvm_page_index_t page_index;
         UvmEventReadDuplicateInvalidateInfo_V2 *info = &entry.eventData.readDuplicateInvalidate;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType     = UvmEventTypeReadDuplicateInvalidate;
         info->residentIndex = uvm_id_value(dst);
@@ -1627,7 +1627,7 @@ void uvm_tools_record_cpu_fatal_fault(uvm_va_space_t *va_space,
         UvmEventEntry entry;
         UvmEventFatalFaultInfo *info = &entry.eventData.fatalFault;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType      = UvmEventTypeFatalFault;
         info->processorIndex = UVM_ID_CPU_VALUE;
@@ -1643,7 +1643,7 @@ void uvm_tools_record_cpu_fatal_fault(uvm_va_space_t *va_space,
         UvmEventEntry_V2 entry;
         UvmEventFatalFaultInfo_V2 *info = &entry.eventData.fatalFault;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType      = UvmEventTypeFatalFault;
         info->processorIndex = UVM_ID_CPU_VALUE;
@@ -1673,7 +1673,7 @@ void uvm_tools_record_gpu_fatal_fault(uvm_gpu_id_t gpu_id,
         UvmEventEntry entry;
         UvmEventFatalFaultInfo *info = &entry.eventData.fatalFault;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType      = UvmEventTypeFatalFault;
         info->processorIndex = uvm_parent_id_value_from_processor_id(gpu_id);
@@ -1689,7 +1689,7 @@ void uvm_tools_record_gpu_fatal_fault(uvm_gpu_id_t gpu_id,
         UvmEventEntry_V2 entry;
         UvmEventFatalFaultInfo_V2 *info = &entry.eventData.fatalFault;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType      = UvmEventTypeFatalFault;
         info->processorIndex = uvm_id_value(gpu_id);
@@ -1724,7 +1724,7 @@ void uvm_tools_record_thrashing(uvm_va_space_t *va_space,
         UvmEventThrashingDetectedInfo *info = &entry.eventData.thrashing;
         uvm_processor_id_t id;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType = UvmEventTypeThrashingDetected;
         info->address   = address;
@@ -1741,7 +1741,7 @@ void uvm_tools_record_thrashing(uvm_va_space_t *va_space,
         UvmEventEntry_V2 entry;
         UvmEventThrashingDetectedInfo_V2 *info = &entry.eventData.thrashing;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType = UvmEventTypeThrashingDetected;
         info->address   = address;
@@ -1772,7 +1772,7 @@ void uvm_tools_record_throttling_start(uvm_va_space_t *va_space, NvU64 address, 
         UvmEventEntry entry;
         UvmEventThrottlingStartInfo *info = &entry.eventData.throttlingStart;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType      = UvmEventTypeThrottlingStart;
         info->processorIndex = uvm_parent_id_value_from_processor_id(processor);
@@ -1785,7 +1785,7 @@ void uvm_tools_record_throttling_start(uvm_va_space_t *va_space, NvU64 address, 
         UvmEventEntry_V2 entry;
         UvmEventThrottlingStartInfo_V2 *info = &entry.eventData.throttlingStart;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType      = UvmEventTypeThrottlingStart;
         info->processorIndex = uvm_id_value(processor);
@@ -1813,7 +1813,7 @@ void uvm_tools_record_throttling_end(uvm_va_space_t *va_space, NvU64 address, uv
         UvmEventEntry entry;
         UvmEventThrottlingEndInfo *info = &entry.eventData.throttlingEnd;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType      = UvmEventTypeThrottlingEnd;
         info->processorIndex = uvm_parent_id_value_from_processor_id(processor);
@@ -1826,7 +1826,7 @@ void uvm_tools_record_throttling_end(uvm_va_space_t *va_space, NvU64 address, uv
         UvmEventEntry_V2 entry;
         UvmEventThrottlingEndInfo_V2 *info = &entry.eventData.throttlingEnd;
 
-        memset(&entry, 0, sizeof(entry));
+        nv_memset(&entry, 0, sizeof(entry));
 
         info->eventType      = UvmEventTypeThrottlingEnd;
         info->processorIndex = uvm_id_value(processor);
@@ -1851,7 +1851,7 @@ static void record_map_remote_events(void *args)
         if (tools_is_event_enabled_v1(va_space, UvmEventTypeMapRemote)) {
             UvmEventEntry entry;
 
-            memset(&entry, 0, sizeof(entry));
+            nv_memset(&entry, 0, sizeof(entry));
 
             entry.eventData.mapRemote.eventType      = UvmEventTypeMapRemote;
             entry.eventData.mapRemote.srcIndex       = uvm_parent_id_value_from_processor_id(block_map_remote->src);
@@ -1868,7 +1868,7 @@ static void record_map_remote_events(void *args)
         if (tools_is_event_enabled_v2(va_space, UvmEventTypeMapRemote)) {
             UvmEventEntry_V2 entry;
 
-            memset(&entry, 0, sizeof(entry));
+            nv_memset(&entry, 0, sizeof(entry));
 
             entry.eventData.mapRemote.eventType      = UvmEventTypeMapRemote;
             entry.eventData.mapRemote.srcIndex       = uvm_id_value(block_map_remote->src);
@@ -1938,7 +1938,7 @@ void uvm_tools_record_map_remote(uvm_va_block_t *va_block,
         if (tools_is_event_enabled_v1(va_space, UvmEventTypeMapRemote)) {
             UvmEventEntry entry;
 
-            memset(&entry, 0, sizeof(entry));
+            nv_memset(&entry, 0, sizeof(entry));
 
             entry.eventData.mapRemote.eventType      = UvmEventTypeMapRemote;
             entry.eventData.mapRemote.srcIndex       = uvm_parent_id_value_from_processor_id(processor);
@@ -1956,7 +1956,7 @@ void uvm_tools_record_map_remote(uvm_va_block_t *va_block,
         if (tools_is_event_enabled_v2(va_space, UvmEventTypeMapRemote)) {
             UvmEventEntry_V2 entry;
 
-            memset(&entry, 0, sizeof(entry));
+            nv_memset(&entry, 0, sizeof(entry));
 
             entry.eventData.mapRemote.eventType      = UvmEventTypeMapRemote;
             entry.eventData.mapRemote.srcIndex       = uvm_id_value(processor);

@@ -109,7 +109,7 @@ static NV_STATUS test_saturating_counter_bitfields(void)
 {
     struct region r;
 
-    memset(&r, 0, sizeof(r));
+    nv_memset(&r, 0, sizeof(r));
 
     UVM_PERF_SATURATING_INC(r.read_faults);
     TEST_CHECK_RET(r.read_faults == 1);

@@ -143,7 +143,7 @@ static NV_STATUS get_gpu_caps(uvm_gpu_t *gpu)
     NV_STATUS status;
     UvmGpuCaps gpu_caps;
 
-    memset(&gpu_caps, 0, sizeof(gpu_caps));
+    nv_memset(&gpu_caps, 0, sizeof(gpu_caps));
 
     status = uvm_rm_locked_call(nvUvmInterfaceQueryCaps(uvm_gpu_device_handle(gpu), &gpu_caps));
     if (status != NV_OK)
@@ -977,13 +977,13 @@ UVM_DEFINE_SINGLE_PROCFS_FILE(gpu_access_counters_entry);
 
 static void uvm_parent_gpu_uuid_string(char *buffer, const NvProcessorUuid *uuid)
 {
-    memcpy(buffer, UVM_PARENT_GPU_UUID_PREFIX, sizeof(UVM_PARENT_GPU_UUID_PREFIX) - 1);
+    nv_memcpy(buffer, UVM_PARENT_GPU_UUID_PREFIX, sizeof(UVM_PARENT_GPU_UUID_PREFIX) - 1);
     uvm_uuid_string(buffer + sizeof(UVM_PARENT_GPU_UUID_PREFIX) - 1, uuid);
 }
 
 static void uvm_gpu_uuid_string(char *buffer, const NvProcessorUuid *uuid)
 {
-    memcpy(buffer, UVM_GPU_UUID_PREFIX, sizeof(UVM_GPU_UUID_PREFIX) - 1);
+    nv_memcpy(buffer, UVM_GPU_UUID_PREFIX, sizeof(UVM_GPU_UUID_PREFIX) - 1);
     uvm_uuid_string(buffer + sizeof(UVM_GPU_UUID_PREFIX) - 1, uuid);
 }
 
@@ -2229,7 +2229,7 @@ static NV_STATUS get_parent_p2p_caps(uvm_parent_gpu_t *parent_gpu0,
         rm_device1 = parent_gpu0->rm_device;
     }
 
-    memset(p2p_caps_params, 0, sizeof(*p2p_caps_params));
+    nv_memset(p2p_caps_params, 0, sizeof(*p2p_caps_params));
     status = uvm_rm_locked_call(nvUvmInterfaceGetP2PCaps(rm_device0, rm_device1, p2p_caps_params));
     if (status != NV_OK) {
         UVM_ERR_PRINT("nvUvmInterfaceGetP2PCaps() failed with error: %s, for GPU0:%s and GPU1:%s\n",
@@ -2450,7 +2450,7 @@ static void parent_peers_destroy(uvm_parent_gpu_t *parent_gpu0,
 
     uvm_rm_locked_call_void(nvUvmInterfaceP2pObjectDestroy(uvm_global_session_handle(), parent_peer_caps->p2p_handle));
 
-    memset(parent_peer_caps, 0, sizeof(*parent_peer_caps));
+    nv_memset(parent_peer_caps, 0, sizeof(*parent_peer_caps));
 }
 
 static void parent_peers_release(uvm_parent_gpu_t *parent_gpu0, uvm_parent_gpu_t *parent_gpu1)
@@ -2550,7 +2550,7 @@ static void peers_destroy(uvm_gpu_t *gpu0, uvm_gpu_t *gpu1, uvm_gpu_peer_t *peer
 
     parent_peers_release(gpu0->parent, gpu1->parent);
 
-    memset(peer_caps, 0, sizeof(*peer_caps));
+    nv_memset(peer_caps, 0, sizeof(*peer_caps));
 }
 
 static void peers_release(uvm_gpu_t *gpu0, uvm_gpu_t *gpu1)

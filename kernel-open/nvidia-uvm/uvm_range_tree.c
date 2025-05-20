@@ -97,7 +97,7 @@ static uvm_range_tree_node_t *range_node_find(uvm_range_tree_t *tree,
 
 void uvm_range_tree_init(uvm_range_tree_t *tree)
 {
-    memset(tree, 0, sizeof(*tree));
+    nv_memset(tree, 0, sizeof(*tree));
     tree->rb_root = RB_ROOT;
     INIT_LIST_HEAD(&tree->head);
 }

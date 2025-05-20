@@ -457,7 +457,7 @@ void *uvm_push_get_single_inline_buffer(uvm_push_t *push,
 // Helper that copies size bytes of data from src into the inline data fragment
 static void uvm_push_inline_data_add(uvm_push_inline_data_t *data, const void *src, size_t size)
 {
-    memcpy(uvm_push_inline_data_get(data, size), src, size);
+    nv_memcpy(uvm_push_inline_data_get(data, size), src, size);
 }
 
 // Push an operation releasing a timestamp into the pushbuffer.

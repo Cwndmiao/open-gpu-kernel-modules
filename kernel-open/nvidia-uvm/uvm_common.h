@@ -24,20 +24,20 @@
 #ifndef __UVM_COMMON_H__
 #define __UVM_COMMON_H__
 
-#ifdef DEBUG
+//#ifdef DEBUG
     #define UVM_IS_DEBUG() 1
-#else
-    #define UVM_IS_DEBUG() 0
-#endif
+//#else
+//    #define UVM_IS_DEBUG() 0
+//#endif
 
 // NVIDIA_UVM_DEVELOP implies DEBUG, but not vice-versa
 // TODO Bug 1773100: Figure out the right distinction between develop and debug
 // builds.
-#ifdef NVIDIA_UVM_DEVELOP
+//#ifdef NVIDIA_UVM_DEVELOP
     #define UVM_IS_DEVELOP() 1
-#else
-    #define UVM_IS_DEVELOP() 0
-#endif
+//#else
+//    #define UVM_IS_DEVELOP() 0
+//#endif
 
 #include "uvm_types.h"
 #include "uvm_linux.h"

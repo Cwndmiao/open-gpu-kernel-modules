@@ -1088,6 +1088,7 @@ NV_STATUS NV_API_CALL nv_set_freq                (nv_state_t *, TEGRASOC_WHICH_C
  * ---------------------------------------------------------------------------
  */
 
+NV_STATUS  NV_API_CALL  rm_whosyourdaddy(void);
 NvBool     NV_API_CALL  rm_init_rm               (nvidia_stack_t *);
 void       NV_API_CALL  rm_shutdown_rm           (nvidia_stack_t *);
 NvBool     NV_API_CALL  rm_init_private_state    (nvidia_stack_t *, nv_state_t *);

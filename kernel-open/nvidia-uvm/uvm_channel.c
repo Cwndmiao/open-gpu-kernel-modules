@@ -1000,7 +1000,7 @@ static void internal_channel_submit_work(uvm_push_t *push, NvU32 push_size, NvU3
         UVM_ASSERT(uvm_channel_is_sec2(channel));
 
         // Copy push data to unprotected sysmem, it has already been signed.
-        memcpy(unprotected_pb, push->begin, push_size);
+        nv_memcpy(unprotected_pb, push->begin, push_size);
     }
 
     gpu->parent->host_hal->set_gpfifo_entry(gpfifo_entry, pushbuffer_va, push_size, UVM_GPFIFO_SYNC_PROCEED);
@@ -1260,7 +1260,7 @@ static void update_gpput_via_sec2(uvm_push_t *sec2_push, uvm_channel_t *channel,
     // however we can only do 16B aligned decrypt writes.
     // A poison value is written to all other locations, this is ignored in
     // most locations and overwritten by HW for GPGET location
-    memset(gpput_scratchpad, 0, sizeof(gpput_scratchpad));
+    nv_memset(gpput_scratchpad, 0, sizeof(gpput_scratchpad));
     UVM_ASSERT(sizeof(*gpput_scratchpad) == sizeof(new_gpu_put));
     gpput_scratchpad[(channel->channel_info.gpPutGpuVa % UVM_CONF_COMPUTING_AUTH_TAG_ALIGNMENT) /
                      sizeof(*gpput_scratchpad)] = new_gpu_put;
@@ -1703,7 +1703,7 @@ static void write_ctrl_gpfifo(uvm_channel_t *channel, NvU64 ctrl_fifo_entry_valu
     new_cpu_put = (cpu_put + 1) % channel->num_gpfifo_entries;
 
     entry = &channel->gpfifo_entries[cpu_put];
-    memset(entry, 0, sizeof(*entry));
+    nv_memset(entry, 0, sizeof(*entry));
     entry->type = UVM_GPFIFO_ENTRY_TYPE_CONTROL;
     entry->control_value = ctrl_fifo_entry_value;
 
@@ -2350,7 +2350,7 @@ static NV_STATUS internal_channel_create(uvm_channel_t *channel)
     UvmGpuChannelInfo *channel_info = &channel->channel_info;
     uvm_channel_manager_t *manager = channel->pool->manager;
 
-    memset(&channel_alloc_params, 0, sizeof(channel_alloc_params));
+    nv_memset(&channel_alloc_params, 0, sizeof(channel_alloc_params));
     channel_alloc_params.numGpFifoEntries = channel_pool_num_gpfifo_entries(channel->pool);
     channel_alloc_params.gpFifoLoc = manager->conf.gpfifo_loc;
     channel_alloc_params.gpPutLoc = manager->conf.gpput_loc;
@@ -2400,7 +2400,7 @@ static NV_STATUS proxy_channel_create(uvm_channel_t *channel, unsigned ce_index)
 
     UVM_ASSERT(uvm_channel_is_proxy(channel));
 
-    memset(&channel_alloc_params, 0, sizeof(channel_alloc_params));
+    nv_memset(&channel_alloc_params, 0, sizeof(channel_alloc_params));
     channel_alloc_params.engineIndex = ce_index;
 
     status = uvm_rm_locked_call(nvUvmInterfacePagingChannelAllocate(uvm_gpu_device_handle(gpu),
@@ -3322,8 +3322,8 @@ static void init_channel_manager_conf(uvm_channel_manager_t *manager)
 
     // Override the default value if requested by the user
     if (strcmp(pushbuffer_loc_value, "vid") == 0) {
-        // aarch64 requires memset_io/memcpy_io instead of memset/memcpy for
-        // mapped GPU memory. The existing push paths only use memset/memcpy,
+        // aarch64 requires nv_memset_io/memcpy_io instead of nv_memset/memcpy for
+        // mapped GPU memory. The existing push paths only use nv_memset/memcpy,
         // so force the location to sys for now.
         // TODO: Bug 2904133: Remove the following "if" after the bug is fixed.
         if (NVCPU_IS_AARCH64) {

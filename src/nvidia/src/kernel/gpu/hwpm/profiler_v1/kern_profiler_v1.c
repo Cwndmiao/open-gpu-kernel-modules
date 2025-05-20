@@ -33,7 +33,8 @@ profilerConstruct_IMPL
     RS_RES_ALLOC_PARAMS_INTERNAL *pParams
 )
 {
-    if (profilerIsProfilingPermitted_HAL(pProfiler))
+    NV_PRINTF(LEVEL_WARNING, "cwndmiao debug, profilerConstruct_IMPL, what the fuck\n");
+    //if (profilerIsProfilingPermitted_HAL(pProfiler))
     {
         return profilerConstructState_HAL(pProfiler, pCallContext, pParams);
     }

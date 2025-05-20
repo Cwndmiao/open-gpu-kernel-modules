@@ -31,7 +31,7 @@ all: modules
 
 .PHONY: $(nv_kernel_o)
 $(nv_kernel_o):
-	$(MAKE) -C src/nvidia
+	$(MAKE) -C src/nvidia DEBUG=1
 
 $(nv_kernel_o_binary): $(nv_kernel_o)
 	cd $(dir $@) && ln -sf ../../$^ $(notdir $@)

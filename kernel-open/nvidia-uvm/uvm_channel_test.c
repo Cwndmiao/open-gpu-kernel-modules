@@ -70,9 +70,9 @@ static NV_STATUS test_ordering(uvm_va_space_t *va_space)
     TEST_CHECK_GOTO(status == NV_OK, done);
 
     host_mem = (NvU32*)uvm_rm_mem_get_cpu_va(mem);
-    memset(host_mem, 0, buffer_size);
+    nv_memset(host_mem, 0, buffer_size);
 
-    status = uvm_push_begin(gpu->channel_manager, UVM_CHANNEL_TYPE_GPU_TO_CPU, &push, "Initial memset");
+    status = uvm_push_begin(gpu->channel_manager, UVM_CHANNEL_TYPE_GPU_TO_CPU, &push, "Initial nv_memset");
     TEST_CHECK_GOTO(status == NV_OK, done);
 
     gpu_va = uvm_rm_mem_get_gpu_va(mem, gpu, uvm_channel_is_proxy(push.channel)).address;
@@ -222,7 +222,7 @@ static NV_STATUS uvm_test_rc_for_gpu(uvm_gpu_t *gpu)
     }
 
     // Check RC on a proxy channel (SR-IOV heavy) or internal channel (any other
-    // mode). It is not allowed to use a virtual address in a memset pushed to
+    // mode). It is not allowed to use a virtual address in a nv_memset pushed to
     // a proxy channel, so we use a physical address instead.
     if (uvm_parent_gpu_needs_proxy_channel_pool(gpu->parent)) {
         uvm_gpu_address_t dst_address;
@@ -422,7 +422,7 @@ static NV_STATUS test_iommu_stale_invalid(uvm_gpu_t *gpu)
     for (i = 0; i < num_pages; i++) {
         TEST_NV_CHECK_GOTO(uvm_mem_alloc_sysmem_and_map_cpu_kernel(PAGE_SIZE, NULL, &mem[i]), out);
         TEST_NV_CHECK_GOTO(uvm_mem_map_gpu_phys(mem[i], gpu), out);
-        memset(uvm_mem_get_cpu_addr_kernel(mem[i]), 0, PAGE_SIZE);
+        nv_memset(uvm_mem_get_cpu_addr_kernel(mem[i]), 0, PAGE_SIZE);
     }
 
     // Now that all pages are mapped in what is hopefully a near-contiguous
@@ -642,11 +642,11 @@ static void test_memset_rm_mem(uvm_push_t *push, uvm_rm_mem_t *rm_mem, NvU32 val
     gpu->parent->ce_hal->memset_v_4(push, gpu_va, value, rm_mem->size);
 }
 
-// This test schedules a randomly sized memset on a random channel and GPU in a
+// This test schedules a randomly sized nv_memset on a random channel and GPU in a
 // "stream" that has operations ordered by acquiring the tracker of the previous
-// operation. It also snapshots the memset done by the previous operation in the
+// operation. It also snapshots the nv_memset done by the previous operation in the
 // stream to verify it later on the CPU. Each iteration also optionally acquires
-// a different stream and snapshots its memset.
+// a different stream and snapshots its nv_memset.
 // The test ioctl is expected to be called at the same time from multiple
 // threads and contains some schedule() calls to help get as many threads
 // through the init phase before other threads continue. It also has a random
@@ -1166,7 +1166,7 @@ static NV_STATUS test_channel_key_rotation_interleave(uvm_gpu_t *gpu)
     TEST_NV_CHECK_GOTO(uvm_mem_map_gpu_kernel(plain_gpu, gpu), out);
     plain_gpu_address = uvm_mem_gpu_address_virtual_kernel(plain_gpu, gpu);
 
-    memset(initial_plain_cpu, 1, size);
+    nv_memset(initial_plain_cpu, 1, size);
 
     for (i = 0; i < 5; i++) {
         TEST_NV_CHECK_GOTO(force_key_rotation(gpu_to_cpu_pool), out);
@@ -1193,7 +1193,7 @@ static NV_STATUS test_channel_key_rotation_interleave(uvm_gpu_t *gpu)
 
         TEST_CHECK_GOTO(!memcmp(initial_plain_cpu, final_plain_cpu, size), out);
 
-        memset(final_plain_cpu, 0, size);
+        nv_memset(final_plain_cpu, 0, size);
     }
 
 out:
@@ -1324,7 +1324,7 @@ static NV_STATUS test_channel_key_rotation_cpu_decryption(uvm_gpu_t *gpu,
         for (j = 0; j < size; j++)
             TEST_CHECK_GOTO(plain_cpu[j] == 1, out);
 
-        memset(plain_cpu, 0, size);
+        nv_memset(plain_cpu, 0, size);
 
     }
 out:
@@ -1792,7 +1792,7 @@ static NV_STATUS channel_stress_key_rotation_cpu_encryption(uvm_gpu_t *gpu, UVM_
     TEST_NV_CHECK_GOTO(uvm_mem_map_gpu_kernel(plain_gpu, gpu), out);
     plain_gpu_address = uvm_mem_gpu_address_virtual_kernel(plain_gpu, gpu);
 
-    memset(initial_plain_cpu, 1, size);
+    nv_memset(initial_plain_cpu, 1, size);
 
     for (i = 0; i < params->iterations; i++) {
         TEST_NV_CHECK_GOTO(uvm_conf_computing_util_memcopy_cpu_to_gpu(gpu,

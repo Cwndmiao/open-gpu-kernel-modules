@@ -206,7 +206,7 @@ NV_STATUS uvm_va_space_create(struct address_space *mapping, uvm_va_space_t **va
     INIT_RADIX_TREE(&va_space->range_groups, NV_UVM_GFP_FLAGS);
     uvm_range_tree_init(&va_space->range_group_ranges);
 
-    bitmap_zero(va_space->enabled_peers, UVM_MAX_UNIQUE_GPU_PAIRS);
+    nv_bitmap_zero(va_space->enabled_peers, UVM_MAX_UNIQUE_GPU_PAIRS);
 
     // CPU is not explicitly registered in the va space
     processor_mask_array_set(va_space->can_access, UVM_ID_CPU, UVM_ID_CPU);
@@ -495,7 +495,7 @@ void uvm_va_space_destroy(uvm_va_space_t *va_space)
 
     uvm_processor_mask_copy(retained_gpus, &va_space->registered_gpus);
 
-    bitmap_copy(va_space->enabled_peers_teardown, va_space->enabled_peers, UVM_MAX_UNIQUE_GPU_PAIRS);
+    nv_bitmap_copy(va_space->enabled_peers_teardown, va_space->enabled_peers, UVM_MAX_UNIQUE_GPU_PAIRS);
 
     uvm_va_space_detach_all_user_channels(va_space, &deferred_free_list);
 
@@ -2433,7 +2433,7 @@ uvm_service_block_context_t *uvm_service_block_context_alloc(struct mm_struct *m
         return NULL;
 
     if (UVM_IS_DEBUG())
-        memset(service_context, 0xff, sizeof(*service_context));
+        nv_memset(service_context, 0xff, sizeof(*service_context));
 
     service_context->block_context = uvm_va_block_context_alloc(mm);
     if (!service_context->block_context) {

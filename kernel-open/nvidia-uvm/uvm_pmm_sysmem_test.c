@@ -80,7 +80,7 @@ static NV_STATUS test_cpu_chunk_mapping_access(uvm_cpu_chunk_t *chunk, uvm_gpu_t
     NV_STATUS status = NV_OK;
 
     TEST_NV_CHECK_RET(cpu_chunk_map_on_cpu(chunk, (void **)&cpu_addr));
-    memset(cpu_addr, 0, chunk_size);
+    nv_memset(cpu_addr, 0, chunk_size);
 
     dma_addr = uvm_cpu_chunk_get_gpu_phys_addr(chunk, gpu);
     gpu_addr = uvm_gpu_address_copy(gpu, uvm_gpu_phys_address(UVM_APERTURE_SYS, dma_addr));

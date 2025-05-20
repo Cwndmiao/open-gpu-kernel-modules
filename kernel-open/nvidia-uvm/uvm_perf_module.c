@@ -43,7 +43,7 @@ void uvm_perf_module_type_unset_data(uvm_perf_module_data_desc_t *modules_data, 
     // Data should have been previously set
     UVM_ASSERT(modules_data[type].data);
 
-    memset(&modules_data[type], 0, sizeof(modules_data[type]));
+    nv_memset(&modules_data[type], 0, sizeof(modules_data[type]));
 }
 
 NV_STATUS uvm_perf_module_load(uvm_perf_module_t *module, uvm_va_space_t *va_space)
@@ -134,7 +134,7 @@ void uvm_perf_module_init(const char *name, uvm_perf_module_type_t type,
     UVM_ASSERT(module);
     UVM_ASSERT(callback_count <= UVM_PERF_EVENT_COUNT);
 
-    memset(module->callbacks, 0, sizeof(module->callbacks));
+    nv_memset(module->callbacks, 0, sizeof(module->callbacks));
 
     // Register all the given callbacks
     for (i = 0; i < callback_count; ++i) {

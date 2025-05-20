@@ -1629,14 +1629,14 @@ gpuValidateRegOffset_IMPL
     // Regop calls are typically subject to the allowlist, however certain regop calls might originate from RM on behalf of user-space clients.
     // In these cases, we can skip permission validation so that these ctrl calls can be made by any UMD without adding these registers to the allowlist.
     // To bypass this check, set bSkipPermissionValidation to true in gpuExecRegOps().
-    if (!bSkipPermissionValidation && !osIsAdministrator() &&
-        !gpuGetUserRegisterAccessPermissions(pGpu, offset))
-    {
-        NV_PRINTF(LEVEL_ERROR,
-                  "User does not have permission to access register offset 0x%x\n",
-                  offset);
-        return NV_ERR_INSUFFICIENT_PERMISSIONS;
-    }
+    //if (!bSkipPermissionValidation && !osIsAdministrator() &&
+    //    !gpuGetUserRegisterAccessPermissions(pGpu, offset))
+    //{
+    //    NV_PRINTF(LEVEL_ERROR,
+    //              "User does not have permission to access register offset 0x%x\n",
+    //              offset);
+    //    return NV_ERR_INSUFFICIENT_PERMISSIONS;
+    //}
 
     return NV_OK;
 }

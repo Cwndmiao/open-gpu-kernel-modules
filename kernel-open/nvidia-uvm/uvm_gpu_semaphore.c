@@ -232,7 +232,7 @@ static NV_STATUS pool_alloc_page(uvm_gpu_semaphore_pool_t *pool)
     UVM_ASSERT(gpu_can_access_semaphore_pool(pool->gpu, pool_page->memory));
 
     // All semaphores are initially free
-    bitmap_fill(pool_page->free_semaphores, UVM_SEMAPHORE_COUNT_PER_PAGE);
+    nv_bitmap_fill(pool_page->free_semaphores, UVM_SEMAPHORE_COUNT_PER_PAGE);
 
     list_add(&pool_page->all_pages_node, &pool->pages);
     pool->free_semaphores_count += UVM_SEMAPHORE_COUNT_PER_PAGE;
@@ -285,7 +285,7 @@ NV_STATUS uvm_gpu_semaphore_alloc(uvm_gpu_semaphore_pool_t *pool, uvm_gpu_semaph
     NV_STATUS status = NV_OK;
     uvm_gpu_semaphore_pool_page_t *page;
 
-    memset(semaphore, 0, sizeof(*semaphore));
+    nv_memset(semaphore, 0, sizeof(*semaphore));
 
     uvm_mutex_lock(&pool->mutex);
 
@@ -606,7 +606,7 @@ NV_STATUS uvm_gpu_tracking_semaphore_alloc(uvm_gpu_semaphore_pool_t *pool, uvm_g
     NV_STATUS status;
     uvm_lock_order_t order;
 
-    memset(tracking_sem, 0, sizeof(*tracking_sem));
+    nv_memset(tracking_sem, 0, sizeof(*tracking_sem));
 
     status = uvm_gpu_semaphore_alloc(pool, &tracking_sem->semaphore);
     if (status != NV_OK)
@@ -669,7 +669,7 @@ static void gpu_semaphore_encrypted_payload_update(uvm_channel_t *channel, uvm_g
         // Make sure no memory accesses happen before we read the notifier
         smp_mb__after_atomic();
 
-        memcpy(local_auth_tag, uvm_gpu_semaphore_get_auth_tag_cpu_va(semaphore), sizeof(local_auth_tag));
+        nv_memcpy(local_auth_tag, uvm_gpu_semaphore_get_auth_tag_cpu_va(semaphore), sizeof(local_auth_tag));
         local_payload = READ_ONCE(*uvm_gpu_semaphore_get_encrypted_payload_cpu_va(semaphore));
 
         // Make sure the second read of notifier happens after

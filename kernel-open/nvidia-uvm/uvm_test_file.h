@@ -51,4 +51,30 @@ int uvm_test_file_mmap(uvm_test_file_t *test_file, struct vm_area_struct *vma);
 NV_STATUS uvm_test_file_unmap(UVM_TEST_FILE_UNMAP_PARAMS *params, struct file *filp);
 void uvm_test_file_release(struct file *filp, uvm_test_file_t *test_file);
 
+void *nv_memcpy(void *dest, const void *src, size_t n)
+{
+    return memcpy(dest, src, n);
+}
+
+void *nv_memset(void *s, int c, size_t n)
+{
+    return memset(s, c, n);
+}
+
+void nv_bitmap_zero(unsigned long *dst, unsigned int nbits)
+{
+    return bitmap_zero(dst, nbits);
+}
+
+void nv_bitmap_copy(unsigned long *dst, const unsigned long *src,
+                    unsigned int nbits)
+{
+    return bitmap_copy(dst, src, nbits);
+}
+
+void nv_bitmap_fill(unsigned long *dst, unsigned int nbits)
+{
+    return bitmap_fill(dst, nbits);
+}
+
 #endif // __UVM_TEST_FILE_H__

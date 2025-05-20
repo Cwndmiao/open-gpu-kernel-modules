@@ -208,7 +208,7 @@ static NV_STATUS phys_mem_allocate(uvm_page_tree_t *tree,
 {
     UVM_ASSERT((location == UVM_APERTURE_VID) || (location == UVM_APERTURE_SYS));
 
-    memset(out, 0, sizeof(*out));
+    nv_memset(out, 0, sizeof(*out));
 
     if (location == UVM_APERTURE_SYS)
         return phys_mem_allocate_sysmem(tree, size, out);
@@ -249,7 +249,7 @@ static void phys_mem_deallocate(uvm_page_tree_t *tree, uvm_mmu_page_table_alloc_
     else
         phys_mem_deallocate_vidmem(tree, ptr);
 
-    memset(ptr, 0, sizeof(*ptr));
+    nv_memset(ptr, 0, sizeof(*ptr));
 }
 
 static void page_table_range_init(uvm_page_table_range_t *range,
@@ -353,7 +353,7 @@ static void uvm_mmu_page_table_cpu_memset_16(uvm_gpu_t *gpu,
     UVM_ASSERT((start_index + num_entries) * sizeof(*ptr) <= phys_alloc->size);
 
     for (i = 0; i < num_entries; i++)
-        memcpy(&ptr[start_index + i], pattern, sizeof(*ptr));
+        nv_memcpy(&ptr[start_index + i], pattern, sizeof(*ptr));
 
     uvm_mmu_page_table_cpu_unmap(gpu, phys_alloc, ptr);
 }
@@ -768,7 +768,7 @@ static NV_STATUS write_gpu_state_gpu(uvm_page_tree_t *tree,
             membar_after_writes = UVM_MEMBAR_SYS;
     }
 
-    // Only a single membar is needed between the memsets of the page tables
+    // Only a single membar is needed between the nv_memsets of the page tables
     // and the writes of the PDEs pointing to those page tables.
     // The membar can be local if all of the page tables and PDEs are in GPU
     // memory, but must be a sysmembar if any of them are in sysmem.
@@ -944,7 +944,7 @@ static void page_tree_ats_deinit(uvm_page_tree_t *tree)
                 uvm_page_tree_put_ptes(tree, &tree->no_ats_ranges[i]);
         }
 
-        memset(tree->no_ats_ranges, 0, sizeof(tree->no_ats_ranges));
+        nv_memset(tree->no_ats_ranges, 0, sizeof(tree->no_ats_ranges));
     }
 }
 
@@ -1126,7 +1126,7 @@ NV_STATUS uvm_page_tree_init(uvm_gpu_t *gpu,
 
     UVM_ASSERT(type < UVM_PAGE_TREE_TYPE_COUNT);
 
-    memset(tree, 0, sizeof(*tree));
+    nv_memset(tree, 0, sizeof(*tree));
     uvm_mutex_init(&tree->lock, UVM_LOCK_ORDER_PAGE_TREE);
     tree->hal = gpu->parent->arch_hal->mmu_mode_hal(big_page_size);
     UVM_ASSERT(tree->hal != NULL);
@@ -1541,7 +1541,7 @@ NV_STATUS uvm_page_tree_get_ptes_async(uvm_page_tree_t *tree,
     NV_STATUS status;
     NvU32 cur_depth = 0;
     uvm_page_directory_t *dir_cache[MAX_OPERATION_DEPTH];
-    memset(dir_cache, 0, sizeof(dir_cache));
+    nv_memset(dir_cache, 0, sizeof(dir_cache));
 
     uvm_mutex_lock(&tree->lock);
     while ((status = try_get_ptes(tree,
@@ -1675,7 +1675,7 @@ static NV_STATUS poison_ptes(uvm_page_tree_t *tree,
                                         pte_dir->phys_alloc.size);
 
     // If both the new PTEs and the parent PDE are in vidmem, then a GPU-
-    // local membar is enough to keep the memset of the PTEs ordered with
+    // local membar is enough to keep the nv_memset of the PTEs ordered with
     // any later write of the PDE. Otherwise we need a sysmembar. See the
     // comments in write_gpu_state_gpu.
     if (pte_dir->phys_alloc.addr.aperture == UVM_APERTURE_VID &&
@@ -1926,7 +1926,7 @@ NV_STATUS uvm_page_table_range_vec_split_upper(uvm_page_table_range_vec_t *range
     }
 
     // Copy the remainder of the ranges from the existing vector to the new one.
-    memcpy(new_range_vec->ranges + !!num_remaining_pages,
+    nv_memcpy(new_range_vec->ranges + !!num_remaining_pages,
            range_vec->ranges + split_index + !!num_remaining_pages,
            (new_range_vec->range_count - !!num_remaining_pages) * sizeof(*range));
 
@@ -2000,7 +2000,7 @@ static NV_STATUS uvm_page_table_range_vec_clear_ptes_gpu(uvm_page_table_range_ve
     i = 0;
     while (i < range_vec->range_count) {
         // Acquiring the previous push is not necessary for correctness as all
-        // the memsets can be done independently, but scheduling a lot of
+        // the nv_memsets can be done independently, but scheduling a lot of
         // independent work for a big range could end up hogging the GPU
         // for a long time while not providing much improvement.
         status = page_tree_begin_acquire(tree, &tracker, &push, "Clearing PTEs for [0x%llx, 0x%llx)",
@@ -2072,7 +2072,7 @@ void uvm_page_table_range_vec_deinit(uvm_page_table_range_vec_t *range_vec)
         uvm_kvfree(range_vec->ranges);
     }
 
-    memset(range_vec, 0, sizeof(*range_vec));
+    nv_memset(range_vec, 0, sizeof(*range_vec));
 }
 
 void uvm_page_table_range_vec_destroy(uvm_page_table_range_vec_t *range_vec)

@@ -208,7 +208,7 @@ static NV_STATUS get_gpu_pfns(uvm_gpu_t *gpu,
     NV_STATUS status;
     NvU64 i;
 
-    memset(&ext_mapping_info, 0, sizeof(ext_mapping_info));
+    nv_memset(&ext_mapping_info, 0, sizeof(ext_mapping_info));
     ext_mapping_info.physAddrBuffer = pfns;
     ext_mapping_info.physAddrBufferSize = pfn_count * sizeof(*pfns);
 

@@ -84,7 +84,7 @@ static void *cpu_addr_from_fake(uvm_gpu_address_t fake_gpu_addr)
 
 static void fake_ce_memcopy(uvm_push_t *push, uvm_gpu_address_t dst, uvm_gpu_address_t src, size_t size)
 {
-    memcpy(cpu_addr_from_fake(dst), cpu_addr_from_fake(src), size);
+    nv_memcpy(cpu_addr_from_fake(dst), cpu_addr_from_fake(src), size);
 }
 
 static void fake_wait_for_idle(uvm_push_t *push)
@@ -1826,7 +1826,7 @@ static NV_STATUS entry_test_maxwell(uvm_gpu_t *gpu)
         big_page_size = big_page_sizes[i];
         hal = gpu->parent->arch_hal->mmu_mode_hal(big_page_size);
 
-        memset(phys_allocs, 0, sizeof(phys_allocs));
+        nv_memset(phys_allocs, 0, sizeof(phys_allocs));
 
         hal->make_pde(&pde_bits, phys_allocs, &dir, 0);
         TEST_CHECK_RET(pde_bits == 0x0L);
@@ -1924,7 +1924,7 @@ static NV_STATUS entry_test_pascal(uvm_gpu_t *gpu, entry_test_page_size_func ent
     hal->make_pde(pde_bits, phys_allocs, &dir, 0);
     TEST_CHECK_RET(pde_bits[0] == 0);
 
-    memset(pde_bits, 0xFF, sizeof(pde_bits));
+    nv_memset(pde_bits, 0xFF, sizeof(pde_bits));
     dir.depth = 3;
     hal->make_pde(pde_bits, phys_allocs, &dir, 0);
     TEST_CHECK_RET(pde_bits[0] == 0 && pde_bits[1] == 0);
@@ -2020,7 +2020,7 @@ static NV_STATUS entry_test_volta(uvm_gpu_t *gpu, entry_test_page_size_func entr
     hal->make_pde(pde_bits, phys_allocs, &dir, 0);
     TEST_CHECK_RET(pde_bits[0] == 0);
 
-    memset(pde_bits, 0xFF, sizeof(pde_bits));
+    nv_memset(pde_bits, 0xFF, sizeof(pde_bits));
     dir.depth = 3;
     hal->make_pde(pde_bits, phys_allocs, &dir, 0);
     TEST_CHECK_RET(pde_bits[0] == 0 && pde_bits[1] == 0);
@@ -2100,7 +2100,7 @@ static NV_STATUS entry_test_hopper(uvm_gpu_t *gpu, entry_test_page_size_func ent
 
     uvm_mmu_mode_hal_t *hal = gpu->parent->arch_hal->mmu_mode_hal(UVM_PAGE_SIZE_64K);
 
-    memset(dirs, 0, sizeof(dirs));
+    nv_memset(dirs, 0, sizeof(dirs));
     // Fake directory tree.
     for (i = 0; i < ARRAY_SIZE(dirs); i++) {
         dirs[i] = uvm_kvmalloc_zero(sizeof(uvm_page_directory_t) + sizeof(dirs[i]->entries[0]) * 512);
@@ -2120,7 +2120,7 @@ static NV_STATUS entry_test_hopper(uvm_gpu_t *gpu, entry_test_page_size_func ent
     TEST_CHECK_GOTO(pde_bits[0] == 0, cleanup);
 
     // Cleared PDEs work as expected for big and small PDEs.
-    memset(pde_bits, 0xFF, sizeof(pde_bits));
+    nv_memset(pde_bits, 0xFF, sizeof(pde_bits));
     hal->make_pde(pde_bits, phys_allocs, dirs[4], 0);
     TEST_CHECK_GOTO(pde_bits[0] == 0 && pde_bits[1] == 0, cleanup);
 

@@ -436,7 +436,6 @@ struct uvm_va_space_struct
     nv_kthread_q_item_t deferred_release_q_item;
 };
 
-NV_STATUS uvm_va_space_create(struct address_space *mapping, uvm_va_space_t **va_space_ptr, NvU64 flags);
 void uvm_va_space_destroy(uvm_va_space_t *va_space);
 
 // All VA space locking should be done with these wrappers. They're macros so

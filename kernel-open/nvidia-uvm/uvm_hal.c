@@ -705,7 +705,7 @@ static inline void op_copy(uvm_hal_class_ops_t *dst, uvm_hal_class_ops_t *src, N
 {
     void *m_dst = (char *)dst + op_offset + sizeof(void *) * op_idx;
     void *m_src = (char *)src + op_offset + sizeof(void *) * op_idx;
-    memcpy(m_dst, m_src, sizeof(void *));
+    nv_memcpy(m_dst, m_src, sizeof(void *));
 }
 
 static inline NV_STATUS ops_init_from_table(uvm_hal_class_ops_t *dest_table,

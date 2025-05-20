@@ -322,7 +322,7 @@ static void *realloc_from_kmalloc(void *p, size_t new_size)
     new_p = alloc_internal(new_size, false);
     if (!new_p)
         return NULL;
-    memcpy(new_p, p, min(ksize(p), new_size));
+    nv_memcpy(new_p, p, min(ksize(p), new_size));
     kfree(p);
     return new_p;
 }
@@ -347,7 +347,7 @@ static void *realloc_from_vmalloc(void *p, size_t new_size)
     if (!new_p)
         return NULL;
 
-    memcpy(new_p, p, min(new_size, old_hdr->alloc_size));
+    nv_memcpy(new_p, p, min(new_size, old_hdr->alloc_size));
     vfree(old_hdr);
     return new_p;
 }

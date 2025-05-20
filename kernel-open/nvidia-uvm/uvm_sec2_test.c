@@ -182,7 +182,7 @@ static NV_STATUS test_semaphore_timestamp(uvm_gpu_t *gpu)
 
     timestamp = (NvU64 *)mem.cpu_va;
     TEST_CHECK_GOTO(timestamp != NULL, done);
-    memset(timestamp, 0, size);
+    nv_memset(timestamp, 0, size);
 
     // Shift the timestamp pointer to where the semaphore timestamp info is.
     timestamp += 1;

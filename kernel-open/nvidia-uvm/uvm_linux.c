@@ -37,7 +37,7 @@
 #if UVM_CGROUP_ACCOUNTING_SUPPORTED()
 void uvm_memcg_context_start(uvm_memcg_context_t *context, struct mm_struct *mm)
 {
-    memset(context, 0, sizeof(*context));
+    nv_memset(context, 0, sizeof(*context));
     if (!mm)
         return;
 

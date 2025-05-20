@@ -521,7 +521,7 @@ static void schedule_kill_channel(uvm_fault_buffer_entry_t *fault_entry, uvm_use
     user_channel->kill_channel.va_space = va_space;
 
     // Save the packet to be handled by RM in the channel structure
-    memcpy(user_channel->kill_channel.fault_packet, packet, parent_gpu->fault_buffer_hal->entry_size(parent_gpu));
+    nv_memcpy(user_channel->kill_channel.fault_packet, packet, parent_gpu->fault_buffer_hal->entry_size(parent_gpu));
 
     // Retain the channel here so it is not prematurely destroyed. It will be
     // released after forwarding the fault to RM in kill_channel_delayed.

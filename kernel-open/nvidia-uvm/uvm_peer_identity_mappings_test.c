@@ -102,7 +102,7 @@ static NV_STATUS try_peer_access_remote_gpu_memory(uvm_gpu_t *local_gpu, uvm_gpu
     TEST_NV_CHECK_GOTO(status, cleanup);
 
     // set the sysmem back to zero
-    memset((void *)cpu_array, 0, MEM_ALLOCATION_SIZE);
+    nv_memset((void *)cpu_array, 0, MEM_ALLOCATION_SIZE);
 
     // copy peer vidmem to sysmem
     status = uvm_push_begin(peer_gpu->channel_manager,

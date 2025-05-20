@@ -994,7 +994,7 @@ void uvm_va_block_context_init(uvm_va_block_context_t *va_block_context, struct 
         uvm_page_mask_t **mask_array = va_block_context->make_resident.cpu_pages_used.node_masks;
         int nid;
 
-        memset(va_block_context, 0xff, sizeof(*va_block_context));
+        nv_memset(va_block_context, 0xff, sizeof(*va_block_context));
 
         for_each_possible_uvm_node(nid)
             uvm_page_mask_fill(mask_array[node_to_index(nid)]);
@@ -2791,7 +2791,7 @@ static NV_STATUS block_zero_new_gpu_chunk(uvm_va_block_t *block,
                                           uvm_tracker_t *tracker)
 {
     NV_STATUS status;
-    uvm_gpu_address_t memset_addr_base, memset_addr;
+    uvm_gpu_address_t nv_memset_addr_base, nv_memset_addr;
     uvm_push_t push;
     uvm_gpu_id_t id;
     uvm_va_block_region_t subregion;
@@ -2863,22 +2863,22 @@ static NV_STATUS block_zero_new_gpu_chunk(uvm_va_block_t *block,
         goto out;
 
     for_each_va_block_subregion_in_mask(subregion, zero_mask, chunk_region) {
-        // Pipeline the memsets since they never overlap with each other
+        // Pipeline the nv_memsets since they never overlap with each other
         uvm_push_set_flag(&push, UVM_PUSH_FLAG_CE_NEXT_PIPELINED);
 
-        // We'll push one membar later for all memsets in this loop
+        // We'll push one membar later for all nv_memsets in this loop
         uvm_push_set_flag(&push, UVM_PUSH_FLAG_NEXT_MEMBAR_NONE);
 
-        memset_addr.address = memset_addr_base.address + (subregion.first - chunk_region.first) * PAGE_SIZE;
-        gpu->parent->ce_hal->memset_8(&push, memset_addr, 0, uvm_va_block_region_size(subregion));
+        nv_memset_addr.address = nv_memset_addr_base.address + (subregion.first - chunk_region.first) * PAGE_SIZE;
+        gpu->parent->ce_hal->memset_8(&push, nv_memset_addr, 0, uvm_va_block_region_size(subregion));
     }
 
-    // A membar from this GPU is required between this memset and any PTE write
+    // A membar from this GPU is required between this nv_memset and any PTE write
     // pointing this or another GPU to this chunk. Otherwise an engine could
-    // read the PTE then access the page before the memset write is visible to
+    // read the PTE then access the page before the nv_memset write is visible to
     // that engine.
     //
-    // This memset writes GPU memory, so local mappings need only a GPU-local
+    // This nv_memset writes GPU memory, so local mappings need only a GPU-local
     // membar. We can't easily determine here whether a peer GPU will ever map
     // this page in the future, so always use a sysmembar. uvm_push_end provides
     // one by default.
@@ -2985,7 +2985,7 @@ chunk_unmap:
     uvm_mmu_chunk_unmap(chunk, &block->tracker);
 
 chunk_free:
-    // block_zero_new_gpu_chunk may have pushed memsets on this chunk which it
+    // block_zero_new_gpu_chunk may have pushed nv_memsets on this chunk which it
     // placed in the block tracker.
     uvm_pmm_gpu_free(&gpu->pmm, chunk, &block->tracker);
 
@@ -3929,7 +3929,7 @@ static NV_STATUS block_copy_pages(uvm_va_block_t *va_block,
         UVM_ASSERT(uvm_cpu_chunk_get_size(src_chunk) >= uvm_va_block_region_size(region));
         UVM_ASSERT(uvm_va_block_region_size(region) <= uvm_cpu_chunk_get_size(dst_chunk));
 
-        // CPU-to-CPU copies using memcpy() don't have any inherent ordering
+        // CPU-to-CPU copies using nv_memcpy() don't have any inherent ordering
         // with copies using GPU CEs. So, we have to make sure that all
         // previously submitted work is complete.
         status = uvm_tracker_wait(&va_block->tracker);
@@ -3942,7 +3942,7 @@ static NV_STATUS block_copy_pages(uvm_va_block_t *va_block,
             void *src_addr = kmap(src_page);
             void *dst_addr = kmap(dst_page);
 
-            memcpy(dst_addr, src_addr, PAGE_SIZE);
+            nv_memcpy(dst_addr, src_addr, PAGE_SIZE);
             kunmap(src_addr);
             kunmap(dst_addr);
 
@@ -4199,7 +4199,7 @@ static NV_STATUS block_copy_resident_pages_between(uvm_va_block_t *block,
             }
         }
         else {
-            // For CPU-to-CPU copies using memcpy(), record the start of the
+            // For CPU-to-CPU copies using nv_memcpy(), record the start of the
             // migration here. This will be reported in the migration event.
             cpu_migration_begin_timestamp = NV_GETTIME();
         }
@@ -7574,7 +7574,7 @@ static void block_gpu_compute_new_pte_state(uvm_va_block_t *block,
     DECLARE_BITMAP(big_ptes_not_covered, MAX_BIG_PAGES_PER_UVM_VA_BLOCK);
     bool can_make_new_big_ptes;
 
-    memset(new_pte_state, 0, sizeof(*new_pte_state));
+    nv_memset(new_pte_state, 0, sizeof(*new_pte_state));
     new_pte_state->needs_4k = true;
 
     // TODO: Bug 1676485: Force a specific page size for perf testing
@@ -8158,6 +8158,8 @@ static NV_STATUS uvm_cpu_insert_page(struct vm_area_struct *vma,
     }
 
     ret = vm_insert_page(vma, addr, page);
+    UVM_ERR_PRINT("cwndmiao debug, uvm_cpu_insert_page, vma= %px, addr= %px, page= %px\n",
+            vma, addr, page);
     uvm_up_read(&vma_wrapper->lock);
     if (ret) {
         UVM_ASSERT_MSG(ret == -ENOMEM, "ret: %d\n", ret);
@@ -9284,7 +9286,7 @@ static void block_put_ptes_safe(uvm_page_tree_t *tree, uvm_page_table_range_t *r
 {
     if (range->table) {
         uvm_page_tree_put_ptes(tree, range);
-        memset(range, 0, sizeof(*range));
+        nv_memset(range, 0, sizeof(*range));
     }
 }
 
@@ -10673,7 +10675,7 @@ static void block_copy_split_gpu_chunks(uvm_va_block_t *existing, uvm_va_block_t
     UVM_ASSERT(num_split_chunks_new > 0);
 
     // Copy post chunks from the end of existing into new (C above)
-    memcpy(&new_gpu_state->chunks[num_split_chunks_new],
+    nv_memcpy(&new_gpu_state->chunks[num_split_chunks_new],
            &existing_gpu_state->chunks[existing_before_state.chunk_index + 1],
            num_post_chunks * sizeof(new_gpu_state->chunks[0]));
 
@@ -10712,7 +10714,7 @@ static void block_copy_split_gpu_chunks(uvm_va_block_t *existing, uvm_va_block_t
         // anywhere, but we need to clear out stale pointers from existing's
         // array covering the new elements. new's chunks array was already zero-
         // initialized.
-        memset(&existing_gpu_state->chunks[existing_before_state.chunk_index],
+        nv_memset(&existing_gpu_state->chunks[existing_before_state.chunk_index],
                0,
                num_split_chunks_existing * sizeof(existing_gpu_state->chunks[0]));
     }
@@ -10820,7 +10822,7 @@ static void block_split_gpu(uvm_va_block_t *existing, uvm_va_block_t *new, uvm_g
                                         existing_pages_big);
 
             if (existing_pages_big == 0) {
-                memset(&existing_gpu_state->page_table_range_big, 0, sizeof(existing_gpu_state->page_table_range_big));
+                nv_memset(&existing_gpu_state->page_table_range_big, 0, sizeof(existing_gpu_state->page_table_range_big));
                 existing_gpu_state->initialized_big = false;
             }
 
@@ -13105,7 +13107,7 @@ NV_STATUS uvm_va_block_write_from_cpu(uvm_va_block_t *va_block,
             return status;
 
         mapped_page = (char *)kmap(page);
-        memcpy(mapped_page + page_offset, src, size);
+        nv_memcpy(mapped_page + page_offset, src, size);
         kunmap(page);
 
         return NV_OK;
@@ -13183,7 +13185,7 @@ NV_STATUS uvm_va_block_read_to_cpu(uvm_va_block_t *va_block,
 
     proc = uvm_va_block_page_get_closest_resident(va_block, va_block_context, page_index, UVM_ID_CPU);
     if (UVM_ID_IS_INVALID(proc)) {
-        memset(dst, 0, size);
+        nv_memset(dst, 0, size);
         return NV_OK;
     }
     else if (UVM_ID_IS_CPU(proc)) {
@@ -13196,7 +13198,7 @@ NV_STATUS uvm_va_block_read_to_cpu(uvm_va_block_t *va_block,
             return status;
 
         mapped_page = (char *)kmap(page);
-        memcpy(dst, mapped_page + page_offset, size);
+        nv_memcpy(dst, mapped_page + page_offset, size);
         kunmap(page);
 
         return NV_OK;
@@ -13372,8 +13374,8 @@ NV_STATUS uvm_va_block_evict_chunks(uvm_va_block_t *va_block,
     block_context = service_context->block_context;
 
     if (uvm_va_block_is_hmm(va_block)) {
-        memset(block_context->hmm.src_pfns, 0, sizeof(block_context->hmm.src_pfns));
-        memset(block_context->hmm.dst_pfns, 0, sizeof(block_context->hmm.dst_pfns));
+        nv_memset(block_context->hmm.src_pfns, 0, sizeof(block_context->hmm.src_pfns));
+        nv_memset(block_context->hmm.dst_pfns, 0, sizeof(block_context->hmm.dst_pfns));
     }
 
     pages_to_evict = &block_context->caller_page_mask;

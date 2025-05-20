@@ -409,7 +409,7 @@ static NV_STATUS test_push_interleaving_on_gpu(uvm_gpu_t* gpu)
     TEST_CHECK_GOTO(status == NV_OK, done);
     host_va = (NvU32*)uvm_rm_mem_get_cpu_va(mem);
     gpu_va = uvm_rm_mem_get_gpu_va(mem, gpu, uvm_channel_is_proxy(channel)).address;
-    memset(host_va, 0, size);
+    nv_memset(host_va, 0, size);
 
     // Begin a few pushes on the channel, but do not end them yet.
     // Each pushed method sets a magic number on an independent memory location.
@@ -921,7 +921,7 @@ static NV_STATUS test_push_gpu_to_gpu(uvm_va_space_t *va_space)
                                   mem[UVM_ID_CPU_VALUE]);
             TEST_CHECK_GOTO(status == NV_OK, done);
 
-            memset(host_ptr, 0, size / sizeof(NvU32));
+            nv_memset(host_ptr, 0, size / sizeof(NvU32));
 
             // Copy from the first GPU to the second GPU
             status = sync_memcopy(UVM_CHANNEL_TYPE_GPU_TO_GPU,

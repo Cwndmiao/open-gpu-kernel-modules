@@ -205,6 +205,8 @@ NV_STATUS uvm_rm_mem_alloc(uvm_gpu_t *gpu,
     UVM_ASSERT((type == UVM_RM_MEM_TYPE_SYS) || (type == UVM_RM_MEM_TYPE_GPU));
     UVM_ASSERT(size != 0);
 
+    UVM_ERR_PRINT("cwndmiao debug, uvm_rm_mem_alloc\n");
+
     rm_mem = uvm_kvmalloc_zero(sizeof(*rm_mem));
     if (rm_mem == NULL)
         return NV_ERR_NO_MEMORY;

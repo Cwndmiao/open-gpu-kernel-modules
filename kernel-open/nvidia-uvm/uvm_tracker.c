@@ -78,7 +78,7 @@ NV_STATUS uvm_tracker_init_from(uvm_tracker_t *dst, uvm_tracker_t *src)
 void uvm_tracker_deinit(uvm_tracker_t *tracker)
 {
     free_entries(tracker);
-    memset(tracker, 0, sizeof(*tracker));
+    nv_memset(tracker, 0, sizeof(*tracker));
 }
 
 NV_STATUS uvm_tracker_overwrite(uvm_tracker_t *dst, uvm_tracker_t *src)
@@ -92,7 +92,7 @@ NV_STATUS uvm_tracker_overwrite(uvm_tracker_t *dst, uvm_tracker_t *src)
         return status;
 
     dst->size = src->size;
-    memcpy(uvm_tracker_get_entries(dst),
+    nv_memcpy(uvm_tracker_get_entries(dst),
            uvm_tracker_get_entries(src),
            src->size * sizeof(*uvm_tracker_get_entries(dst)));
 
@@ -112,7 +112,7 @@ NV_STATUS uvm_tracker_reserve(uvm_tracker_t *tracker, NvU32 min_free_entries)
         if (tracker_is_using_static_entries(tracker)) {
             new_entries = uvm_kvmalloc(sizeof(*new_entries) * new_max_size);
             if (new_entries)
-                memcpy(new_entries, tracker->static_entries, sizeof(*new_entries) * tracker->size);
+                nv_memcpy(new_entries, tracker->static_entries, sizeof(*new_entries) * tracker->size);
         } else {
             new_entries = uvm_kvrealloc(tracker->dynamic_entries, sizeof(*new_entries) * new_max_size);
         }

@@ -121,12 +121,12 @@ const char *uvm_processor_get_name(uvm_processor_id_t id)
 void uvm_processor_get_uuid(uvm_processor_id_t id, NvProcessorUuid *out_uuid)
 {
     if (UVM_ID_IS_CPU(id)) {
-        memcpy(out_uuid, &NV_PROCESSOR_UUID_CPU_DEFAULT, sizeof(*out_uuid));
+        nv_memcpy(out_uuid, &NV_PROCESSOR_UUID_CPU_DEFAULT, sizeof(*out_uuid));
     }
     else {
         uvm_gpu_t *gpu = uvm_gpu_get(id);
         UVM_ASSERT(gpu);
-        memcpy(out_uuid, &gpu->uuid, sizeof(*out_uuid));
+        nv_memcpy(out_uuid, &gpu->uuid, sizeof(*out_uuid));
     }
 }
 
