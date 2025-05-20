@@ -516,7 +516,9 @@ put_kref:
 
 static void replayable_faults_isr_bottom_half_entry(void *args)
 {
+    UVM_ERR_PRINT("cwndmiao debug, GPU page_fault enter\n");
    UVM_ENTRY_VOID(replayable_faults_isr_bottom_half(args));
+    UVM_ERR_PRINT("cwndmiao debug, GPU page_fault leave\n");
 }
 
 static void non_replayable_faults_isr_bottom_half(void *args)

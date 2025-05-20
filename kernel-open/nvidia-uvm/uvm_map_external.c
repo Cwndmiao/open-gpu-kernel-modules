@@ -194,6 +194,31 @@ static NV_STATUS uvm_pte_buffer_get(uvm_pte_buffer_t *pte_buffer,
         return status;
     }
 
+    {
+        UVM_ERR_PRINT("cwndmiao debug, Get %s mappings for VA range [0x%llx, 0x%llx], offset 0x%llx, size 0x%llx: %s\n",
+                      va_range->type == UVM_VA_RANGE_TYPE_CHANNEL ? "channel" : "external",
+                      va_range->node.start,
+                      va_range->node.end,
+                      map_offset,
+                      map_size,
+                      nvstatusToString(status));
+        NvU64 ipte;
+        NvU64 *ppte = pte_buffer->mapping_info.pteBuffer;
+        NvU64 limit = 2;
+        for (ipte = 0; ipte < pte_buffer->num_ptes; ipte++) {
+            if (pte_buffer->pte_size == 16) {
+                if (ipte < limit || ipte >= pte_buffer->num_ptes - limit) {
+                    UVM_ERR_PRINT("cwndmiao debug, %04llx pte[low]= %016llx pte[high]= %016llx\n", ipte, ppte[0], ppte[1]);
+                }
+                ppte += 2;
+            } else if (pte_buffer->pte_size == 8) {
+                if (ipte < limit || ipte >= pte_buffer->num_ptes - limit) {
+                    UVM_ERR_PRINT("cwndmiao debug, %04llx pte= %016llx\n", ipte, ppte[0]);
+                }
+                ppte += 1;
+            }
+        }
+    }
     *ptes_out = pte_buffer->mapping_info.pteBuffer;
 
     return NV_OK;

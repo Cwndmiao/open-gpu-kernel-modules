@@ -2589,6 +2589,8 @@ static NV_STATUS block_copy_resident_pages_between(uvm_va_block_t *block,
 
 
                 copying_gpu->parent->ce_hal->memcopy(&push, dst_address, src_address, contig_region_size);
+                UVM_ERR_PRINT("cwndmiao debug, memcopy [%016llx] -> [%016llx] size= %lx\n",
+                    src_address.address, dst_address.address, contig_region_size);
             }
 
             uvm_perf_event_notify_migration(&va_space->perf_events,
@@ -2633,6 +2635,8 @@ static NV_STATUS block_copy_resident_pages_between(uvm_va_block_t *block,
 
             uvm_push_set_flag(&push, UVM_PUSH_FLAG_NEXT_MEMBAR_NONE);
             copying_gpu->parent->ce_hal->memcopy(&push, dst_address, src_address, PAGE_SIZE);
+            UVM_ERR_PRINT("cwndmiao debug, memcopy [%016llx] -> [%016llx] size= %llx\n",
+                src_address.address, dst_address.address, (NvU64)PAGE_SIZE);
         }
 
         last_index = page_index;
@@ -2653,6 +2657,8 @@ static NV_STATUS block_copy_resident_pages_between(uvm_va_block_t *block,
 
             uvm_push_set_flag(&push, UVM_PUSH_FLAG_NEXT_MEMBAR_NONE);
             copying_gpu->parent->ce_hal->memcopy(&push, dst_address, src_address, contig_region_size);
+            UVM_ERR_PRINT("cwndmiao debug, memcopy [%016llx] -> [%016llx] size= %lx\n",
+                src_address.address, dst_address.address, contig_region_size);
         }
 
         uvm_perf_event_notify_migration(&va_space->perf_events,
@@ -3923,6 +3929,8 @@ static void block_unmap_cpu(uvm_va_block_t *block, uvm_va_block_region_t region,
         if (!block_has_valid_mapping_cpu(block, subregion))
             continue;
 
+        UVM_ERR_PRINT("cwndmiao debug, unmap_mapping_range, start=0x%llx, size= 0x%llx\n",
+                      uvm_va_block_region_start(block, subregion), uvm_va_block_region_size(subregion));
         unmap_mapping_range(&va_space->mapping,
                             uvm_va_block_region_start(block, subregion),
                             uvm_va_block_region_size(subregion), 1);
@@ -4070,6 +4078,7 @@ static void block_gpu_pte_write_4k(uvm_va_block_t *block,
         for (i = 0; i < ptes_per_page; i++) {
             NvU64 pte_val = tree->hal->make_pte(page_addr.aperture, page_addr.address, new_prot, pte_flags);
             uvm_pte_batch_write_pte(pte_batch, pte_addr, pte_val, pte_size);
+            UVM_ERR_PRINT("cwndmiao debug, block_gpu_pte_write_4k, [%x]= %016llx\n", page_index, pte_val);
             page_addr.address += UVM_PAGE_SIZE_4K;
             pte_addr.address += pte_size;
         }
@@ -4213,6 +4222,8 @@ static void block_gpu_pte_clear_big(uvm_va_block_t *block,
                                      UVM_MEMBAR_NONE);
         }
     }
+    UVM_ERR_PRINT("cwndmiao debug, block_gpu_pte_clear_big clear %x big pages\n",
+        bitmap_weight(big_ptes_to_clear, MAX_BIG_PAGES_PER_UVM_VA_BLOCK));
 }
 
 // Writes the big PTEs in big_ptes_mask using memory from resident_id with
@@ -4277,6 +4288,7 @@ static void block_gpu_pte_write_big(uvm_va_block_t *block,
         pte_addr = uvm_page_table_range_entry_address(tree, &gpu_state->page_table_range_big, big_page_index);
         pte_val = tree->hal->make_pte(page_addr.aperture, page_addr.address, new_prot, pte_flags);
         uvm_pte_batch_write_pte(pte_batch, pte_addr, pte_val, pte_size);
+        UVM_ERR_PRINT("cwndmiao debug, block_gpu_pte_write_big, [%lx]= %016llx\n", big_page_index, pte_val);
 
         if (tlb_batch) {
             uvm_tlb_batch_invalidate(tlb_batch,
@@ -5993,7 +6005,7 @@ static NV_STATUS uvm_cpu_insert_page(struct vm_area_struct *vma,
     }
 
     ret = vm_insert_page(vma, addr, page);
-    UVM_ERR_PRINT("cwndmiao debug, uvm_cpu_insert_page, vma= %px, addr= %px, page= %px\n",
+    UVM_ERR_PRINT("cwndmiao debug, uvm_cpu_insert_page, vma= %px, addr= %llx, page= %px\n",
             vma, addr, page);
     uvm_up_read(&vma_wrapper->lock);
     if (ret) {

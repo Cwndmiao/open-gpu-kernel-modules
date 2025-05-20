@@ -1067,6 +1067,13 @@ static NV_STATUS try_get_ptes(uvm_page_tree_t *tree,
     }
 
     free_unused_directories(tree, used_count, dirs_used, dir_cache);
+    {
+        NvU32 i;
+        for (i = 0; i < used_count; i++) {
+            uvm_page_directory_t *dir = dirs_used[i];
+            UVM_ERR_PRINT("cwndmiao debug, page_dir [%llx, %llx] page_size %x, depth= %x, phys_alloc.addr= %llx\n", start, size, page_size, dir->depth, dir->phys_alloc.addr.address);
+        }
+    }
     return write_gpu_state(tree, page_size, invalidate_depth, used_count, dirs_used);
 }
 
