@@ -13,4 +13,4 @@ fi
 
 make -j
 sudo insmod ./kernel-open/nvidia.ko
-sudo insmod ./kernel-open/nvidia-uvm.ko
+sudo insmod ./kernel-open/nvidia-uvm.ko uvm_enable_builtin_tests=1
