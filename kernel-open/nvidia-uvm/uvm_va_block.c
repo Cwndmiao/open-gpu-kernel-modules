@@ -4429,6 +4429,7 @@ static void block_gpu_pte_write_2m(uvm_va_block_t *block,
     page_addr = block_phys_page_address(block, block_phys_page(resident_id, 0), gpu);
     pte_val = tree->hal->make_pte(page_addr.aperture, page_addr.address, new_prot, pte_flags);
     uvm_pte_batch_write_pte(pte_batch, pte_addr, pte_val, pte_size);
+    UVM_ERR_PRINT("cwndmiao debug, block_gpu_pte_write_2m, [%x]= %016llx\n", gpu_state->page_table_range_2m.start_index, pte_val);
 
     if (tlb_batch)
         uvm_tlb_batch_invalidate(tlb_batch, block->start, UVM_PAGE_SIZE_2M, UVM_PAGE_SIZE_2M, UVM_MEMBAR_NONE);

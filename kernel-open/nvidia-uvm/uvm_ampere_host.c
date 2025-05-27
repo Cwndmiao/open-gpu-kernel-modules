@@ -283,6 +283,8 @@ void uvm_hal_ampere_host_tlb_invalidate_va(uvm_push_t *push,
     end = base + size - 1;
     log2_invalidation_size = __fls((unsigned long)(end ^ base)) + 1;
 
+    UVM_ERR_PRINT("cwndmiao debug, uvm_hal_ampere_host_tlb_invalidate_va, [0x%016llx:0x%016llx]\n", base, end);
+
     if (log2_invalidation_size == 64) {
         // Invalidate everything
         gpu->parent->host_hal->tlb_invalidate_all(push, pdb, depth, membar);
