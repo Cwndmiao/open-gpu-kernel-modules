@@ -321,7 +321,7 @@ NV_STATUS kchannelAllocMem_GM107
         SLI_LOOP_BREAK;
     }
 
-    NV_PRINTF(LEVEL_INFO,
+    NV_PRINTF(LEVEL_WARNING,
               "hChannel 0x%x hClient 0x%x, Class ID 0x%x "
               "Instance Block @ 0x%llx (%s %x) "
               "USERD @ 0x%llx "
