@@ -428,55 +428,55 @@ static NV_STATUS _threadNodeCheckTimeout(OBJGPU *pGpu, THREAD_STATE_NODE *pThrea
         *pElapsedTimeUs = (timeInNs - pThreadNode->timeout.enterTime) / 1000;
     }
 
-    if (threadStateDatabase.timeout.flags & GPU_TIMEOUT_FLAGS_OSTIMER)
-    {
-        if (timeInNs >= *pThreadNodeTime)
-        {
-            NV_PRINTF(LEVEL_ERROR,
-                      "_threadNodeCheckTimeout: currentTime: %llx >= %llx\n",
-                      timeInNs, *pThreadNodeTime);
+    //if (threadStateDatabase.timeout.flags & GPU_TIMEOUT_FLAGS_OSTIMER)
+    //{
+    //    if (timeInNs >= *pThreadNodeTime)
+    //    {
+    //        NV_PRINTF(LEVEL_ERROR,
+    //                  "_threadNodeCheckTimeout: currentTime: %llx >= %llx\n",
+    //                  timeInNs, *pThreadNodeTime);
 
-            rmStatus = NV_ERR_TIMEOUT;
-        }
-    }
-    else if (threadStateDatabase.timeout.flags & GPU_TIMEOUT_FLAGS_OSDELAY)
-    {
-        osDelayUs(100);
-        *pThreadNodeTime -= NV_MIN(100, *pThreadNodeTime);
-        if (*pThreadNodeTime == 0)
-        {
-            rmStatus = NV_ERR_TIMEOUT;
-        }
-    }
-    else
-    {
-        NV_PRINTF(LEVEL_INFO,
-                  "_threadNodeCheckTimeout: Unsupported timeout.flags: 0x%x!\n",
-                  threadStateDatabase.timeout.flags);
+    //        rmStatus = NV_ERR_TIMEOUT;
+    //    }
+    //}
+    //else if (threadStateDatabase.timeout.flags & GPU_TIMEOUT_FLAGS_OSDELAY)
+    //{
+    //    osDelayUs(100);
+    //    *pThreadNodeTime -= NV_MIN(100, *pThreadNodeTime);
+    //    if (*pThreadNodeTime == 0)
+    //    {
+    //        rmStatus = NV_ERR_TIMEOUT;
+    //    }
+    //}
+    //else
+    //{
+    //    NV_PRINTF(LEVEL_INFO,
+    //              "_threadNodeCheckTimeout: Unsupported timeout.flags: 0x%x!\n",
+    //              threadStateDatabase.timeout.flags);
 
-        rmStatus = NV_ERR_INVALID_STATE;
-    }
+    //    rmStatus = NV_ERR_INVALID_STATE;
+    //}
 
-    if (rmStatus == NV_ERR_TIMEOUT)
-    {
-        // Report the time this Thread entered the RM
-        _threadStatePrintInfo(pThreadNode);
+    //if (rmStatus == NV_ERR_TIMEOUT)
+    //{
+    //    // Report the time this Thread entered the RM
+    //    _threadStatePrintInfo(pThreadNode);
 
-        // This is set via osGetTimeoutParams per platform
-        NV_PRINTF(LEVEL_ERROR,
-                  "_threadNodeCheckTimeout: Timeout was set to: %lld msecs!\n",
-                  threadStateDatabaseTimeoutMsecs);
+    //    // This is set via osGetTimeoutParams per platform
+    //    NV_PRINTF(LEVEL_ERROR,
+    //              "_threadNodeCheckTimeout: Timeout was set to: %lld msecs!\n",
+    //              threadStateDatabaseTimeoutMsecs);
 
-        if (threadStateDatabase.setupFlags & THREAD_STATE_SETUP_FLAGS_ASSERT_ON_TIMEOUT_ENABLED)
-        {
-            NV_ASSERT(0);
-        }
+    //    if (threadStateDatabase.setupFlags & THREAD_STATE_SETUP_FLAGS_ASSERT_ON_TIMEOUT_ENABLED)
+    //    {
+    //        NV_ASSERT(0);
+    //    }
 
-        if (threadStateDatabase.setupFlags & THREAD_STATE_SETUP_FLAGS_RESET_ON_TIMEOUT_ENABLED)
-        {
-            threadStateResetTimeout(pGpu);
-        }
-    }
+    //    if (threadStateDatabase.setupFlags & THREAD_STATE_SETUP_FLAGS_RESET_ON_TIMEOUT_ENABLED)
+    //    {
+    //        threadStateResetTimeout(pGpu);
+    //    }
+    //}
 
     return rmStatus;
 }

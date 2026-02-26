@@ -2686,11 +2686,11 @@ NV_STATUS nvGpuOpsDupAddressSpace(struct gpuDevice *device,
             goto cleanup_dup_vaspace;
     }
 
-    if (!vaspaceIsExternallyOwned(pVAS))
-    {
-        status = NV_ERR_INVALID_FLAGS;
-        goto cleanup_dup_vaspace;
-    }
+    //if (!vaspaceIsExternallyOwned(pVAS))
+    //{
+    //    status = NV_ERR_INVALID_FLAGS;
+    //    goto cleanup_dup_vaspace;
+    //}
 
     status = getAddressSpaceInfo(gpuVaSpace, pGpu, vaSpaceInfo);
     if (status != NV_OK)

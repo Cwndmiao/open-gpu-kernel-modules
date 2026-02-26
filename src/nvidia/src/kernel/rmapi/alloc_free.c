@@ -857,6 +857,8 @@ serverAllocResourceUnderLock
         pRmAllocParams->pRightsRequired = &rightsRequired;
     }
 
+    NV_PRINTF(LEVEL_WARNING, "cwndmiao debug, alloc res hClient= %08x, hParent= %08x, hObject= %08x, name= %s\n",
+            hClient, hParent, pRmAllocParams->hResource, pResDesc->pClassInfo->name);
     status = clientAllocResource(pClient, &g_resServ, pRmAllocParams);
     if (status != NV_OK)
         goto done;
