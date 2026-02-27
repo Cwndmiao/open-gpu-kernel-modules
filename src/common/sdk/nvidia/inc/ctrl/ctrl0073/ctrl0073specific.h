@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1993-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -27,8 +27,11 @@
 
 //
 // This file was generated with FINN, an NVIDIA coding tool.
-// Source file:      ctrl/ctrl0073/ctrl0073specific.finn
+// Source file: ctrl/ctrl0073/ctrl0073specific.finn
 //
+
+
+
 
 #include "ctrl/ctrl0073/ctrl0073base.h"
 
@@ -126,8 +129,8 @@ typedef struct NV0073_CTRL_SPECIFIC_GET_TYPE_PARAMS {
  *             Perform the read and return an unadulterated EDID.
  *       NV0073_CTRL_SPECIFIC_GET_EDID_FLAGS_DISPMUX_READ_MODE
  *         A client uses this field to indicate whether to read EDID
- *         from SBIOS using ACPI sub function for display dynamic switching
- *         feature. This flag should only be set on internal display with
+ *         from SBIOS using ACPI sub function for display dynamic switching 
+ *         feature. This flag should only be set on internal display with 
  *         dynamic switching feature enabled.
  *         Possible values are:
  *           NV0073_CTRL_SPECIFIC_GET_EDID_FLAGS_DISPMUX_READ_MODE_ACPI
@@ -281,10 +284,12 @@ typedef struct NV0073_CTRL_CMD_SPECIFIC_FAKE_DEVICE_PARAMS {
 
 /* Faking Support commands */
 /* some random value to enable/disable test code */
-#define NV0073_FAKE_DEVICE_SUPPORT_ENABLE         0x11faU
-#define NV0073_FAKE_DEVICE_SUPPORT_DISABLE        0x99ceU
-#define NV0073_FAKE_DEVICE_SUPPORT_ATTACH_DEVICES 0x100U
-#define NV0073_FAKE_DEVICE_SUPPORT_REMOVE_DEVICES 0x101U
+#define NV0073_FAKE_DEVICE_SUPPORT_ENABLE                       0x11faU
+#define NV0073_FAKE_DEVICE_SUPPORT_DISABLE                      0x99ceU
+#define NV0073_FAKE_DEVICE_SUPPORT_ATTACH_DEVICES               0x100U
+#define NV0073_FAKE_DEVICE_SUPPORT_REMOVE_DEVICES               0x101U
+
+
 
 /*
  * NV0073_CTRL_CMD_SPECIFIC_GET_I2C_PORTID
@@ -315,7 +320,7 @@ typedef struct NV0073_CTRL_CMD_SPECIFIC_FAKE_DEVICE_PARAMS {
  *   NV_ERR_INVALID_ARGUMENT
  */
 
-#define NV0073_CTRL_CMD_SPECIFIC_GET_I2C_PORTID   (0x730211U) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_SPECIFIC_GET_I2C_PORTID_PARAMS_MESSAGE_ID" */
+#define NV0073_CTRL_CMD_SPECIFIC_GET_I2C_PORTID                        (0x730211U) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_SPECIFIC_GET_I2C_PORTID_PARAMS_MESSAGE_ID" */
 
 #define NV0073_CTRL_SPECIFIC_GET_I2C_PORTID_PARAMS_MESSAGE_ID (0x11U)
 
@@ -326,7 +331,10 @@ typedef struct NV0073_CTRL_SPECIFIC_GET_I2C_PORTID_PARAMS {
     NvU32 ddcPortId;
 } NV0073_CTRL_SPECIFIC_GET_I2C_PORTID_PARAMS;
 
-#define NV0073_CTRL_SPECIFIC_I2C_PORT_NONE          (0x0U)
+#define NV0073_CTRL_SPECIFIC_I2C_PORT_NONE            (0x0U)
+
+
+
 
 /*
  * NV0073_CTRL_CMD_SPECIFIC_GET_CONNECTOR_DATA
@@ -389,10 +397,10 @@ typedef struct NV0073_CTRL_SPECIFIC_GET_I2C_PORTID_PARAMS {
  *
  */
 
-#define NV0073_CTRL_CMD_SPECIFIC_GET_CONNECTOR_DATA (0x730250U) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_SPECIFIC_GET_CONNECTOR_DATA_PARAMS_MESSAGE_ID" */
+#define NV0073_CTRL_CMD_SPECIFIC_GET_CONNECTOR_DATA   (0x730250U) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_SPECIFIC_GET_CONNECTOR_DATA_PARAMS_MESSAGE_ID" */
 
 /* maximum number of connectors */
-#define NV0073_CTRL_MAX_CONNECTORS                  4U
+#define NV0073_CTRL_MAX_CONNECTORS                    4U
 
 #define NV0073_CTRL_SPECIFIC_GET_CONNECTOR_DATA_PARAMS_MESSAGE_ID (0x50U)
 
@@ -447,7 +455,6 @@ typedef struct NV0073_CTRL_SPECIFIC_GET_CONNECTOR_DATA_PARAMS {
 #define NV0073_CTRL_SPECIFIC_CONNECTOR_DATA_TYPE_USB_C                                 0x00000071U
 #define NV0073_CTRL_SPECIFIC_CONNECTOR_DATA_TYPE_DSI                                   0x00000072U
 #define NV0073_CTRL_SPECIFIC_CONNECTOR_DATA_TYPE_STEREO_3PIN_DIN                       0x00000073U
-#define NV0073_CTRL_SPECIFIC_CONNECTOR_DATA_TYPE_USB_C_UHBR                            0x00000074U
 #define NV0073_CTRL_SPECIFIC_CONNECTOR_DATA_TYPE_UNKNOWN                               0xFFFFFFFFU
 
 /* defines for the platform field */
@@ -542,44 +549,6 @@ typedef struct NV0073_CTRL_SPECIFIC_CTRL_HDMI_PARAMS {
 #define NV0073_CTRL_SPECIFIC_CTRL_HDMI_DISABLE             (0x00000000U)
 #define NV0073_CTRL_SPECIFIC_CTRL_HDMI_ENABLE              (0x00000001U)
 
-/*
- * NV0073_CTRL_CMD_SPECIFIC_SET_HDMI_AUDIO_MUTESTREAM
- *
- * This command is used to signal the resource manager that the audio stream
- * is to be mute off or on.
- *   subDeviceInstance
- *     This parameter specifies the subdevice instance within the
- *     NV04_DISPLAY_COMMON parent device to which operation should be directed.
- *     This parameter must specify a value between zero and the total number
- *     of subdevices within the parent device.  This parameter should be set
- *     to zero for default behavior.
- *   displayId
- *     This parameter specifies the displayId of HDMI resource to configure.
- *     This comes as input to this command.
- *   mute
- *     This field specifies the legal values:
- *       NV0073_CTRL_SPECIFIC_SET_HDMI_AUDIO_MUTESTREAM_TRUE
- *       NV0073_CTRL_SPECIFIC_SET_HDMI_AUDIO_MUTESTREAM_FALSE
- *
- *  Possible status values returned are:
- *    NV_OK
- *    NV_ERR_INVALID_PARAM_STRUCT
- *    NV_ERR_INVALID_ARGUMENT
- *    NV_ERR_NOT_SUPPORTED
- */
-#define NV0073_CTRL_CMD_SPECIFIC_SET_HDMI_AUDIO_MUTESTREAM (0x730275U) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_CMD_SPECIFIC_SET_HDMI_AUDIO_MUTESTREAM_PARAMS_MESSAGE_ID" */
-
-#define NV0073_CTRL_CMD_SPECIFIC_SET_HDMI_AUDIO_MUTESTREAM_PARAMS_MESSAGE_ID (0x75U)
-
-typedef struct NV0073_CTRL_CMD_SPECIFIC_SET_HDMI_AUDIO_MUTESTREAM_PARAMS {
-    NvU8  subDeviceInstance;
-    NvU32 displayId;
-    NvU8  mute;
-} NV0073_CTRL_CMD_SPECIFIC_SET_HDMI_AUDIO_MUTESTREAM_PARAMS;
-
-#define NV0073_CTRL_SPECIFIC_SET_HDMI_AUDIO_MUTESTREAM_FALSE (0x00000000U)
-#define NV0073_CTRL_SPECIFIC_SET_HDMI_AUDIO_MUTESTREAM_TRUE  (0x00000001U)
-
 
 
 /*
@@ -608,48 +577,7 @@ typedef struct NV0073_CTRL_SPECIFIC_ACPI_ID_MAPPING {
     NvU32 dodIndex;
 } NV0073_CTRL_SPECIFIC_ACPI_ID_MAPPING;
 
-/*
- * NV0073_CTRL_CMD_GET_ACPI_DOD_DISPLAY_PORT_ATTACHMENT
- *
- * This call will return the Display Port Attachment value
- * per displayID as defined by Nvidia that is directly
- * associated with the ACPI 3.0 _DOD entry's Display Port
- * Attachment field.  This should help clients map the
- * _DOD ACPI ID to each displayID. Note, that some systems
- * do not have a standard in place for this field.  On those
- * systems, the RM will return NV_ERR_NOT_SUPPORTED.
- *
- * Note that this "Display Port" attachment field has nothing
- * to do with DisplayPort/DP.  It's an unfortunate name inside
- * the ACPI 3.0 spec that coincides with the name of DisplayPort.
- *
- *
- * Possible status values returned are:
- * NV_OK
- * NV_ERR_INVALID_PARAM_STRUCT
- * NV_ERR_NOT_SUPPORTED
- *
-*/
 
-#define NV0073_CTRL_GET_ACPI_DOD_DISPLAY_PORT_ATTACHMENT_PARAMS_MESSAGE_ID (0x85U)
-
-typedef struct NV0073_CTRL_GET_ACPI_DOD_DISPLAY_PORT_ATTACHMENT_PARAMS {
-    NvU32 subDeviceInstance;
-    NvU32 displayId;
-    NvU32 dispPortAttachment;
-} NV0073_CTRL_GET_ACPI_DOD_DISPLAY_PORT_ATTACHMENT_PARAMS;
-
-
-#define NV0073_CTRL_CMD_SPECIFIC_GET_ACPI_DOD_DISPLAY_PORT_ATTACHMENT (0x730285U) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_GET_ACPI_DOD_DISPLAY_PORT_ATTACHMENT_PARAMS_MESSAGE_ID" */
-
-// defines for dispPortAttachment
-#define NV0073_DISPLAY_PORT_ATTACHMENT_ANALOG                         (0x00000000U)
-#define NV0073_DISPLAY_PORT_ATTACHMENT_LVDS                           (0x00000001U)
-#define NV0073_DISPLAY_PORT_ATTACHMENT_DP_A                           (0x00000002U)
-#define NV0073_DISPLAY_PORT_ATTACHMENT_DP_B                           (0x00000003U)
-#define NV0073_DISPLAY_PORT_ATTACHMENT_DP_C                           (0x00000004U)
-#define NV0073_DISPLAY_PORT_ATTACHMENT_DP_D                           (0x00000005U)
-#define NV0073_DISPLAY_PORT_ATTACHMENT_UNKNOWN                        (0xFFFFFFFFU)
 
 /*
  * NV0073_CTRL_CMD_SPECIFIC_SET_ACPI_ID_MAPPING
@@ -785,10 +713,10 @@ typedef struct NV0073_CTRL_SPECIFIC_GET_ALL_HEAD_MASK_PARAMS {
  *         It is temporal and will be deprecated soon.
  *   packetSize
  *     packet size of packets in pPacket to send, including header and payload.
- *   targetHead
- *     Specifies the target head number for which SDP needs to be updated.
+ *   targetHead 
+ *     Specifies the target head number for which SDP needs to be updated. 
  *   bUsePsrHeadforSdp
- *     Indicates use targetHead field for setting SDP or infoframe packet instead
+ *     Indicates use targetHead field for setting SDP or infoframe packet instead 
  *     of deriving the active head from displayID.
  *   pPacket
  *     pPacket points to the packets to send.
@@ -1160,42 +1088,24 @@ typedef struct NV0073_CTRL_SPECIFIC_OR_GET_INFO_PARAMS {
  *     The backlight brightness in the range [0,100], inclusive.  This
  *     is an input for SET_BACKLIGHT_BRIGHTNESS, and an output for
  *     GET_BACKLIGHT_BRIGHTNESS.
- *   brightnessType
- *     This can take in one of the three parameters:
- *     NV0073_CTRL_SPECIFIC_BACKLIGHT_BRIGHTNESS_TYPE_PERCENT100(for percentage brightness with value calibrated to 100 scale),
- *     NV0073_CTRL_SPECIFIC_BACKLIGHT_BRIGHTNESS_TYPE_PERCENT1000(for percentage brightness with uncalibrated values),
- *     NV0073_CTRL_SPECIFIC_BACKLIGHT_BRIGHTNESS_TYPE_NITS(used when panel supports Nits based)
- *     based on the brightness control method to be used.
+ *
  *
  * Possible status values returned include:
  *   NV_OK
  *   NV_ERR_NOT_SUPPORTED
  */
-#define NV0073_CTRL_CMD_SPECIFIC_GET_BACKLIGHT_BRIGHTNESS (0x730291U) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_SPECIFIC_GET_BACKLIGHT_BRIGHTNESS_PARAMS_MESSAGE_ID" */
+#define NV0073_CTRL_CMD_SPECIFIC_GET_BACKLIGHT_BRIGHTNESS (0x730291U) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | 0x91" */
+
+#define NV0073_CTRL_CMD_SPECIFIC_SET_BACKLIGHT_BRIGHTNESS (0x730292U) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | 0x92" */
 
 #define NV0073_CTRL_BACKLIGHT_BRIGHTNESS_MIN_VALUE        0U
 #define NV0073_CTRL_BACKLIGHT_BRIGHTNESS_MAX_VALUE        100U
 
 typedef struct NV0073_CTRL_SPECIFIC_BACKLIGHT_BRIGHTNESS_PARAMS {
-    NvU32  subDeviceInstance;
-    NvU32  displayId;
-    NvU32  brightness;
-    NvBool bUncalibrated;
-    NvU8   brightnessType;
+    NvU32 subDeviceInstance;
+    NvU32 displayId;
+    NvU32 brightness;
 } NV0073_CTRL_SPECIFIC_BACKLIGHT_BRIGHTNESS_PARAMS;
-#define NV0073_CTRL_SPECIFIC_BACKLIGHT_BRIGHTNESS_TYPE_PERCENT100        1
-#define NV0073_CTRL_SPECIFIC_BACKLIGHT_BRIGHTNESS_TYPE_PERCENT1000       2
-#define NV0073_CTRL_SPECIFIC_BACKLIGHT_BRIGHTNESS_TYPE_NITS              3
-
-#define NV0073_CTRL_SPECIFIC_GET_BACKLIGHT_BRIGHTNESS_PARAMS_MESSAGE_ID (0x91U)
-
-typedef NV0073_CTRL_SPECIFIC_BACKLIGHT_BRIGHTNESS_PARAMS NV0073_CTRL_SPECIFIC_GET_BACKLIGHT_BRIGHTNESS_PARAMS;
-
-#define NV0073_CTRL_CMD_SPECIFIC_SET_BACKLIGHT_BRIGHTNESS (0x730292U) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_SPECIFIC_SET_BACKLIGHT_BRIGHTNESS_PARAMS_MESSAGE_ID" */
-
-#define NV0073_CTRL_SPECIFIC_SET_BACKLIGHT_BRIGHTNESS_PARAMS_MESSAGE_ID (0x92U)
-
-typedef NV0073_CTRL_SPECIFIC_BACKLIGHT_BRIGHTNESS_PARAMS NV0073_CTRL_SPECIFIC_SET_BACKLIGHT_BRIGHTNESS_PARAMS;
 
 /*
  * NV0073_CTRL_CMD_SPECIFIC_SET_HDMI_SINK_CAPS
@@ -1279,10 +1189,6 @@ typedef struct NV0073_CTRL_SPECIFIC_SET_HDMI_SINK_CAPS_PARAMS {
  *   powerState
  *     This parameter should be one of the valid
  *     NV0073_CTRL_SPECIFIC_SET_MONITOR_POWER_* values.
- *   headIdx
- *     The head id on which power operation needs to be done.
- *   bForceMonitorState
- *     Monitor power state that client wants to force in RM.
  *
  * Possible status values returned are:
  *   NV_OK
@@ -1294,11 +1200,9 @@ typedef struct NV0073_CTRL_SPECIFIC_SET_HDMI_SINK_CAPS_PARAMS {
 #define NV0073_CTRL_SPECIFIC_SET_MONITOR_POWER_PARAMS_MESSAGE_ID (0x95U)
 
 typedef struct NV0073_CTRL_SPECIFIC_SET_MONITOR_POWER_PARAMS {
-    NvU32  subDeviceInstance;
-    NvU32  displayId;
-    NvU32  powerState;
-    NvU32  headIdx;
-    NvBool bForceMonitorState;
+    NvU32 subDeviceInstance;
+    NvU32 displayId;
+    NvU32 powerState;
 } NV0073_CTRL_SPECIFIC_SET_MONITOR_POWER_PARAMS;
 
 #define NV0073_CTRL_SPECIFIC_SET_MONITOR_POWER_OFF     (0x00000000U)
@@ -1342,7 +1246,7 @@ typedef struct NV0073_CTRL_SPECIFIC_SET_MONITOR_POWER_PARAMS {
 *             For FRL 4-lane configuration and 10 Gbps bandwidth per lane.
 *           NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_4LANES_12G
 *             For FRL 4-lane configuration and 12 Gbps bandwidth per lane.
-*         On return, the link bandwidth setting is returned which may be
+*         On return, the link bandwidth setting is returned which may be 
 *         different from the requested input setting.
 *   bFakeLt
 *     This flag as input to this command.
@@ -1351,10 +1255,6 @@ typedef struct NV0073_CTRL_SPECIFIC_SET_MONITOR_POWER_PARAMS {
 *   bLtSkipped
 *     The flag returned indicating whether link training is skipped or not.
 *     TRUE if link training is skipped due to the link config is not changed.
-*   bLinkAssessmentOnly
-*     The flag as input to this command. It indicates that the client is doing
-*     link training only for the link assessment, no FRL video transmission is
-*     intended.
 *
 * Possible status values returned include:
 * NV_OK -
@@ -1377,57 +1277,21 @@ typedef struct NV0073_CTRL_SPECIFIC_SET_HDMI_FRL_LINK_CONFIG_PARAMS {
     NvU32  displayId;
     NvU32  data;
     NvBool bFakeLt;
-    NvBool bDoNotSkipLt;
     NvBool bLtSkipped;
-    NvBool bLinkAssessmentOnly;
 } NV0073_CTRL_SPECIFIC_SET_HDMI_FRL_LINK_CONFIG_PARAMS;
 
 #define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE                                           2:0
-#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_NONE       (0x00000000U)
-#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_3LANES_3G  (0x00000001U)
-#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_3LANES_6G  (0x00000002U)
-#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_4LANES_6G  (0x00000003U)
-#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_4LANES_8G  (0x00000004U)
-#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_4LANES_10G (0x00000005U)
-#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_4LANES_12G (0x00000006U)
-
-/*
-* NV0073_CTRL_CMD_SPECIFIC_SET_HDMI_FRL_FLUSH_MODE
-*
-* This command is used to enable flush mode on given HDMI displayId in
-* preparation for FRL link training. The flush mode can be enabled only if HDMI
-* display is active and driven by FRL protocol. If display is not active then
-* this control command does nothing.
-*
-*   subDeviceInstance
-*     This parameter specifies the subdevice instance within the
-*     NV04_DISPLAY_COMMON parent device to which the operation should be
-*     directed.
-*   displayID
-*     This parameter specifies the displayID for the display output resource to
-*     configure.
-*   bEnable
-*     This parameter is an inputto this command.
-*
-* Possible status values returned include:
-* NV_OK
-* NV_ERR_INVALID_ARGUMENT
-*   If any argument is invalid for this control call, NV_ERR_INVALID_ARGUMENT
-*   status will be returned.
-*/
-#define NV0073_CTRL_CMD_SPECIFIC_SET_HDMI_FRL_FLUSH_MODE  (0x73029bU) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_SPECIFIC_SET_HDMI_FRL_FLUSH_MODE_PARAMS_MESSAGE_ID" */
-
-#define NV0073_CTRL_SPECIFIC_SET_HDMI_FRL_FLUSH_MODE_PARAMS_MESSAGE_ID (0x9BU)
-
-typedef struct NV0073_CTRL_SPECIFIC_SET_HDMI_FRL_FLUSH_MODE_PARAMS {
-    NvU32  subDeviceInstance;
-    NvU32  displayId;
-    NvBool bEnable;
-} NV0073_CTRL_SPECIFIC_SET_HDMI_FRL_FLUSH_MODE_PARAMS;
+#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_NONE                (0x00000000U)
+#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_3LANES_3G           (0x00000001U)
+#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_3LANES_6G           (0x00000002U)
+#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_4LANES_6G           (0x00000003U)
+#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_4LANES_8G           (0x00000004U)
+#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_4LANES_10G          (0x00000005U)
+#define NV0073_CTRL_HDMI_FRL_DATA_SET_FRL_RATE_4LANES_12G          (0x00000006U)
 
 
 
-#define NV0073_CTRL_SPECIFIC_MAX_CRC_REGIONS 9U
+#define NV0073_CTRL_SPECIFIC_MAX_CRC_REGIONS                                  9U
 
 #define NV0073_CTRL_CMD_SPECIFIC_GET_REGIONAL_CRCS_PARAMS_MESSAGE_ID (0xA0U)
 
@@ -1442,7 +1306,7 @@ typedef struct NV0073_CTRL_CMD_SPECIFIC_GET_REGIONAL_CRCS_PARAMS {
  * NV0073_CTRL_CMD_SPECIFIC_GET_REGIONAL_CRCS
  *
  * This command is used to capture the active viewport region CRCs
- *
+ * 
  *  [in]subDeviceInstance
  *     This parameter specifies the subdevice instance within the
  *     NV04_DISPLAY_COMMON parent device to which the operation should be
@@ -1538,13 +1402,13 @@ typedef struct NV0073_CTRL_SPECIFIC_GET_HDMI_GPU_CAPS_PARAMS {
 
 /*
  * NV0073_CTRL_CMD_SPECIFIC_DISPLAY_CHANGE
- *
+ * 
  * Notifies the system that a display change is about to begin/end.
  * Also performs the necessary synchronizations for the same.
- *
+ * 
  * The command takes a NV0073_CTRL_SPECIFIC_DISPLAY_CHANGE_PARAMS structure as an
  * argument with appropriate subDeviceInstance.
- *
+ * 
  *  [in]subDeviceInstance
  *   The sub-device instance
  *  [in]newDevices
@@ -1591,7 +1455,7 @@ typedef struct NV0073_CTRL_SPECIFIC_DISPLAY_CHANGE_PARAMS {
  *     NV04_DISPLAY_COMMON parent device to which the operation should be
  *     directed.
  *   displayId
- *     This parameter specifies the displayId of HDMI sink.
+ *     This parameter specifies the displayId of HDMI sink. 
  *   offset
  *     This parameter specifies the SCDC offset which the read operation
  *     should be used.
@@ -1675,7 +1539,7 @@ typedef struct NV0073_CTRL_SPECIFIC_IS_DIRECTMODE_DISPLAY_PARAMS {
  *     This parameter specifies the command for the HDMI FRL capacity computation.
  *   [in] input
  *     This parameter specifies the input data for the HDMI FRL capacity
- *     computation.
+ *     computation.   
  *   [out] result
  *     This indicates the computation result of HDMI FRL capacity computation.
  *   [in/out] preCalc
@@ -1763,7 +1627,7 @@ typedef struct NV0073_CTRL_SPECIFIC_GET_HDMI_FRL_CAPACITY_COMPUTATION_PARAMS {
  * This generic packets can be used for both HDMI and DP.
  * HW has added 6 new generic packets for each head because some usecases have
  * requirement to send infoframe in particular location (vsync, vblank, loadV).
- *
+ * 
  * Note: 1. Client first needs to reserve or acquire a free infoframe index
  *          using NV0073_CTRL_CMD_SPECIFIC_ACQUIRE_SHARED_GENERIC_PACKET.
  *       2. Client needs to update the SDP index for head through control call
@@ -1789,7 +1653,7 @@ typedef struct NV0073_CTRL_SPECIFIC_GET_HDMI_FRL_CAPACITY_COMPUTATION_PARAMS {
  *        Set to _YES will cause new infoframe to be transmitted exactly once.
  *        Set to _NO will cause new infoframe to be transmitted every frame.
  *       NV0073_CTRL_SPECIFIC_SHARED_GENERIC_CTRL_LOC
- *         SDP can be sent in 3 different locations:
+ *         SDP can be sent in 3 different locations: 
  *           VBLANK - new infoframe will be sent at Vblank.
  *           VSYNC - new infoframe will be sent at Vsync.
  *           LOADV - new infoframe will be triggered by LOADV, and sent at Vsync
@@ -1801,9 +1665,9 @@ typedef struct NV0073_CTRL_SPECIFIC_GET_HDMI_FRL_CAPACITY_COMPUTATION_PARAMS {
  *        _DISABLE: do not override shared generic infoframe subpacker DB1 bit3.
  *   [in]packetSize
  *     size of packets in Packet array to send, including header and payload.
- *   [in]infoframeIndex
+ *   [in]infoframeIndex 
  *     Specifies the target head number for which SDP needs to be updated.
- *   [in]infoframeIndex
+ *   [in]infoframeIndex 
  *     Specifies the index of infoframe.
  *   [in]packet
  *     pPacket points to the packets to send.
@@ -1859,9 +1723,9 @@ typedef struct NV0073_CTRL_SPECIFIC_SET_SHARED_GENERIC_PACKET_PARAMS {
 /*
  * NV0073_CTRL_CMD_SPECIFIC_ACQUIRE_SHARED_GENERIC_PACKET
  *
- * This command is used to reserve the infoframe for head and RM would assign
+ * This command is used to reserve the infoframe for head and RM would assign 
  * free infoframe index and return the index of infoframe. Later client needs
- * to call control call NV0073_CTRL_CMD_SPECIFIC_RELEASE_SHARED_GENERIC_PACKET
+ * to call control call NV0073_CTRL_CMD_SPECIFIC_RELEASE_SHARED_GENERIC_PACKET 
  * to release the index.
  *
  *   [in]subDeviceInstance
@@ -1907,7 +1771,7 @@ typedef struct NV0073_CTRL_SPECIFIC_ACQUIRE_SHARED_GENERIC_PACKET_PARAMS {
  *     of subdevices within the parent device.  This parameter should be set
  *     to zero for default behavior.
  *   [in]targetHeadIndex
- *     Specifies the target head number for which SDP needs to be updated.
+ *     Specifies the target head number for which SDP needs to be updated. 
  *   [in]infoframeIndex
  *     Infoframe index for the target head
  * Possible status values returned are:
@@ -1926,228 +1790,4 @@ typedef struct NV0073_CTRL_SPECIFIC_RELEASE_SHARED_GENERIC_PACKET_PARAMS {
     NvU32 infoframeIndex;
 } NV0073_CTRL_SPECIFIC_RELEASE_SHARED_GENERIC_PACKET_PARAMS;
 
-/*
- * NV0073_CTRL_CMD_SPECIFIC_DISP_I2C_READ_WRITE
- *
- * This command is used to do I2C R/W to slave on display i2c instance.
- *
- *   subDeviceInstance
- *     This parameter specifies the subdevice instance within the
- *     NV04_DISPLAY_COMMON parent device to which the operation should be
- *     directed. This parameter must specify a value between zero and the
- *     total number of subdevices within the parent device.  This parameter
- *     should be set to zero for default behavior.
- *   i2cPort
- *      This parameter specifies the I2C CCB port ID.
- *   i2cSlaveAddress
- *      This parameter specifies the I2C slave address.
- *   readWriteFlag
- *      This parameter specifies whether its read/write operation.
- *   readWriteLen
- *      This parameter specifies the length of the read/write buffer
- *   readBuffer
- *      This parameter reads the data from slave address and copies to this
- *      buffer
- *   writeBuffer
- *      This parameter specifies this buffer data that would be written to
- *      slave address
- *
- * Possible status values returned are:
- *   NV_OK
- *   NV_ERR_INVALID_PARAM_STRUCT
- *   NV_ERR_INVALID_ARGUMENT
- */
-
-#define NV0073_CTRL_CMD_SPECIFIC_DISP_I2C_READ_WRITE     (0x7302acU) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_SPECIFIC_DISP_I2C_READ_WRITE_PARAMS_MESSAGE_ID" */
-
-#define NV0073_CTRL_SPECIFIC_DISP_I2C_READ_WRITE_BUF_LEN 128U
-
-#define NV0073_CTRL_SPECIFIC_DISP_I2C_READ_WRITE_PARAMS_MESSAGE_ID (0xACU)
-
-typedef struct NV0073_CTRL_SPECIFIC_DISP_I2C_READ_WRITE_PARAMS {
-    NvU32 subDeviceInstance;
-    NvU32 i2cPort;
-    NvU32 i2cSlaveAddress;
-    NvU32 readWriteFlag;
-    NvU32 readWriteLen;
-    NvU8  readBuffer[NV0073_CTRL_SPECIFIC_DISP_I2C_READ_WRITE_BUF_LEN];
-    NvU8  writeBuffer[NV0073_CTRL_SPECIFIC_DISP_I2C_READ_WRITE_BUF_LEN];
-} NV0073_CTRL_SPECIFIC_DISP_I2C_READ_WRITE_PARAMS;
-
-#define NV0073_CTRL_SPECIFIC_DISP_I2C_READ_MODE                   (0x00000001)
-#define NV0073_CTRL_SPECIFIC_DISP_I2C_WRITE_MODE                  (0x00000000)
-
-/*
- * NV0073_CTRL_CMD_GET_VALID_HEAD_WINDOW_ASSIGNMENT
- *
- * This command returns the valid window head assignment mask
- *
- * windowHeadMask [out]
- *   This out parameter is an array which holds the head mask for
- *   each window. The Nth element in the array would be a bitmask
- *   of which heads can possibly drive window N.
- *
- * Possible status values returned are:
- *   NV_OK
- *   NV_ERR_INVALID_ARGUMENT
- *   NV_ERR_GENERIC
- */
-#define NV0073_CTRL_CMD_SPECIFIC_GET_VALID_HEAD_WINDOW_ASSIGNMENT (0x7302ad) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_SPECIFIC_GET_VALID_HEAD_WINDOW_ASSIGNMENT_PARAMS_MESSAGE_ID" */
-
-#define NV0073_CTRL_SPECIFIC_MAX_WINDOWS                          32U
-#define NV0073_CTRL_SPECIFIC_FLEXIBLE_HEAD_WINDOW_ASSIGNMENT      (0xFFU)
-
-#define NV0073_CTRL_SPECIFIC_GET_VALID_HEAD_WINDOW_ASSIGNMENT_PARAMS_MESSAGE_ID (0xADU)
-
-typedef struct NV0073_CTRL_SPECIFIC_GET_VALID_HEAD_WINDOW_ASSIGNMENT_PARAMS {
-    NvU32 subDeviceInstance;
-    NvU8  windowHeadMask[NV0073_CTRL_SPECIFIC_MAX_WINDOWS];
-} NV0073_CTRL_SPECIFIC_GET_VALID_HEAD_WINDOW_ASSIGNMENT_PARAMS;
-
-/*
- * NV0073_CTRL_CMD_SPECIFIC_DEFAULT_ADAPTIVESYNC_DISPLAY
- *
- * This command is used to query whether the specified monitor should default
- * to adaptive sync.
- *
- *   [in]manufacturerID
- *     This parameter specifies the 16-bit EDID Manufacturer ID.
- *   [in]productID
- *     This parameter specifies the 16-bit EDID Product ID.
- *   [out]bDefaultAdaptivesync;
- *     This indicates whether the monitor should default to adaptive sync.
- * Possible return values:
- *  NV_OK
- */
-
-#define NV0073_CTRL_CMD_SPECIFIC_DEFAULT_ADAPTIVESYNC_DISPLAY (0x7302aeU) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_SPECIFIC_DEFAULT_ADAPTIVESYNC_DISPLAY_PARAMS_MESSAGE_ID" */
-
-#define NV0073_CTRL_SPECIFIC_DEFAULT_ADAPTIVESYNC_DISPLAY_PARAMS_MESSAGE_ID (0xAEU)
-
-typedef struct NV0073_CTRL_SPECIFIC_DEFAULT_ADAPTIVESYNC_DISPLAY_PARAMS {
-    NvU16  manufacturerID;
-    NvU16  productID;
-    NvBool bDefaultAdaptivesync;
-} NV0073_CTRL_SPECIFIC_DEFAULT_ADAPTIVESYNC_DISPLAY_PARAMS;
-
-/*
- * NV0073_CTRL_CMD_SPECIFIC_GET_DISPLAY_BRIGHTNESS_LTM
- * NV0073_CTRL_CMD_SPECIFIC_SET_DISPLAY_BRIGHTNESS_LTM
- * These commands retrieve and set the brightness level and Local Tone Mapping (LTM) settings for
- * the specified display.
- *
- * subDeviceInstance
- * This parameter specifies the subdevice instance within the
- * NV04_DISPLAY_COMMON parent device to which the operation should be
- * directed.
- *
- * displayId
- * Display for which brightness/LTM settings is to be retrieved or set.
- *
- * brightnessMilliNits
- * the display brightness in the millinits units in the [0,10000000] range, inclusive.
- *
- * transitionTimeMs
- * the transition time for display brightness to transition from current brightness level to the brightnessMilliNits
- *
- * bUncalibrated
- * if true the parameter indicates brightnessMilliNits has to be interpreted as brightness % value, in 0.001% units
- *
- * bAdaptiveBrightness
- * if true the brightnessMilliNits is set by the OS in the response to the ambient light sensor (ALS) input (if present on the system)
- *
- * bBoostRange
- * if true the brightnessMilliNits value is set by the OS in the response to the ambient light sensor (ALS) input (if present on the system)
- * Indicating very bright ambient light environment
- *
- * ambientIlluminance
- * if bAdaptiveBrightness = true, ambientIlluminance represents an ambient illuminance value reported by the ALS sensor, in 0.001 Lux units
- *
- * ambientChromaticityX
- * if bAdaptiveBrightness = true, ambientChromaticityX represents X chromaticity value reported by ALS sensor, in 0.001 units of [0,1] range
- *
- * ambientChromaticityY
- * if bAdaptiveBrightness = true, ambientChromaticityY represents Y chromaticity value reported by ALS sensor, in 0.001 units of [0,1] range
- *
- * bLtmEnable
- * if set to true, enable LTM functionality in GPU display HW. Set to true by default.
- *
- * bEnhanceContrast
- * if bLtmEnable = true, and if set to true, enhance local contrast via LTM regardless of any other contrast enhancement driver policies. Set to false by default.
- *
- * contrastGain
- * if bLtmEnable = true, this is used to how gain we need to apply on the contrast.
- *
- * detailGain
- * if bLtmEnable = true, how much details needs to be boosted is indicated by this parameter.
- *
- * bContentAdaptiveBrightness
- * if bLtmEnable = true, and if set to true, modify display backlight level and adjust pixel values dynamically on per-frame basis to perform content adaptive brightness control to reduce display power. Set to false by default.
- *
- * bDynamicHdrTonemapping
- * if bLtmEnable = true, and if set to true, and output is HDR, enable dynamic per frame HDR tonemapping. Set to false by default.
- *
- * maxDisplayLuminance
- * maximum display luminance
- *
- * luminanceSscalingFactor
- * HDR tone mapping luminance scaling factor
- *
- * Possible status values returned include:
- * NV_OK
- * NV_ERR_NOT_SUPPORTED
- */
-
-typedef struct NV0073_CTRL_SPECIFIC_DISPLAY_BRIGHTNESS_LTM_PARAMS {
-    NvU32  subDeviceInstance;
-    NvU32  displayId;
-    NvU32  brightnessMilliNits;
-    NvU32  transitionTimeMs;
-    NvBool bUncalibrated;
-    NvBool bAdaptiveBrightness;
-    NvBool bBoostRange;
-    NvU32  ambientIlluminance;
-    NvU32  ambientChromaticityX;
-    NvU32  ambientChromaticityY;
-    NvBool bEnhanceContrast;
-    NvU16  contrastGain;
-    NvU16  detailGain;
-    NvBool bContentAdaptiveBrightness;
-    NvBool bDynamicHdrTonemapping;
-    NvU32  maxDisplayLuminance;
-    NvU32  luminanceScalingFactor;
-} NV0073_CTRL_SPECIFIC_DISPLAY_BRIGHTNESS_LTM_PARAMS;
-
-#define NV0073_CTRL_SPECIFIC_GET_DISPLAY_BRIGHTNESS_LTM_PARAMS_MESSAGE_ID (0xAFU)
-
-typedef NV0073_CTRL_SPECIFIC_DISPLAY_BRIGHTNESS_LTM_PARAMS NV0073_CTRL_SPECIFIC_GET_DISPLAY_BRIGHTNESS_LTM_PARAMS;
-
-#define NV0073_CTRL_CMD_SPECIFIC_GET_DISPLAY_BRIGHTNESS_LTM (0x7302afU) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_SPECIFIC_GET_DISPLAY_BRIGHTNESS_LTM_PARAMS_MESSAGE_ID" */
-
-#define NV0073_CTRL_SPECIFIC_SET_DISPLAY_BRIGHTNESS_LTM_PARAMS_MESSAGE_ID (0xB0U)
-
-typedef NV0073_CTRL_SPECIFIC_DISPLAY_BRIGHTNESS_LTM_PARAMS NV0073_CTRL_SPECIFIC_SET_DISPLAY_BRIGHTNESS_LTM_PARAMS;
-
-#define NV0073_CTRL_CMD_SPECIFIC_SET_DISPLAY_BRIGHTNESS_LTM    (0x7302b0U) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_SPECIFIC_SET_DISPLAY_BRIGHTNESS_LTM_PARAMS_MESSAGE_ID" */
-
-/*
-* NV0073_CTRL_CMD_GET_REGISTER_OFFSET_FOR_ULMB_TIMESTAMP
-*
-* The command returns the offset of the disp registers for sending timestamp
-* directly to RISCV, so that clients may map them directly and write to this
-* register which will trigger interrupt in RISCV.
-*
-* Possible status values returned are: 
-*   NV_OK
-*   NV_ERR_NOT_SUPPORTED
-*/
-
-#define NV0073_CTRL_CMD_GET_REGISTER_OFFSET_FOR_ULMB_TIMESTAMP (0x7302b1U) /* finn: Evaluated from "(FINN_NV04_DISPLAY_COMMON_SPECIFIC_INTERFACE_ID << 8) | NV0073_CTRL_GET_REGISTER_OFFSET_FOR_ULMB_TIMESTAMP_PARAMS_MESSAGE_ID" */
-
-#define NV0073_CTRL_GET_REGISTER_OFFSET_FOR_ULMB_TIMESTAMP_PARAMS_MESSAGE_ID (0xB1U)
-
-typedef struct NV0073_CTRL_GET_REGISTER_OFFSET_FOR_ULMB_TIMESTAMP_PARAMS {
-    NvU32 subDeviceInstance;
-    NvU32 dispRegisterBase;
-} NV0073_CTRL_GET_REGISTER_OFFSET_FOR_ULMB_TIMESTAMP_PARAMS;
 /* _ctrl0073specific_h_ */

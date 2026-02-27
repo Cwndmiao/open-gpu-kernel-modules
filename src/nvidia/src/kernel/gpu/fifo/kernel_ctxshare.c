@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2018-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2018-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -33,11 +33,8 @@
 #include "core/locks.h"
 #include "gpu/mem_mgr/vaspace_api.h"
 #include "rmapi/rs_utils.h"
-#include "platform/sli/sli.h"
-#include "containers/eheap_old.h"
 
 #define SUBCTXID_EHEAP_OWNER NvU32_BUILD('n','v','r','m')
-#define VASPACEID_EHEAP_OWNER NvU32_BUILD('n','v','r','m')
 
 NV_STATUS
 kctxshareapiConstruct_IMPL
@@ -118,15 +115,11 @@ kctxshareapiConstruct_IMPL
         NV_PRINTF(LEVEL_INFO, "Constructing Legacy Context Share\n");
         NV_ASSERT(hVASpace == NV01_NULL_OBJECT);
         pVAS = pKernelChannelGroup->pVAS;
-
-        pKernelCtxShareApi->hVASpace = pKernelChannelGroupApi->hVASpace;
     }
     else
     {
         NV_PRINTF(LEVEL_INFO, "Constructing Client Allocated Context Share\n");
         rmStatus = vaspaceGetByHandleOrDeviceDefault(pClient, hDevice, hVASpace, &pVAS);
-
-        pKernelCtxShareApi->hVASpace = hVASpace;
     }
 
     NV_ASSERT_OR_RETURN((rmStatus == NV_OK), rmStatus);
@@ -295,7 +288,7 @@ kctxshareapiCopyConstruct_IMPL
     if (pKernelChannelGroupApi->hKernelGraphicsContext != NV01_NULL_OBJECT)
     {
         RsResourceRef *pKernelGraphicsContextRef;
-        NV_ASSERT_OK_OR_ELSE(rmStatus,
+        NV_ASSERT_OK_OR_ELSE(rmStatus, 
                              clientGetResourceRef(pCallContext->pClient, pKernelChannelGroupApi->hKernelGraphicsContext, &pKernelGraphicsContextRef),
                              goto done);
 
@@ -303,7 +296,7 @@ kctxshareapiCopyConstruct_IMPL
     }
 
     //
-    // For legacy internal kctxshares, RPC is handled by the channelgroup object's copy ctor,
+    // For legacy internal kctxshares, RPC is handled by the channelgroup object's copy ctor, 
     // so we skip the automatic RPC here
     //
     if ((IS_VIRTUAL(pGpu) || IS_GSP_CLIENT(pGpu)) && !pKernelCtxShareApi->pShareData->pKernelChannelGroup->bLegacyMode)
@@ -314,7 +307,7 @@ kctxshareapiCopyConstruct_IMPL
                              pDstRef, rmStatus);
     }
 
-done:
+done: 
     if (rmStatus != NV_OK)
     {
         serverFreeShare(&g_resServ, pShared);
@@ -368,19 +361,12 @@ kctxshareInitCommon_IMPL
     KernelChannelGroupApi *pKernelChannelGroupApi
 )
 {
-    KernelFifo         *pKernelFifo           = GPU_GET_KERNEL_FIFO(pGpu);
     NV_STATUS           status                = NV_OK;
-    NvU32               sbctxHeapFlag         = 0;
-    NvU32               vaSpaceHeapFlag       = 0;
-    NvU64               subctxOffset          = 0;
-    NvU64               vaSpaceOffset         = 0;
+    NvU32               heapFlag              = 0;
+    NvU64               offset                = 0;
     NvU64               size                  = 1;
-    NvU64               origSbctxRangeLo      = 0;
-    NvU64               origSbctxRangeHi      = 0;
-    EMEMBLOCK          *pSbctxBlock;
-    EMEMBLOCK          *pVaSpaceBlock         = NULL;
+    PEMEMBLOCK          pBlock;
     KernelChannelGroup *pKernelChannelGroup;
-    VaSpaceMapEntry    *pVaSpaceEntry;
 
     NV_ASSERT_OR_RETURN(pKernelChannelGroupApi != NULL, NV_ERR_INVALID_STATE);
     pKernelChannelGroup = pKernelChannelGroupApi->pKernelChannelGroup;
@@ -388,7 +374,7 @@ kctxshareInitCommon_IMPL
     NV_ASSERT(pVAS != NULL);
 
     // GPU lock must be held before calling this function
-    NV_ASSERT_OR_RETURN(rmDeviceGpuLockIsOwner(pGpu->gpuInstance), NV_ERR_INVALID_LOCK_STATE);
+    LOCK_ASSERT_AND_RETURN(rmDeviceGpuLockIsOwner(pGpu->gpuInstance));
 
     //
     // For external VAS, create subcontext only after SetPageDirectory() call is made.
@@ -409,8 +395,8 @@ kctxshareInitCommon_IMPL
    // If flag is equal to SYNC, allocate context share from veId 0.
     if (Flags == NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_SYNC)
     {
-        sbctxHeapFlag = NVOS32_ALLOC_FLAGS_FIXED_ADDRESS_ALLOCATE;
-        subctxOffset   = 0;
+        heapFlag = NVOS32_ALLOC_FLAGS_FIXED_ADDRESS_ALLOCATE;
+        offset   = 0;
     }
     //
     // If the flag is Async, we want to allocate a free block in reverse order.
@@ -419,25 +405,12 @@ kctxshareInitCommon_IMPL
     //
     else if (Flags == NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     {
-        sbctxHeapFlag = NVOS32_ALLOC_FLAGS_FORCE_MEM_GROWS_DOWN;
-    }
-    // ASYNC_PREFER_LOWER is similar to above, but lower veIds are preferred and allocated in order.
-    else if (Flags == NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC_PREFER_LOWER)
-    {
-        sbctxHeapFlag = NVOS32_ALLOC_FLAGS_FORCE_MEM_GROWS_UP;
-
-        origSbctxRangeLo = pKernelChannelGroup->pSubctxIdHeap->rangeLo;
-        origSbctxRangeHi = pKernelChannelGroup->pSubctxIdHeap->rangeHi;
-        NV_ASSERT_OR_RETURN(origSbctxRangeLo == 0, NV_ERR_INVALID_STATE);
-
-        // Avoid allocating veId 0 unless requested.
-        status = pKernelChannelGroup->pSubctxIdHeap->eheapSetAllocRange(pKernelChannelGroup->pSubctxIdHeap, 1, origSbctxRangeHi);
-        NV_ASSERT_OK_OR_RETURN(status);
+        heapFlag = NVOS32_ALLOC_FLAGS_FORCE_MEM_GROWS_DOWN;
     }
     else if (Flags == NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_SPECIFIED)
     {
-        sbctxHeapFlag = NVOS32_ALLOC_FLAGS_FIXED_ADDRESS_ALLOCATE;
-        subctxOffset   = *pSubctxId;
+        heapFlag = NVOS32_ALLOC_FLAGS_FIXED_ADDRESS_ALLOCATE;
+        offset   = *pSubctxId;
     }
     else
     {
@@ -448,98 +421,28 @@ kctxshareInitCommon_IMPL
     status = pKernelChannelGroup->pSubctxIdHeap->eheapAlloc(
         pKernelChannelGroup->pSubctxIdHeap,
         SUBCTXID_EHEAP_OWNER,
-        &sbctxHeapFlag,
-        &subctxOffset,
+        &heapFlag,
+        &offset,
         &size,
         1,
         1,
-        &pSbctxBlock,
+        &pBlock,
         NULL,
         NULL);
-
-    if (Flags == NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC_PREFER_LOWER)
-    {
-        // Restore original pSubctxIdHeap ranges.
-        NV_ASSERT_OK_OR_RETURN(pKernelChannelGroup->pSubctxIdHeap->eheapSetAllocRange(pKernelChannelGroup->pSubctxIdHeap, origSbctxRangeLo, origSbctxRangeHi));
-
-        // Retry with full range. (Alloc veId 0 if no others are available.)
-        if (status != NV_OK)
-        {
-            status = pKernelChannelGroup->pSubctxIdHeap->eheapAlloc(
-                pKernelChannelGroup->pSubctxIdHeap,
-                SUBCTXID_EHEAP_OWNER,
-                &sbctxHeapFlag,
-                &subctxOffset,
-                &size,
-                1,
-                1,
-                &pSbctxBlock,
-                NULL,
-                NULL);
-        }
-    }
-
     if (status != NV_OK)
     {
         return status;
     }
 
-    pVaSpaceEntry = mapFind(&pKernelChannelGroup->vaSpaceMap, (NvU64)pVAS);
-
-    if (pVaSpaceEntry == NULL)
-    {
-        /*
-         * Do not follow sbctxHeapFlag, since we do not know that a subcontext using FIXED_ADDRESS_ALLOCATE
-         * will not be deallocated and reallocated with a different VASpace while another subcontext using the
-         * original VASpace remains allocated, preventing that offset in pVaSpaceIdHeap from being freed.
-         */
-        vaSpaceHeapFlag = NVOS32_ALLOC_FLAGS_FORCE_MEM_GROWS_UP;
-        status = pKernelChannelGroup->pVaSpaceIdHeap->eheapAlloc(
-            pKernelChannelGroup->pVaSpaceIdHeap,
-            VASPACEID_EHEAP_OWNER,
-            &vaSpaceHeapFlag,
-            &vaSpaceOffset,
-            &size,
-            1,
-            1,
-            &pVaSpaceBlock,
-            NULL,
-            NULL);
-        if (status != NV_OK)
-        {
-            goto done;
-        }
-
-        pVaSpaceBlock->pData = (void *)pVAS;
-
-        pVaSpaceEntry = mapInsertNew(&pKernelChannelGroup->vaSpaceMap, (NvU64)pVAS);
-        if (pVaSpaceEntry == NULL)
-        {
-            status = NV_ERR_NO_MEMORY;
-            goto done;
-        }
-
-        pVaSpaceEntry->heapOffset = vaSpaceOffset;
-        pVaSpaceEntry->refCount = 1;
-    }
-    else
-    {
-        vaSpaceOffset = pVaSpaceEntry->heapOffset;
-        pVaSpaceEntry->refCount += 1;
-    }
-
     pKernelCtxShare->pVAS                = pVAS;
-    pKernelCtxShare->subctxId            = NvU64_LO32(subctxOffset);
-    pKernelCtxShare->vaSpaceId           = NvU64_LO32(vaSpaceOffset);
+    pKernelCtxShare->subctxId            = NvU64_LO32(offset);
     pKernelCtxShare->pKernelChannelGroup = pKernelChannelGroup;
     pKernelCtxShare->flags               = Flags;
 
-    NV_PRINTF(LEVEL_INFO, "Allocated subctxId: 0x%02llx, vaSpaceId: 0x%02llx\n", subctxOffset, vaSpaceOffset);
-
-    pSbctxBlock->pData = (void *)pKernelCtxShare;
+    pBlock->pData = (void *)pKernelCtxShare;
 
     status = kctxshareInit_HAL(pKernelCtxShare, pKernelCtxShareApi, pGpu, pVAS,
-                               pKernelChannelGroupApi, subctxOffset, pSbctxBlock);
+                               pKernelChannelGroupApi, offset, pBlock);
 
     if(status != NV_OK)
     {
@@ -550,18 +453,11 @@ kctxshareInitCommon_IMPL
 done:
     if (status == NV_OK)
     {
-       *pSubctxId   = NvU64_LO32(subctxOffset);
-
-        if (Flags == NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC_PREFER_LOWER)
-        {
-            *pSubctxId = ( subctxOffset < kfifoGetMaxLowerSubcontext(pGpu, pKernelFifo) ?
-                FLD_SET_DRF(_CTXSHARE_ALLOCATION, _SUBCTXID, _ASYNC_PREFER_LOWER_ALLOCATION, _SUCCESS, *pSubctxId) :
-                FLD_SET_DRF(_CTXSHARE_ALLOCATION, _SUBCTXID, _ASYNC_PREFER_LOWER_ALLOCATION, _FAIL,    *pSubctxId) );
-        }
+       *pSubctxId   = NvU64_LO32(offset);
 
         NV_PRINTF(LEVEL_INFO,
                   "New Context Share 0x%p allocated with id 0x%x\n",
-                  pKernelCtxShare, NvU64_LO32(subctxOffset));
+                  pKernelCtxShare, NvU64_LO32(offset));
     }
     else
     {
@@ -569,26 +465,12 @@ done:
 
         tmpStatus = pKernelChannelGroup->pSubctxIdHeap->eheapFree(
             pKernelChannelGroup->pSubctxIdHeap,
-            subctxOffset);
+            offset);
         NV_ASSERT(tmpStatus == NV_OK);
-
-        if (pVaSpaceEntry != NULL)
-        {
-            pVaSpaceEntry->refCount -= 1;
-            if (pVaSpaceEntry->refCount == 0)
-            {
-                tmpStatus = pKernelChannelGroup->pVaSpaceIdHeap->eheapFree(
-                    pKernelChannelGroup->pVaSpaceIdHeap,
-                    vaSpaceOffset);
-                NV_ASSERT(tmpStatus == NV_OK);
-
-                mapRemove(&pKernelChannelGroup->vaSpaceMap, pVaSpaceEntry);
-            }
-        }
 
         NV_PRINTF(LEVEL_INFO,
                   "Context Share 0x%p allocation with id 0x%x failed, status is %x\n",
-                  pKernelCtxShare, NvU64_LO32(subctxOffset), status);
+                  pKernelCtxShare, NvU64_LO32(offset), status);
     }
 
     return status;
@@ -619,12 +501,15 @@ kctxshareDestroyCommon_IMPL
 )
 {
     NV_STATUS               status = NV_OK;
-    NvU32                   subctxId;
+    NvU32                   subctxId, i;
     KernelChannelGroup     *pKernelChannelGroup;
-    NvBool                  bRelease;
+    NvU32                   subDevInst;
+    ENGINE_CTX_DESCRIPTOR  *pEngCtxDesc = NULL;
+    NvU64                   numMax = 0;
+    NvBool                  bRelease = NV_TRUE;
+    NvU64                   vaddr = 0;
     RsShared               *pShared = NULL;
     NvS32                   refcnt = 0;
-    VaSpaceMapEntry        *pVaSpaceEntry;
 
     NV_ASSERT_OR_RETURN(pKernelCtxShare != NULL, NV_ERR_INVALID_STATE);
 
@@ -634,23 +519,92 @@ kctxshareDestroyCommon_IMPL
     NV_ASSERT_OR_RETURN(refcnt == 1, NV_ERR_INVALID_STATE);
 
     // GPU lock must be held before calling this function
-    NV_ASSERT_OR_RETURN(rmDeviceGpuLockIsOwner(pGpu->gpuInstance), NV_ERR_INVALID_LOCK_STATE);
+    LOCK_ASSERT_AND_RETURN(rmDeviceGpuLockIsOwner(pGpu->gpuInstance));
 
     pKernelChannelGroup = pKernelCtxShare->pKernelChannelGroup;
     NV_ASSERT(pKernelChannelGroup == pKernelChannelGroupApi->pKernelChannelGroup);
     subctxId = pKernelCtxShare->subctxId;
 
-    pVaSpaceEntry = mapFind(&pKernelChannelGroup->vaSpaceMap, (NvU64)(pKernelCtxShare->pVAS));
-    NV_ASSERT_OR_ELSE(pVaSpaceEntry != NULL && pVaSpaceEntry->refCount != 0,
-        status = NV_ERR_INVALID_STATE;
-        NV_PRINTF(LEVEL_ERROR, "VASpace map entry not found.\n");
-        goto fail);
-
     //
     // Handle the case when VAS is shared by subcontexts.
     // Release the shared resources only when the last subcontext using this VAS is freed.
     //
-    bRelease = (pVaSpaceEntry->refCount == 1);
+    status = pKernelChannelGroup->pSubctxIdHeap->eheapGetSize(
+        pKernelChannelGroup->pSubctxIdHeap,
+        &numMax);
+    NV_ASSERT(status == NV_OK);
+
+    for (i = 0; i < numMax; i++)
+    {
+        if (i == pKernelCtxShare->subctxId)
+        {
+            continue;
+        }
+
+        PEMEMBLOCK pBlock = pKernelChannelGroup->pSubctxIdHeap->eheapGetBlock(
+            pKernelChannelGroup->pSubctxIdHeap,
+            i,
+            NV_FALSE);
+        if (pBlock)
+        {
+            OBJVASPACE *pSubctxVAS = ((KernelCtxShare *)pBlock->pData)->pVAS;
+            if (pSubctxVAS == pKernelCtxShare->pVAS)
+            {
+                bRelease = NV_FALSE;
+                break;
+            }
+        }
+    }
+
+    SLI_LOOP_START(SLI_LOOP_FLAGS_BC_ONLY | SLI_LOOP_FLAGS_IGNORE_REENTRANCY)
+    RsResourceRef *pParentRef = RES_GET_REF(pKernelCtxShareApi)->pParentRef; 
+    KernelChannelGroupApi *pKernelChannelGroupApi = dynamicCast(pParentRef->pResource, KernelChannelGroupApi);
+    KernelGraphicsContext *pKernelGraphicsContext;
+
+    subDevInst = gpumgrGetSubDeviceInstanceFromGpu(pGpu);
+    if ((pKernelChannelGroup->ppEngCtxDesc != NULL) &&
+         kgrctxFromKernelChannelGroupApi(pKernelChannelGroupApi, &pKernelGraphicsContext) == NV_OK)
+    {
+        if (bRelease)
+        {
+            KernelGraphicsManager *pKernelGraphicsManager = GPU_GET_KERNEL_GRAPHICS_MANAGER(pGpu);
+            NvHandle hClient = RES_GET_CLIENT_HANDLE(pKernelGraphicsContext);
+            NvHandle hParent = RES_GET_PARENT_HANDLE(pKernelGraphicsContext);
+            NV2080_CTRL_GR_ROUTE_INFO grRouteInfo;
+            KernelGraphics *pKernelGraphics;
+
+            portMemSet(&grRouteInfo, 0, sizeof(grRouteInfo));
+            kgrmgrCtrlSetChannelHandle(hParent, &grRouteInfo);
+
+            kgrmgrCtrlRouteKGR(pGpu, pKernelGraphicsManager, hClient, &grRouteInfo, &pKernelGraphics);
+
+            kgrctxReleaseSubctxResources_HAL(pGpu, pKernelGraphicsContext, pKernelGraphics, pKernelCtxShare->pVAS, pKernelCtxShare->subctxId);
+
+            pEngCtxDesc = pKernelChannelGroup->ppEngCtxDesc[subDevInst];
+            if (pEngCtxDesc != NULL)
+            {
+                vaddr = 0;
+                if (vaListFindVa(&pEngCtxDesc->vaList, pKernelCtxShare->pVAS, &vaddr) == NV_OK)
+                {
+                    NvU64 tmpVaddr = 0;
+                    while (vaListFindVa(&pEngCtxDesc->vaList, pKernelCtxShare->pVAS, &tmpVaddr) == NV_OK)
+                    {
+                        status = vaListRemoveVa(&pEngCtxDesc->vaList, pKernelCtxShare->pVAS);
+                        NV_ASSERT(status == NV_OK);
+                    }
+
+                    if (vaListGetManaged(&pEngCtxDesc->vaList))
+                    {
+                        dmaUnmapBuffer_HAL(pGpu, GPU_GET_DMA(pGpu), pKernelCtxShare->pVAS, vaddr);
+                    }
+                }
+            }
+        }
+    }
+    SLI_LOOP_END
+
+
+    subDevInst = gpumgrGetSubDeviceInstanceFromGpu(pGpu);
 
     status = kctxshareDestroy_HAL(pKernelCtxShare, pKernelCtxShareApi, pGpu, pKernelChannelGroupApi, bRelease);
     if (status != NV_OK)
@@ -661,26 +615,7 @@ kctxshareDestroyCommon_IMPL
     status = pKernelChannelGroup->pSubctxIdHeap->eheapFree(
         pKernelChannelGroup->pSubctxIdHeap,
         subctxId);
-    NV_ASSERT_OR_ELSE(status == NV_OK,
-        NV_PRINTF(LEVEL_ERROR,
-                  "Subcontext ID heap free failed with status = %s (0x%x)\n",
-                  nvstatusToString(status), status);
-        goto fail);
-
-    pVaSpaceEntry->refCount -= 1;
-    if (pVaSpaceEntry->refCount == 0)
-    {
-        status = pKernelChannelGroup->pVaSpaceIdHeap->eheapFree(
-            pKernelChannelGroup->pVaSpaceIdHeap,
-            pVaSpaceEntry->heapOffset);
-    NV_ASSERT_OR_ELSE(status == NV_OK,
-        NV_PRINTF(LEVEL_ERROR,
-                  "VASpace ID heap free failed with status = %s (0x%x)\n",
-                  nvstatusToString(status), status);
-        goto fail);
-        
-        mapRemove(&pKernelChannelGroup->vaSpaceMap, pVaSpaceEntry);
-    }
+    NV_ASSERT_OR_GOTO(status == NV_OK, fail);
 
 fail:
     if (status == NV_OK)
@@ -710,7 +645,7 @@ kctxshareDestruct_IMPL
     //
     if(pKernelCtxShare->pKernelChannelGroup != NULL)
     {
-        EMEMBLOCK *pBlock =
+        PEMEMBLOCK pBlock =
             pKernelCtxShare->pKernelChannelGroup->pSubctxIdHeap->eheapGetBlock(
                 pKernelCtxShare->pKernelChannelGroup->pSubctxIdHeap,
                 pKernelCtxShare->subctxId,

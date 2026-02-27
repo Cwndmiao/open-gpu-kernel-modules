@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2018-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2018-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -101,20 +101,28 @@ serverutilGetResourceRefWithParent
     return NV_OK;
 }
 
-RmClient
-*serverutilGetClientUnderLock
+NV_STATUS
+serverutilGetClientUnderLock
 (
-    NvHandle hClient
+    NvHandle hClient,
+    RmClient **ppClient
 )
 {
     NV_STATUS status;
     RsClient *pRsClient;
+    RmClient *pClient;
 
     status = serverGetClientUnderLock(&g_resServ, hClient, &pRsClient);
     if (status != NV_OK)
-        return NULL;
+        return status;
 
-    return dynamicCast(pRsClient, RmClient);
+    pClient = dynamicCast(pRsClient, RmClient);
+    NV_ASSERT(pClient != NULL);
+
+    if (ppClient)
+        *ppClient = pClient;
+
+    return NV_OK;
 }
 
 RmClient
@@ -230,9 +238,9 @@ serverutilValidateNewResourceHandle
     NvHandle hObject
 )
 {
-    RmClient *pClient = serverutilGetClientUnderLock(hClient);
+    RmClient *pClient;
 
-    return ((pClient != NULL) &&
+    return ((NV_OK == serverutilGetClientUnderLock(hClient, &pClient)) &&
             (NV_OK == clientValidateNewResourceHandle(staticCast(pClient, RsClient), hObject, NV_TRUE)));
 }
 
@@ -246,15 +254,10 @@ serverutilGenResourceHandle
     NV_STATUS status;
     RmClient *pClient;
 
-    //
-    // LOCK TEST: we should have the API lock here unless we're executing out of
-    // the power management path.
-    //
-    NV_ASSERT_OR_RETURN(rmapiLockIsOwner() || rmapiInRtd3PmPath(), NV_ERR_INVALID_LOCK_STATE);
+    // LOCK TEST: we should have the API lock here
+    LOCK_ASSERT_AND_RETURN(rmApiLockIsOwner());
 
-    pClient = serverutilGetClientUnderLock(hClient);
-
-    if (pClient == NULL)
+    if (NV_OK != serverutilGetClientUnderLock(hClient, &pClient))
         return NV_ERR_INVALID_CLIENT;
 
     status = clientGenResourceHandle(staticCast(pClient, RsClient), returnHandle);
@@ -346,27 +349,25 @@ serverutilAcquireClient
 (
     NvHandle hClient,
     LOCK_ACCESS_TYPE access,
-    CLIENT_ENTRY **ppClientEntry,
     RmClient **ppClient
 )
 {
-    CLIENT_ENTRY *pClientEntry;
+    RsClient *pRsClient;
     RmClient *pClient;
 
     // LOCK TEST: we should have the API lock here
-    NV_ASSERT_OR_RETURN(rmapiLockIsOwner(), NV_ERR_INVALID_LOCK_STATE);
+    LOCK_ASSERT_AND_RETURN(rmApiLockIsOwner());
 
-    if (NV_OK != serverAcquireClient(&g_resServ, hClient, access, &pClientEntry))
+    if (NV_OK != serverAcquireClient(&g_resServ, hClient, access, &pRsClient))
         return NV_ERR_INVALID_CLIENT;
 
-    pClient = dynamicCast(pClientEntry->pClient, RmClient);
+    pClient = dynamicCast(pRsClient, RmClient);
     if (pClient == NULL)
     {
-        serverReleaseClient(&g_resServ, access, pClientEntry);
+        serverReleaseClient(&g_resServ, access, pRsClient);
         return NV_ERR_INVALID_CLIENT;
     }
 
-    *ppClientEntry = pClientEntry;
     *ppClient = pClient;
     return NV_OK;
 }
@@ -375,8 +376,8 @@ void
 serverutilReleaseClient
 (
     LOCK_ACCESS_TYPE access,
-    CLIENT_ENTRY *pClientEntry
+    RmClient *pClient
 )
 {
-    serverReleaseClient(&g_resServ, access, pClientEntry);
+    serverReleaseClient(&g_resServ, access, staticCast(pClient, RsClient));
 }

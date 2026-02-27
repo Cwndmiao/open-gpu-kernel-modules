@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1993-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -30,12 +30,11 @@
 #include "dp_internal.h"
 #include "dp_watermark.h"
 #include "dp_linkconfig.h"
-#include "dp_printf.h"
 #include "displayport.h"
 
 #define FEC_TOTAL_SYMBOLS_PER_BLK(lanes)  ((NvU32)((lanes == 1) ? 512U : 256U))
 #define FEC_PARITY_SYMBOLS_PER_BLK(lanes)  ((NvU32)((lanes == 1) ? 12U : 6U))
-//return max number of FEC parity symbols in x link clock cycles
+//return max number of FEC parity symbols in x link clock cycles 
 #define FEC_PARITY_SYM_SST(lanes, x)   (DP_MIN((NvU32)(x) % FEC_TOTAL_SYMBOLS_PER_BLK(lanes), FEC_PARITY_SYMBOLS_PER_BLK(lanes)) + (NvU32)(x) / FEC_TOTAL_SYMBOLS_PER_BLK(lanes) * FEC_PARITY_SYMBOLS_PER_BLK(lanes) + FEC_PARITY_SYMBOLS_PER_BLK(lanes) + 1U)
 #define FEC_PARITY_SYM_MST(lanes, x)   (DP_MIN((NvU32)(x) % FEC_TOTAL_SYMBOLS_PER_BLK(lanes), FEC_PARITY_SYMBOLS_PER_BLK(lanes)) + (NvU32)(x) / FEC_TOTAL_SYMBOLS_PER_BLK(lanes) * FEC_PARITY_SYMBOLS_PER_BLK(lanes) + 1U)
 
@@ -47,13 +46,15 @@ bool DisplayPort::isModePossibleMST
     Watermark  * dpInfo
 )
 {
+    //
     // For MST, use downspread 0.6%
-    NvU64 linkFreq;
-    DP_ASSERT(!linkConfig.bIs128b132bChannelCoding);
-    linkFreq = LINK_RATE_TO_DATA_RATE_8B_10B(linkConfig.peakRate) * 994 / 1000;
+    //
+    NvU64 linkFreq = linkConfig.peakRate * 994 / 1000;
 
+    //
     //  This function is for multistream only!
-    DP_ASSERT(linkConfig.multistream);
+    //
+    DP_ASSERT( linkConfig.multistream );
 
     if(!modesetInfo.pixelClockHz || !modesetInfo.depth)
     {
@@ -84,14 +85,16 @@ bool DisplayPort::isModePossibleMST
 
     if (minHBlank > modesetInfo.rasterWidth - modesetInfo.surfaceWidth)
     {
-        DP_PRINTF(DP_ERROR, "ERROR: Blanking Width is smaller than minimum permissible value.");
+        DP_LOG(("NVRM: %s:", __FUNCTION__));
+        DP_LOG(("\t\tERROR: Blanking Width is smaller than minimum permissible value."));
         return false;
     }
 
     // Bug 702290 - Active Width should be greater than 60
     if (modesetInfo.surfaceWidth <= 60)
     {
-        DP_PRINTF(DP_ERROR, "ERROR: Minimum Horizontal Active Width <= 60 not supported.");
+        DP_LOG(("NVRM: %s:", __FUNCTION__));
+        DP_LOG(("\t\tERROR: Minimum Horizontal Active Width <= 60 not supported."));
         return false;
     }
 
@@ -168,13 +171,10 @@ bool DisplayPort::isModePossibleSST
     bool bUseIncreasedWatermarkLimits
 )
 {
-    NvU64 laneDataRate;
-    DP_ASSERT(!linkConfig.bIs128b132bChannelCoding);
-    laneDataRate = linkConfig.convertMinRateToDataRate();
-
-
+    //
     //  This function is for single stream only!
-    DP_ASSERT(!linkConfig.multistream);
+    //
+    DP_ASSERT( !linkConfig.multistream );
 
     unsigned watermarkAdjust = DP_CONFIG_WATERMARK_ADJUST;
     unsigned watermarkMinimum = DP_CONFIG_WATERMARK_LIMIT;
@@ -207,16 +207,17 @@ bool DisplayPort::isModePossibleSST
         // Print debug message and Assert. All calculations assume a max of 8 lanes
         // & any increase in lanes should cause these calculation to be updated
         //
-        DP_PRINTF(DP_ERROR, "ERROR: LaneCount - %d is not supported for waterMark calculations.", linkConfig.lanes);
-        DP_PRINTF(DP_ERROR, "Current support is only up to 4-Lanes & any change/increase in supported lanes "
-                  "should be reflected in waterMark calculations algorithm. "
-                  "Ex: See calc for minHBlank variable below");
+        DP_LOG(("NVRM: %s: ERROR: LaneCount - %d is not supported for waterMark calculations.",
+                __FUNCTION__, linkConfig.lanes));
+        DP_LOG(("Current support is only up to 4-Lanes & any change/increase in supported lanes "
+                "should be reflected in waterMark calculations algorithm. "
+                "Ex: See calc for minHBlank variable below"));
 
         DP_ASSERT(0);
         return false;
     }
 
-    if ((modesetInfo.pixelClockHz * modesetInfo.depth) >= (8 * laneDataRate * linkConfig.lanes * DSC_FACTOR))
+    if ((modesetInfo.pixelClockHz * modesetInfo.depth) >= (8 * linkConfig.minRate * linkConfig.lanes * DSC_FACTOR))
     {
         return false;
     }
@@ -226,7 +227,7 @@ bool DisplayPort::isModePossibleSST
     // 0 active symbols. This may cause HW hang. Bug 200379426
     //
     if ((modesetInfo.bEnableDsc) &&
-        ((modesetInfo.pixelClockHz * modesetInfo.depth) < ((8 * laneDataRate * linkConfig.lanes * DSC_FACTOR) / 64)))
+        ((modesetInfo.pixelClockHz * modesetInfo.depth) < ((8 * linkConfig.minRate * linkConfig.lanes * DSC_FACTOR) / 64)))
     {
         return false;
     }
@@ -240,7 +241,7 @@ bool DisplayPort::isModePossibleSST
     PrecisionFactor = 100000;
     ratioF = ((NvU64)modesetInfo.pixelClockHz * modesetInfo.depth * PrecisionFactor) / DSC_FACTOR;
 
-    ratioF /= 8 * (NvU64) laneDataRate * linkConfig.lanes;
+    ratioF /= 8 * (NvU64) linkConfig.minRate * linkConfig.lanes;
 
     if (PrecisionFactor < ratioF) // Assert if we will end up with a negative number in below
         return false;
@@ -248,16 +249,21 @@ bool DisplayPort::isModePossibleSST
     watermarkF = ratioF * dpInfo->tuSize * (PrecisionFactor - ratioF)  / PrecisionFactor;
     dpInfo->waterMark = (unsigned)(watermarkAdjust + ((2 * (modesetInfo.depth * PrecisionFactor / (8 * numLanesPerLink * DSC_FACTOR)) + watermarkF) / PrecisionFactor));
 
+    //
     //  Bounds check the watermark
+    //
     NvU32 numSymbolsPerLine = (modesetInfo.surfaceWidth * modesetInfo.depth) / (8 * linkConfig.lanes * DSC_FACTOR);
 
     if (dpInfo->waterMark > 39 || dpInfo->waterMark > numSymbolsPerLine)
     {
-        DP_PRINTF(DP_ERROR, "ERROR: watermark should not be greater than 39.");
+        DP_LOG(("NVRM: %s:", __FUNCTION__));
+        DP_LOG(("\t\tERROR: watermark should not be greater than 39."));
         return false;
     }
 
+    //
     //  Clamp the low side
+    //
     if (dpInfo->waterMark < watermarkMinimum)
         dpInfo->waterMark = watermarkMinimum;
 
@@ -275,24 +281,26 @@ bool DisplayPort::isModePossibleSST
 
     BlankingBits += PixelSteeringBits;
     NvU64 NumBlankingLinkClocks = (NvU64)BlankingBits * PrecisionFactor / (8 * numLanesPerLink);
-    NvU32 MinHBlank = (NvU32)(NumBlankingLinkClocks * modesetInfo.pixelClockHz/ laneDataRate / PrecisionFactor);
+    NvU32 MinHBlank = (NvU32)(NumBlankingLinkClocks * modesetInfo.pixelClockHz/ linkConfig.minRate / PrecisionFactor);
     MinHBlank += 12;
 
     if (MinHBlank > modesetInfo.rasterWidth - modesetInfo.surfaceWidth)
     {
-        DP_PRINTF(DP_ERROR, "ERROR: Blanking Width is smaller than minimum permissible value.");
+        DP_LOG(("NVRM: %s:", __FUNCTION__));
+        DP_LOG(("\t\tERROR: Blanking Width is smaller than minimum permissible value."));
         return false;
     }
 
     // Bug 702290 - Active Width should be greater than 60
     if (modesetInfo.surfaceWidth <= 60)
     {
-        DP_PRINTF(DP_ERROR, "ERROR: Minimum Horizontal Active Width <= 60 not supported.");
+        DP_LOG(("NVRM: %s:", __FUNCTION__));
+        DP_LOG(("\t\tERROR: Minimum Horizontal Active Width <= 60 not supported."));
         return false;
     }
 
 
-    NvS32 hblank_symbols = (NvS32)(((NvU64)(modesetInfo.rasterWidth - modesetInfo.surfaceWidth - MinHBlank) * laneDataRate) / modesetInfo.pixelClockHz);
+    NvS32 hblank_symbols = (NvS32)(((NvU64)(modesetInfo.rasterWidth - modesetInfo.surfaceWidth - MinHBlank) * linkConfig.minRate) / modesetInfo.pixelClockHz);
 
     //reduce HBlank Symbols to account for secondary data packet
     hblank_symbols -= 1; //Stuffer latency to send BS
@@ -389,7 +397,7 @@ bool DisplayPort::isModePossibleSST
     }
     else
     {
-        vblank_symbols = (NvS32)(((NvU64)(modesetInfo.surfaceWidth - 40) * laneDataRate) /  modesetInfo.pixelClockHz) - 1;
+        vblank_symbols = (NvS32)(((NvU64)(modesetInfo.surfaceWidth - 40) * linkConfig.minRate) /  modesetInfo.pixelClockHz) - 1;
 
         vblank_symbols -= numLanesPerLink == 1 ? 39  : numLanesPerLink == 2 ? 21 : 12;
     }
@@ -411,7 +419,7 @@ bool DisplayPort::isModePossibleSSTWithFEC
     // This function is for single stream only!
     // Refer to Bug 200406501 and 200401850 for algorithm
     //
-    DP_ASSERT(!linkConfig.multistream);
+    DP_ASSERT( !linkConfig.multistream );
 
     unsigned watermarkAdjust = DP_CONFIG_WATERMARK_ADJUST;
     unsigned watermarkMinimum = DP_CONFIG_WATERMARK_LIMIT;
@@ -423,8 +431,6 @@ bool DisplayPort::isModePossibleSSTWithFEC
         watermarkAdjust = DP_CONFIG_INCREASED_WATERMARK_ADJUST;
         watermarkMinimum = DP_CONFIG_INCREASED_WATERMARK_LIMIT;
     }
-
-    NvU64 laneDataRate = linkConfig.convertMinRateToDataRate();
 
     if(!modesetInfo.pixelClockHz || !modesetInfo.depth)
     {
@@ -447,16 +453,17 @@ bool DisplayPort::isModePossibleSSTWithFEC
         // Print debug message and Assert. All calculations assume a max of 8 lanes
         // & any increase in lanes should cause these calculation to be updated
         //
-        DP_PRINTF(DP_ERROR, "ERROR: LaneCount - %d is not supported for waterMark calculations.", linkConfig.lanes);
-        DP_PRINTF(DP_ERROR, "Current support is only up to 4-Lanes & any change/increase in supported lanes "
-                  "should be reflected in waterMark calculations algorithm. "
-                  "Ex: See calc for minHBlank variable below");
+        DP_LOG(("NVRM: %s: ERROR: LaneCount - %d is not supported for waterMark calculations.",
+                __FUNCTION__, linkConfig.lanes));
+        DP_LOG(("Current support is only up to 4-Lanes & any change/increase in supported lanes "
+                "should be reflected in waterMark calculations algorithm. "
+                "Ex: See calc for minHBlank variable below"));
 
         DP_ASSERT(0);
         return false;
     }
 
-    if ((modesetInfo.pixelClockHz * modesetInfo.depth) >= (8 * laneDataRate * linkConfig.lanes * DSC_FACTOR))
+    if ((modesetInfo.pixelClockHz * modesetInfo.depth) >= (8 * linkConfig.minRate * linkConfig.lanes * DSC_FACTOR))
     {
         return false;
     }
@@ -466,7 +473,7 @@ bool DisplayPort::isModePossibleSSTWithFEC
     // 0 active symbols. This may cause HW hang. Bug 200379426
     //
     if ((modesetInfo.bEnableDsc) &&
-        ((modesetInfo.pixelClockHz * modesetInfo.depth) < ((8 * laneDataRate * linkConfig.lanes * DSC_FACTOR) / 64)))
+        ((modesetInfo.pixelClockHz * modesetInfo.depth) < ((8 * linkConfig.minRate * linkConfig.lanes * DSC_FACTOR) / 64)))
     {
         return false;
     }
@@ -480,7 +487,7 @@ bool DisplayPort::isModePossibleSSTWithFEC
     PrecisionFactor = 100000;
     ratioF = ((NvU64)modesetInfo.pixelClockHz * modesetInfo.depth * PrecisionFactor) / DSC_FACTOR;
 
-    ratioF /= 8 * (NvU64)laneDataRate * linkConfig.lanes;
+    ratioF /= 8 * (NvU64)linkConfig.minRate * linkConfig.lanes;
 
     if (PrecisionFactor < ratioF) // Assert if we will end up with a negative number in below
         return false;
@@ -510,7 +517,8 @@ bool DisplayPort::isModePossibleSSTWithFEC
 
     if (dpInfo->waterMark > numSymbolsPerLine)
     {
-        DP_PRINTF(DP_ERROR, "ERROR: watermark = %d should not be greater than numSymbolsPerLine = %d.", dpInfo->waterMark, numSymbolsPerLine);
+        DP_LOG(("NVRM: %s:", __FUNCTION__));
+        DP_LOG(("\t\tERROR: watermark = %d should not be greater than numSymbolsPerLine = %d.", dpInfo->waterMark, numSymbolsPerLine));
         return false;
     }
 
@@ -535,7 +543,7 @@ bool DisplayPort::isModePossibleSSTWithFEC
         sliceWidth = (NvU32)divide_ceil(modesetInfo.surfaceWidth, sliceCount);
         chunkSize = (NvU32)divide_ceil(modesetInfo.depth * sliceWidth, 8U * DSC_FACTOR);
 
-        if(((NvU64)(chunkSize + 1U) * sliceCount * modesetInfo.pixelClockHz) < (NvU64)(laneDataRate * numLanesPerLink * modesetInfo.surfaceWidth))
+        if(((NvU64)(chunkSize + 1U) * sliceCount * modesetInfo.pixelClockHz) < (NvU64)(linkConfig.minRate * numLanesPerLink * modesetInfo.surfaceWidth))
         {
             // BW is plenty, this is common case.
             //EOC symbols, when BW enough, only last EOC needs to be considered.
@@ -566,7 +574,7 @@ bool DisplayPort::isModePossibleSSTWithFEC
     if (linkConfig.bEnableFEC)
     {
         //
-        // In worst case, FEC symbols fall into a narrow Hblank period,
+        // In worst case, FEC symbols fall into a narrow Hblank period, 
         // we have to consider this in HBlank checker, see bug 200496977
         // but we don't have to consider this in the calculation of hblank_symbols
         //
@@ -576,27 +584,29 @@ bool DisplayPort::isModePossibleSSTWithFEC
     }
 
     // BlankingSymbolsPerLane is the MinHBlank in link clock cycles,
-    MinHBlank = (unsigned)(divide_ceil(BlankingSymbolsPerLane * modesetInfo.pixelClockHz,
-                                       LINK_RATE_TO_DATA_RATE_8B_10B(linkConfig.peakRate))); //in pclk cycles
+    MinHBlank = (unsigned)(divide_ceil(BlankingSymbolsPerLane * modesetInfo.pixelClockHz, 
+                                        linkConfig.peakRate)); //in pclk cycles
     MinHBlank += 3U; //add some margin
 
     NvU32 HBlank = (modesetInfo.rasterWidth - modesetInfo.surfaceWidth);
 
     if (MinHBlank > HBlank)
     {
-        DP_PRINTF(DP_ERROR, "ERROR: Blanking Width is smaller than minimum permissible value.");
+        DP_LOG(("NVRM: %s:", __FUNCTION__));
+        DP_LOG(("\t\tERROR: Blanking Width is smaller than minimum permissible value."));
         return false;
     }
 
     // Bug 702290 - Active Width should be greater than 60
     if (modesetInfo.surfaceWidth <= 60)
     {
-        DP_PRINTF(DP_ERROR, "ERROR: Minimum Horizontal Active Width <= 60 not supported.");
+        DP_LOG(("NVRM: %s:", __FUNCTION__));
+        DP_LOG(("\t\tERROR: Minimum Horizontal Active Width <= 60 not supported."));
         return false;
     }
 
-    NvU32 total_hblank_symbols = (NvS32)divide_ceil((HBlank * LINK_RATE_TO_DATA_RATE_8B_10B(linkConfig.peakRate)), modesetInfo.pixelClockHz);
-    NvS32 hblank_symbols = (NvS32)(((NvU64)(HBlank - MinHBlank) * LINK_RATE_TO_DATA_RATE_8B_10B(linkConfig.peakRate)) / modesetInfo.pixelClockHz);
+    NvU32 total_hblank_symbols = (NvS32)divide_ceil((HBlank * linkConfig.peakRate), modesetInfo.pixelClockHz);
+    NvS32 hblank_symbols = (NvS32)(((NvU64)(HBlank - MinHBlank) * linkConfig.peakRate) / modesetInfo.pixelClockHz);
 
     if (linkConfig.bEnableFEC)
     {
@@ -697,7 +707,7 @@ bool DisplayPort::isModePossibleSSTWithFEC
     }
     else
     {
-        vblank_symbols = (NvS32)(((NvU64)(modesetInfo.surfaceWidth - 3) * LINK_RATE_TO_DATA_RATE_8B_10B(linkConfig.peakRate)) /  modesetInfo.pixelClockHz);
+        vblank_symbols = (NvS32)(((NvU64)(modesetInfo.surfaceWidth - 3) * linkConfig.peakRate) /  modesetInfo.pixelClockHz);
 
         //
         // The active region transmission is delayed because of lane fifo storage.
@@ -820,62 +830,43 @@ bool DisplayPort::isModePossibleMSTWithFEC
 
     if (MinHBlank > HBlank)
     {
-        DP_PRINTF(DP_ERROR, "ERROR: Blanking Width is smaller than minimum permissible value.");
+        DP_LOG(("NVRM: %s:", __FUNCTION__));
+        DP_LOG(("\t\tERROR: Blanking Width is smaller than minimum permissible value."));
         return false;
     }
 
     // Bug 702290 - Active Width should be greater than 60
     if (modesetInfo.surfaceWidth <= 60)
     {
-        DP_PRINTF(DP_ERROR, "ERROR: Minimum Horizontal Active Width <= 60 not supported.");
+        DP_LOG(("NVRM: %s:", __FUNCTION__));
+        DP_LOG(("\t\tERROR: Minimum Horizontal Active Width <= 60 not supported."));
         return false;
     }
 
-    // MST can do SDP splitting so all audio configuration are possible.
+    // MST can do SDP splitting so all audio configuration are possible. 
     dpInfo->hBlankSym = 0U;
     dpInfo->vBlankSym = 0U;
 
     return true;
 }
 
-unsigned DisplayPort::pbnForMode(const ModesetInfo & modesetInfo, bool bAccountSpread)
+unsigned DisplayPort::pbnForMode(const ModesetInfo & modesetInfo)
 {
-    unsigned bpp_factor;
-    NvU64 pbn_numerator, pbn_denominator;
+    //
+    // Calculate PBN in terms of 54/64 mbyte/sec
+    // round up by .6% for spread de-rate. Note: if we're not spreading our link
+    // this MUST still be counted.  It's also to allow downstream links to be spread.
+    //
+    unsigned pbnForMode = (NvU32)(divide_ceil(modesetInfo.pixelClockHz * modesetInfo.depth * 1006 * 64 / 8,
+                                    (NvU64)54000000 *1000));
 
-    if (modesetInfo.bEnableDsc)
+    if(modesetInfo.bEnableDsc)
     {
-        if (modesetInfo.depth > 512U)
-        {
-            bpp_factor = 256U;
-        }
-        else
-        {
-            // Pre-Blackwell, depth will have bppx16
-            bpp_factor = 16U;
-        }   
-    }
-    else
-    {
-        if (modesetInfo.depth > 36U)
-        {
-            // Blackwell and later, depth will have effectiveBppx256
-            bpp_factor = 256U;
-        }
-        else
-        {
-            bpp_factor = 1U;
-        }
+        //
+        // When DSC is enabled consider depth will multiplied by 16 and also 3% FEC Overhead
+        // as per DP1.4 spec
+        pbnForMode = (NvU32)(divide_ceil(pbnForMode * 100, 97 * DSC_DEPTH_FACTOR));
     }
 
-    pbn_numerator = modesetInfo.pixelClockHz * modesetInfo.depth * 64 / 8;
-    pbn_denominator = 54000000ULL * bpp_factor;
-
-    if (bAccountSpread)
-    {
-        pbn_numerator *= 1006;
-        pbn_denominator *= 1000;
-    }
-
-    return (NvU32)(divide_ceil(pbn_numerator, pbn_denominator));
+    return pbnForMode;
 }

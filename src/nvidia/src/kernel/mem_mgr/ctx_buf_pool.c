@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2016-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -41,7 +41,6 @@
 #include "kernel/gpu/fifo/kernel_fifo.h"
 #include "kernel/gpu/gr/kernel_graphics.h"
 #include "gpu/mem_mgr/heap.h"
-#include "gpu/mem_mgr/phys_mem_allocator/phys_mem_allocator.h"
 
 /*
  * @brief Are memory pools supported for context buffers
@@ -58,26 +57,15 @@ ctxBufPoolIsSupported
 {
     MemoryManager *pMemoryManager = GPU_GET_MEMORY_MANAGER(pGpu);
     NvBool bCallingContextPlugin;
-    NvU32 gfid = GPU_GFID_PF;
-
     if (!pGpu->getProperty(pGpu, PDB_PROP_GPU_MOVE_CTX_BUFFERS_TO_PMA))
     {
         NV_PRINTF(LEVEL_INFO, "Ctx buffers not supported in PMA\n");
         return NV_FALSE;
     }
 
-    if (!memmgrIsPmaEnabled(pMemoryManager) || !memmgrIsPmaSupportedOnPlatform(pMemoryManager))
+    if (!memmgrIsPmaInitialized(pMemoryManager))
     {
         NV_PRINTF(LEVEL_INFO, "PMA is disabled. Ctx buffers will be allocated in RM reserved heap\n");
-        return NV_FALSE;
-    }
-
-    // TODO remove when bug ID 3922001 for ap_sim_compute_uvm test case resolved
-    if (!IS_SILICON(pGpu) &&
-        memmgrBug3922001DisableCtxBufOnSim(pGpu, pMemoryManager) &&
-        gpuIsSelfHosted(pGpu))
-    {
-        NV_PRINTF(LEVEL_INFO, "Ctx buffers not supported on simulation/emulation\n");
         return NV_FALSE;
     }
 
@@ -88,12 +76,12 @@ ctxBufPoolIsSupported
     }
 
     //
-    // In virtualized env, host RM should use CtxBuffer for all allocations made
-    // on behalf of plugin or for PF usages
+    // In virtualized env, host RM we will continue to use subheap for all allocations it makes on behalf
+    // of guest RM. Ctx buffer allocations made by host RM for plugins(plugin channel inst block, runlists etc)
+    // will come from host RM's PMA(partition PMA)
     //
     NV_ASSERT_OR_RETURN(vgpuIsCallingContextPlugin(pGpu, &bCallingContextPlugin) == NV_OK, NV_FALSE);
-    NV_ASSERT_OR_RETURN(vgpuGetCallingContextGfid(pGpu, &gfid) == NV_OK, NV_FALSE);
-    if (hypervisorIsVgxHyper() && !bCallingContextPlugin && IS_GFID_VF(gfid))
+    if (hypervisorIsVgxHyper() && !bCallingContextPlugin)
     {
         NV_PRINTF(LEVEL_INFO, "ctx buffers in PMA not supported for allocations host RM makes on behalf of guest\n");
         return NV_FALSE;
@@ -156,23 +144,11 @@ ctxBufPoolInit
             case RM_ATTR_PAGE_SIZE_512MB:
                 poolConfig = POOL_CONFIG_CTXBUF_512M;
                 break;
-            case RM_ATTR_PAGE_SIZE_256GB:
-                poolConfig = POOL_CONFIG_CTXBUF_256G;
-                break;
             default:
                 NV_PRINTF(LEVEL_ERROR, "Unsupported page size attr %d\n", i);
                 return NV_ERR_INVALID_STATE;
         }
-        NV_ASSERT_OK_OR_GOTO(status,
-            rmMemPoolSetup((void*)pHeap->pPmaObject, &pCtxBufPool->pMemPool[i],
-                           poolConfig),
-            cleanup);
-
-        // Allocate the pool in CPR in case of Confidential Compute
-        if (gpuIsCCFeatureEnabled(pGpu))
-        {
-            rmMemPoolAllocateProtectedMemory(pCtxBufPool->pMemPool[i], NV_TRUE);
-        }
+        NV_ASSERT_OK_OR_GOTO(status, rmMemPoolSetup((void*)&pHeap->pmaObject, &pCtxBufPool->pMemPool[i], poolConfig), cleanup);
     }
     NV_PRINTF(LEVEL_INFO, "Ctx buf pool successfully initialized\n");
 
@@ -262,8 +238,7 @@ ctxBufPoolReserve
 )
 {
     NV_STATUS status = NV_OK;
-    NvU64 pageSize;
-    NvU32 i;
+    NvU32 pageSize, i;
     NvU64 totalSize[RM_ATTR_PAGE_SIZE_INVALID] = {0};
     NvU64 size;
 
@@ -298,14 +273,11 @@ ctxBufPoolReserve
             case RM_PAGE_SIZE_512M:
                 totalSize[RM_ATTR_PAGE_SIZE_512MB] += size;
                 break;
-            case RM_PAGE_SIZE_256G:
-                totalSize[RM_ATTR_PAGE_SIZE_256GB] += size;
-                break;
             default:
-                NV_PRINTF(LEVEL_ERROR, "Unrecognized/unsupported page size = 0x%llx\n", pageSize);
+                NV_PRINTF(LEVEL_ERROR, "Unrecognized/unsupported page size = 0x%x\n", pageSize);
                 NV_ASSERT_OR_RETURN(0, NV_ERR_INVALID_ARGUMENT);
         }
-        NV_PRINTF(LEVEL_INFO, "Reserving 0x%llx bytes for buf Id = 0x%x in pool with page size = 0x%llx\n", size, i, pageSize);
+        NV_PRINTF(LEVEL_INFO, "Reserving 0x%llx bytes for buf Id = 0x%x in pool with page size = 0x%x\n", size, i, pageSize);
     }
 
     for (i = 0; i < RM_ATTR_PAGE_SIZE_INVALID; i++)
@@ -404,10 +376,10 @@ ctxBufPoolAllocate
     }
 
     // If page size is not set, then set it based on actual size of memdesc and its alignment
-    NvU64 pageSize = memdescGetPageSize(pMemDesc, AT_GPU);
+    NvU32 pageSize = memdescGetPageSize(pMemDesc, AT_GPU);
     if ((pageSize == 0) || (memdescGetContiguity(pMemDesc, AT_GPU)))
     {
-        NvU64 newPageSize;
+        NvU32 newPageSize;
         NV_ASSERT_OK_OR_RETURN(ctxBufPoolGetSizeAndPageSize(pCtxBufPool, pMemDesc->pGpu,
             pMemDesc->Alignment, RM_ATTR_PAGE_SIZE_DEFAULT, memdescGetContiguity(pMemDesc, AT_GPU),
            &pMemDesc->ActualSize, &newPageSize));
@@ -422,7 +394,7 @@ ctxBufPoolAllocate
         if (pageSize == 0)
         {
             memdescSetPageSize(pMemDesc, AT_GPU, newPageSize);
-            NV_PRINTF(LEVEL_INFO, "Ctx buffer page size set to 0x%llx\n", newPageSize);
+            NV_PRINTF(LEVEL_INFO, "Ctx buffer page size set to 0x%x\n", newPageSize);
         }
         pageSize = newPageSize;
     }
@@ -443,15 +415,12 @@ ctxBufPoolAllocate
         case RM_PAGE_SIZE_512M:
             pPool = pCtxBufPool->pMemPool[RM_ATTR_PAGE_SIZE_512MB];
             break;
-        case RM_PAGE_SIZE_256G:
-            pPool = pCtxBufPool->pMemPool[RM_ATTR_PAGE_SIZE_256GB];
-            break;
         default:
-            NV_PRINTF(LEVEL_ERROR, "Unsupported page size = 0x%llx set for context buffer\n", pageSize);
+            NV_PRINTF(LEVEL_ERROR, "Unsupported page size = 0x%x set for context buffer\n", pageSize);
             NV_ASSERT_OR_RETURN(0, NV_ERR_INVALID_ARGUMENT);
     }
     NV_ASSERT_OK_OR_RETURN(rmMemPoolAllocate(pPool, (RM_POOL_ALLOC_MEMDESC*)pMemDesc));
-    NV_PRINTF(LEVEL_INFO, "Buffer allocated from ctx buf pool with page size = 0x%llx\n", pageSize);
+    NV_PRINTF(LEVEL_INFO, "Buffer allocated from ctx buf pool with page size = 0x%x\n", pageSize);
     return NV_OK;
 }
 
@@ -474,7 +443,7 @@ ctxBufPoolFree
     NV_ASSERT_OR_RETURN(pCtxBufPool != NULL, NV_ERR_INVALID_ARGUMENT);
     NV_ASSERT_OR_RETURN(pMemDesc != NULL, NV_ERR_INVALID_ARGUMENT);
 
-    NvU64 pageSize = memdescGetPageSize(pMemDesc, AT_GPU);
+    NvU32 pageSize = memdescGetPageSize(pMemDesc, AT_GPU);
 
     //
     // If buffer is contiguous, then it may or may not be allocated from the same pool
@@ -504,9 +473,6 @@ ctxBufPoolFree
         case RM_PAGE_SIZE_512M:
             pPool = pCtxBufPool->pMemPool[RM_ATTR_PAGE_SIZE_512MB];
             break;
-        case RM_PAGE_SIZE_256G:
-            pPool = pCtxBufPool->pMemPool[RM_ATTR_PAGE_SIZE_256GB];
-            break;
         default:
             NV_PRINTF(LEVEL_ERROR, "Unsupported page size detected for context buffer\n");
             NV_ASSERT_OR_RETURN(0, NV_ERR_INVALID_STATE);
@@ -516,14 +482,21 @@ ctxBufPoolFree
     if (rmMemPoolIsScrubSkipped(pPool))
     {
         OBJGPU *pGpu = pMemDesc->pGpu;
-        MemoryManager *pMemoryManager = GPU_GET_MEMORY_MANAGER(pGpu);
-
-        memmgrMemsetInBlocks(pMemoryManager, pMemDesc, 0, 0, pMemDesc->Size,
-                                    TRANSFER_FLAGS_NONE, 0 /* Default Block Size */);
+        NvU8   *pMem = kbusMapRmAperture_HAL(pGpu, pMemDesc);
+        if (pMem == NULL)
+        {
+            NV_PRINTF(LEVEL_ERROR, "Failed to BAR2 map memdesc. memory won't be scrubbed\n");
+            NV_ASSERT(pMem != NULL);
+        }
+        else
+        {
+            portMemSet(pMem, 0, pMemDesc->ActualSize);
+            kbusUnmapRmAperture_HAL(pGpu, pMemDesc, &pMem, NV_TRUE);
+        }
     }
     rmMemPoolFree(pPool, (RM_POOL_ALLOC_MEMDESC*)pMemDesc, 0);
 
-    NV_PRINTF(LEVEL_INFO, "Buffer freed from ctx buf pool with page size = 0x%llx\n", pageSize);
+    NV_PRINTF(LEVEL_INFO, "Buffer freed from ctx buf pool with page size = 0x%x\n", pageSize);
     return NV_OK;
 }
 
@@ -532,7 +505,7 @@ ctxBufPoolFree
  *
  * @param[in]  pGpu          OBJGPU pointer
  * @param[in]  bufId         Id to identify the buffer
- * @param[in]  rmEngineType  RM Engine Type
+ * @param[in]  engineType    NV2080 engine type
  * @param[out] ppCtxBufPool  Pointer to context buffer pool
  *
  * @return NV_STATUS
@@ -542,7 +515,7 @@ ctxBufPoolGetGlobalPool
 (
     OBJGPU *pGpu,
     CTX_BUF_ID bufId,
-    RM_ENGINE_TYPE rmEngineType,
+    NvU32 engineType,
     CTX_BUF_POOL_INFO **ppCtxBufPool
 )
 {
@@ -550,17 +523,17 @@ ctxBufPoolGetGlobalPool
     CTX_BUF_POOL_INFO *pCtxBufPool = NULL;
 
     NV_ASSERT_OR_RETURN(ppCtxBufPool != NULL, NV_ERR_INVALID_ARGUMENT);
-    NV_ASSERT_OR_RETURN(RM_ENGINE_TYPE_IS_VALID(rmEngineType), NV_ERR_INVALID_ARGUMENT);
+    NV_ASSERT_OR_RETURN(NV2080_ENGINE_TYPE_IS_VALID(engineType), NV_ERR_INVALID_ARGUMENT);
 
     switch (bufId)
     {
         case CTX_BUF_ID_RUNLIST:
-            pCtxBufPool = kfifoGetRunlistBufPool(pGpu, pKernelFifo, rmEngineType);
+            pCtxBufPool = kfifoGetRunlistBufPool(pGpu, pKernelFifo, engineType);
             break;
         case CTX_BUF_ID_GR_GLOBAL:
         {
-            KernelGraphics *pKernelGraphics = GPU_GET_KERNEL_GRAPHICS(pGpu, RM_ENGINE_TYPE_GR_IDX(rmEngineType));
-            NV_ASSERT_OR_RETURN(RM_ENGINE_TYPE_IS_GR(rmEngineType), NV_ERR_INVALID_ARGUMENT);
+            KernelGraphics *pKernelGraphics = GPU_GET_KERNEL_GRAPHICS(pGpu, NV2080_ENGINE_TYPE_GR_IDX(engineType));
+            NV_ASSERT_OR_RETURN(NV2080_ENGINE_TYPE_IS_GR(engineType), NV_ERR_INVALID_ARGUMENT);
             pCtxBufPool = kgraphicsGetCtxBufPool(pGpu, pKernelGraphics);
             break;
         }
@@ -593,12 +566,12 @@ ctxBufPoolGetSizeAndPageSize
     RM_ATTR_PAGE_SIZE  attr,
     NvBool             bContig,
     NvU64             *pSize,
-    NvU64             *pPageSize
+    NvU32             *pPageSize
 )
 {
     MemoryManager          *pMemoryManager      = GPU_GET_MEMORY_MANAGER(pGpu);
     NV_STATUS               status              = NV_OK;
-    NvU64                   pageSize            = 0;
+    NvU32                   pageSize            = 0;
     NvU32                   allocFlags          = 0;
     NvU32                   retAttr             = 0;
     NvU32                   retAttr2            = 0;
@@ -623,15 +596,11 @@ ctxBufPoolGetSizeAndPageSize
             break;
         case RM_ATTR_PAGE_SIZE_HUGE:
             retAttr = FLD_SET_DRF(OS32, _ATTR, _PAGE_SIZE, _HUGE, retAttr);
-            retAttr2 = FLD_SET_DRF(OS32, _ATTR2, _PAGE_SIZE_HUGE, _2MB, retAttr2);
+            retAttr2 = FLD_SET_DRF(OS32, _ATTR2, _PAGE_SIZE_HUGE, _2MB, retAttr);
             break;
         case RM_ATTR_PAGE_SIZE_512MB:
             retAttr = FLD_SET_DRF(OS32, _ATTR, _PAGE_SIZE, _HUGE, retAttr);
-            retAttr2 = FLD_SET_DRF(OS32, _ATTR2, _PAGE_SIZE_HUGE, _512MB, retAttr2);
-            break;
-        case RM_ATTR_PAGE_SIZE_256GB:
-            retAttr = FLD_SET_DRF(OS32, _ATTR, _PAGE_SIZE, _HUGE, retAttr);
-            retAttr2 = FLD_SET_DRF(OS32, _ATTR2, _PAGE_SIZE_HUGE, _256GB, retAttr2);
+            retAttr2 = FLD_SET_DRF(OS32, _ATTR2, _PAGE_SIZE_HUGE, _512MB, retAttr);
             break;
         default:
             NV_PRINTF(LEVEL_ERROR, "unsupported page size attr\n");
@@ -704,7 +673,7 @@ ctxBufPoolGetSizeAndPageSize
 
     *pPageSize = pageSize;
     *pSize = size;
-    NV_PRINTF(LEVEL_INFO, "Buffer updated size = 0x%llx with page size = 0x%llx\n", size, pageSize);
+    NV_PRINTF(LEVEL_INFO, "Buffer updated size = 0x%llx with page size = 0x%x\n", size, pageSize);
     return status;
 }
 

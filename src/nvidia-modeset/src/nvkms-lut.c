@@ -25,83 +25,46 @@
 #include "nvkms-rm.h"
 #include "nvkms-rmapi.h"
 #include "nvkms-dma.h"
-#include "nvkms-surface.h"
-#include "nvkms-private.h"
 #include "nvkms-utils.h"
-#include "nvkms-headsurface.h"
 #include "nvos.h"
 
 #include <class/cl0040.h> /* NV01_MEMORY_LOCAL_USER */
 
-static void FreeLutSurfaceEvo(NVDevEvoPtr pDevEvo, NVSurfaceEvoPtr pSurfEvo)
+static void FreeLutSurfaceEvoInVidmem(NVLutSurfaceEvoPtr pSurfEvo)
 {
+    NVDevEvoPtr pDevEvo;
+
     if (pSurfEvo == NULL) {
         return;
     }
 
-    nvAssert(pSurfEvo->rmRefCnt == 1);
-    nvAssert(pSurfEvo->structRefCnt == 1);
+    pDevEvo = pSurfEvo->pDevEvo;
 
-    nvEvoUnregisterSurface(pDevEvo,
-                           pDevEvo->pNvKmsOpenDev,
-                           pSurfEvo->owner.surfaceHandle,
-                           TRUE /* skipUpdate */,
-                           FALSE /* skipSync */);
-}
+    nvRmEvoUnMapVideoMemory(pDevEvo, pSurfEvo->handle,
+                            pSurfEvo->subDeviceAddress);
 
-static NVSurfaceEvoPtr RegisterLutSurfaceEvo(NVDevEvoPtr pDevEvo, NvU32 memoryHandle)
-{
-    struct NvKmsRegisterSurfaceParams registerSurfaceParams = { };
-    const NVEvoApiHandlesRec *pSurfaceHandles;
-    NvU64 size = (sizeof(NVEvoLutDataRec) + 63) & ~63;
-    NVSurfaceEvoPtr pSurfEvo = NULL;
+    /* Free display context dmas for the surface, if any */
+    nvRmEvoFreeDispContextDMA(pDevEvo, &pSurfEvo->dispCtxDma);
 
-    registerSurfaceParams.request.deviceHandle = pDevEvo->deviceHandle;
-    registerSurfaceParams.request.useFd = FALSE;
-    registerSurfaceParams.request.rmClient = nvEvoGlobal.clientHandle;
+    /* Free the surface */
+    if (pSurfEvo->handle) {
+        NvU32 result;
 
-    registerSurfaceParams.request.planes[0].u.rmObject = memoryHandle;
-    registerSurfaceParams.request.planes[0].offset = 0;
-    registerSurfaceParams.request.planes[0].pitch = (size + 255) & ~255;
-    registerSurfaceParams.request.planes[0].rmObjectSizeInBytes = size;
+        result = nvRmApiFree(nvEvoGlobal.clientHandle,
+                             pDevEvo->deviceHandle, pSurfEvo->handle);
+        if (result != NVOS_STATUS_SUCCESS) {
+            nvAssert(!"Freeing LUT surface failed");
+        }
 
-    registerSurfaceParams.request.widthInPixels = (size + 7) >> 3; /* TODO: Check on this */
-    registerSurfaceParams.request.heightInPixels = 1;
-
-    registerSurfaceParams.request.layout = NvKmsSurfaceMemoryLayoutPitch;
-    registerSurfaceParams.request.format = NvKmsSurfaceMemoryFormatR16G16B16A16;
-
-    registerSurfaceParams.request.noDisplayHardwareAccess = FALSE;
-    registerSurfaceParams.request.noDisplayCaching = FALSE;
-
-    registerSurfaceParams.request.isoType = NVKMS_MEMORY_ISO;
-    registerSurfaceParams.request.log2GobsPerBlockY = 0;
-
-    /*
-     * Although the caller may like a GPU mapping, we pass
-     * NvHsMapPermissionsNone so failing the mapping doesn't fail the surface
-     * creation.
-     */
-    nvEvoRegisterSurface(pDevEvo,
-                         pDevEvo->pNvKmsOpenDev,
-                         &registerSurfaceParams,
-                         NvHsMapPermissionsNone);
-
-    if (registerSurfaceParams.reply.surfaceHandle == 0) {
-        return NULL;
+        nvFreeUnixRmHandle(&pDevEvo->handleAllocator,
+                           pSurfEvo->handle);
+        pSurfEvo->handle = 0;
     }
 
-    pSurfaceHandles = nvGetSurfaceHandlesFromOpenDevConst(pDevEvo->pNvKmsOpenDev);
-    pSurfEvo =
-        nvEvoGetSurfaceFromHandle(pDevEvo,
-                                  pSurfaceHandles,
-                                  registerSurfaceParams.reply.surfaceHandle,
-                                  FALSE /* isUsedByCursorChannel */,
-                                  TRUE /* isUsedByLayerChannel */);
-    return pSurfEvo;
+    nvFree(pSurfEvo);
 }
 
-static NVSurfaceEvoPtr AllocLutSurfaceEvoInVidmem(NVDevEvoPtr pDevEvo)
+static NVLutSurfaceEvoPtr AllocLutSurfaceEvoInVidmem(NVDevEvoPtr pDevEvo)
 {
     NV_MEMORY_ALLOCATION_PARAMS memAllocParams = { };
     NvU32 ret = NVOS_STATUS_ERROR_GENERIC;
@@ -109,19 +72,28 @@ static NVSurfaceEvoPtr AllocLutSurfaceEvoInVidmem(NVDevEvoPtr pDevEvo)
     NvU32 allocFlags = NVOS32_ALLOC_FLAGS_FORCE_MEM_GROWS_DOWN |
                        NVOS32_ALLOC_FLAGS_ALIGNMENT_FORCE;
     NvU64 size = 0, alignment = 4096;
-    NvU32 memoryHandle = 0;
-    NVSurfaceEvoPtr pSurfEvo = NULL;
 
-    memoryHandle = nvGenerateUnixRmHandle(&pDevEvo->handleAllocator);
+    NVLutSurfaceEvoPtr pSurfEvo;
 
-    if (memoryHandle == 0) {
+    pSurfEvo = nvCalloc(1, sizeof(*pSurfEvo));
+    if (pSurfEvo == NULL) {
+        return NULL;
+    }
+
+    pSurfEvo->pDevEvo = pDevEvo;
+
+    size = (sizeof(NVEvoLutDataRec) + 63) & ~63;
+
+    pSurfEvo->size = size;
+
+    pSurfEvo->handle = nvGenerateUnixRmHandle(&pDevEvo->handleAllocator);
+
+    if (pSurfEvo->handle == 0) {
         goto fail;
     }
 
-    size = (sizeof(NVEvoLutDataRec) + 63) & ~63;
     attr = FLD_SET_DRF(OS32, _ATTR, _LOCATION, _VIDMEM, attr);
     attr2 = FLD_SET_DRF(OS32, _ATTR2, _GPU_CACHEABLE, _DEFAULT, attr2);
-    attr2 = FLD_SET_DRF(OS32, _ATTR2, _ISO, _YES, attr2);
 
     alignment = NV_MAX(alignment, NV_EVO_SURFACE_ALIGNMENT);
     if (alignment != 0) {
@@ -138,72 +110,112 @@ static NVSurfaceEvoPtr AllocLutSurfaceEvoInVidmem(NVDevEvoPtr pDevEvo)
 
     ret = nvRmApiAlloc(nvEvoGlobal.clientHandle,
                        pDevEvo->deviceHandle,
-                       memoryHandle,
+                       pSurfEvo->handle,
                        NV01_MEMORY_LOCAL_USER,
                        &memAllocParams);
 
     /* If we failed the allocation above, abort */
     if (ret != NVOS_STATUS_SUCCESS) {
-        nvFreeUnixRmHandle(&pDevEvo->handleAllocator, memoryHandle);
+        nvFreeUnixRmHandle(&pDevEvo->handleAllocator, pSurfEvo->handle);
+        pSurfEvo->handle = 0;
 
         goto fail;
     }
 
-    pSurfEvo = RegisterLutSurfaceEvo(pDevEvo, memoryHandle);
-    /*
-     * nvEvoRegisterSurface dups the memory handle, so we free the one we
-     * just created.
-     */
-    nvRmApiFree(nvEvoGlobal.clientHandle,
-                pDevEvo->deviceHandle,
-                memoryHandle);
-    nvFreeUnixRmHandle(&pDevEvo->handleAllocator, memoryHandle);
-    memoryHandle = 0;
+    /* Allocate a display context dma */
+    pSurfEvo->dispCtxDma =
+        nvRmEvoAllocateAndBindDispContextDMA(pDevEvo,
+                                             pSurfEvo->handle,
+                                             NvKmsSurfaceMemoryLayoutPitch,
+                                             pSurfEvo->size - 1);
 
-    if (pSurfEvo == NULL) {
+    if (!pSurfEvo->dispCtxDma) {
         goto fail;
     }
 
-    /*
-     * Map the surface for the CPU. This is only done by nvEvoRegisterSurface
-     * for NISO surfaces, so it must be done manually here.
-     */
-    if (!nvRmEvoMapVideoMemory(pDevEvo,
-                               pSurfEvo->planes[0].rmHandle,
-                               size, pSurfEvo->cpuAddress,
+    /* Map the surface for the CPU */
+    if (!nvRmEvoMapVideoMemory(pSurfEvo->pDevEvo,
+                               pSurfEvo->handle, pSurfEvo->size,
+                               pSurfEvo->subDeviceAddress,
                                SUBDEVICE_MASK_ALL)) {
         goto fail;
     }
 
-    /*
-     * The GPU mapping is only needed for prefetching LUT surfaces for DIFR.
-     * It isn't worth failing alone but we want to keep gpuAddress coherent.
-     */
-    pSurfEvo->gpuAddress = nvHsMapSurfaceToDevice(pDevEvo,
-                                                  pSurfEvo->planes[0].rmHandle,
-                                                  size,
-                                                  NvHsMapPermissionsReadOnly);
-
-    if (pSurfEvo->gpuAddress == NV_HS_BAD_GPU_ADDRESS) {
-        pSurfEvo->gpuAddress = 0ULL;
-    }
-
     return pSurfEvo;
 
-fail:
+ fail:
     /* An error occurred -- free the surface */
-    FreeLutSurfaceEvo(pDevEvo, pSurfEvo);
+    FreeLutSurfaceEvoInVidmem(pSurfEvo);
 
     return NULL;
+
 }
 
-static NVSurfaceEvoPtr AllocLutSurfaceEvoInSysmem(NVDevEvoPtr pDevEvo)
+static void FreeLutSurfaceEvoInSysmem(NVLutSurfaceEvoPtr pSurfEvo)
+{
+    NVDevEvoPtr pDevEvo;
+
+    if (pSurfEvo == NULL) {
+        return;
+    }
+
+    pDevEvo = pSurfEvo->pDevEvo;
+
+    /* Free display context dmas for the surface, if any */
+    nvRmEvoFreeDispContextDMA(pDevEvo, &pSurfEvo->dispCtxDma);
+
+    /* Free the surface */
+    if (pSurfEvo->handle) {
+        NvU32 result;
+
+        if (pSurfEvo->subDeviceAddress[0] != NULL) {
+            /*
+             * SOC display devices should only have one subdevice
+             * (and therefore it is safe to unmap only subDeviceAddress[0])
+             * for reasons described in AllocLutSurfaceEvoInSysmem
+             */
+            nvAssert(pDevEvo->numSubDevices == 1);
+
+            result = nvRmApiUnmapMemory(nvEvoGlobal.clientHandle,
+                                        pDevEvo->deviceHandle,
+                                        pSurfEvo->handle,
+                                        pSurfEvo->subDeviceAddress[0],
+                                        0);
+            if (result != NVOS_STATUS_SUCCESS) {
+                nvAssert(!"Unmapping LUT surface failed");
+            }
+            pSurfEvo->subDeviceAddress[0] = NULL;
+        }
+
+        result = nvRmApiFree(nvEvoGlobal.clientHandle,
+                             pDevEvo->deviceHandle, pSurfEvo->handle);
+        if (result != NVOS_STATUS_SUCCESS) {
+            nvAssert(!"Freeing LUT surface failed");
+        }
+
+        nvFreeUnixRmHandle(&pDevEvo->handleAllocator, pSurfEvo->handle);
+    }
+
+    nvFree(pSurfEvo);
+}
+
+static NVLutSurfaceEvoPtr AllocLutSurfaceEvoInSysmem(NVDevEvoPtr pDevEvo)
 {
     NvU32 memoryHandle = 0;
     void *pBase = NULL;
-    NvU64 size = (sizeof(NVEvoLutDataRec) + 63) & ~63;
-    NVSurfaceEvoPtr pSurfEvo = NULL;
-    NvU32 ret = 0;
+    NvU64 size = 0;
+    NVLutSurfaceEvoPtr pSurfEvo;
+
+    pSurfEvo = nvCalloc(1, sizeof(*pSurfEvo));
+    if (pSurfEvo == NULL) {
+        return NULL;
+    }
+
+    pSurfEvo->pDevEvo = pDevEvo;
+
+    size = (sizeof(NVEvoLutDataRec) + 63) & ~63;
+
+    pSurfEvo->size = size;
 
     memoryHandle = nvGenerateUnixRmHandle(&pDevEvo->handleAllocator);
     if (memoryHandle == 0) {
@@ -220,37 +232,15 @@ static NVSurfaceEvoPtr AllocLutSurfaceEvoInSysmem(NVDevEvoPtr pDevEvo)
         goto fail;
     }
 
-    pSurfEvo = RegisterLutSurfaceEvo(pDevEvo, memoryHandle);
+    pSurfEvo->handle = memoryHandle;
 
-    /*
-     * nvEvoRegisterSurface dups the memory handle, so we can free the one we
-     * just created.
-     */
-    nvRmApiUnmapMemory(nvEvoGlobal.clientHandle,
-                       pDevEvo->deviceHandle,
-                       memoryHandle,
-                       pBase,
-                       0 /* flags */);
-
-    nvRmApiFree(nvEvoGlobal.clientHandle,
-                pDevEvo->deviceHandle,
-                memoryHandle);
-    nvFreeUnixRmHandle(&pDevEvo->handleAllocator, memoryHandle);
-    memoryHandle = 0;
-
-    if (pSurfEvo == NULL) {
-        goto fail;
-    }
-
-    ret = nvRmApiMapMemory(nvEvoGlobal.clientHandle,
-                           pDevEvo->deviceHandle,
-                           pSurfEvo->planes[0].rmHandle,
-                           0, /* offset */
-                           size,
-                           &pBase,
-                           0 /* flags */);
-
-    if (ret != NVOS_STATUS_SUCCESS) {
+    /* Allocate and bind a display context dma */
+    pSurfEvo->dispCtxDma =
+        nvRmEvoAllocateAndBindDispContextDMA(pDevEvo,
+                                             pSurfEvo->handle,
+                                             NvKmsSurfaceMemoryLayoutPitch,
+                                             pSurfEvo->size - 1);
+    if (!pSurfEvo->dispCtxDma) {
         goto fail;
     }
 
@@ -261,18 +251,35 @@ static NVSurfaceEvoPtr AllocLutSurfaceEvoInSysmem(NVDevEvoPtr pDevEvo)
      * subdevice.
      */
     nvAssert(pDevEvo->numSubDevices == 1);
-    pSurfEvo->cpuAddress[0] = pBase;
+    pSurfEvo->subDeviceAddress[0] = pBase;
 
     return pSurfEvo;
 
-fail:
+ fail:
     /* An error occurred -- free the surface */
-    FreeLutSurfaceEvo(pDevEvo, pSurfEvo);
+    FreeLutSurfaceEvoInSysmem(pSurfEvo);
 
     return NULL;
 }
 
-static NVSurfaceEvoPtr AllocLutSurfaceEvo(NVDevEvoPtr pDevEvo)
+static void FreeLutSurfaceEvo(NVLutSurfaceEvoPtr pSurfEvo)
+{
+    NVDevEvoPtr pDevEvo;
+
+    if (pSurfEvo == NULL) {
+        return;
+    }
+
+    pDevEvo = pSurfEvo->pDevEvo;
+
+    if (pDevEvo->requiresAllAllocationsInSysmem) {
+        FreeLutSurfaceEvoInSysmem(pSurfEvo);
+    } else {
+        FreeLutSurfaceEvoInVidmem(pSurfEvo);
+    }
+}
+
+static NVLutSurfaceEvoPtr AllocLutSurfaceEvo(NVDevEvoPtr pDevEvo)
 {
     if (pDevEvo->requiresAllAllocationsInSysmem) {
         return AllocLutSurfaceEvoInSysmem(pDevEvo);
@@ -281,75 +288,16 @@ static NVSurfaceEvoPtr AllocLutSurfaceEvo(NVDevEvoPtr pDevEvo)
     }
 }
 
-NvBool nvSetTmoLutSurfaceEvo(NVDevEvoPtr pDevEvo,
-                             NVFlipChannelEvoHwState *pHwState)
-{
-    if (pHwState->hdrStaticMetadata.enabled) {
-        if (!pHwState->tmoLut.pLutSurfaceEvo) {
-            pHwState->tmoLut.pLutSurfaceEvo = AllocLutSurfaceEvo(pDevEvo);
-            if (!pHwState->tmoLut.pLutSurfaceEvo) {
-                return FALSE;
-            }
-        }
-    } else {
-        // Will be freed via nvEvoDecrementSurfaceRefCnts() and
-        // nvFreeUnrefedTmoLutSurfacesEvo() on old state
-        pHwState->tmoLut.pLutSurfaceEvo = NULL;
-    }
-
-    return TRUE;
-}
-
-/*
- * After the flip dereferences its TMO surfaces, or when it fails after TMO
- * surface allocation, any unused TMO surfaces are left with 1 refcount. If
- * these TMO surfaces are owned by the pDevEvo's pNvKmsOpenDev, then they have
- * been allocated within this file and need to be freed. If not, they have been
- * allocated by an NvKms client, which is in charge of freeing them.
- *
- * Only call FreeLutSurfaceEvo in the first case.
- */
-void nvFreeUnrefedTmoLutSurfacesEvo(NVDevEvoPtr pDevEvo,
-                                    NVFlipEvoHwState *pFlipState,
-                                    NvU32 head)
-{
-    NvU32 layer;
-    for (layer = 0; layer < pDevEvo->head[head].numLayers; layer++) {
-        if (pFlipState->layer[layer].tmoLut.pLutSurfaceEvo != NULL &&
-            pFlipState->layer[layer].tmoLut.pLutSurfaceEvo->structRefCnt <= 1) {
-
-            if (pFlipState->layer[layer].tmoLut.pLutSurfaceEvo->owner.pOpenDev ==
-                pDevEvo->pNvKmsOpenDev) {
-
-                FreeLutSurfaceEvo(pDevEvo,
-                    pFlipState->layer[layer].tmoLut.pLutSurfaceEvo);
-            }
-            pFlipState->layer[layer].tmoLut.pLutSurfaceEvo = NULL;
-        }
-    }
-}
-
-void nvInvalidateDefaultLut(NVDevEvoPtr pDevEvo)
-{
-    NvU32 sd;
-
-    for (sd = 0; sd < NVKMS_MAX_SUBDEVICES; sd++) {
-        pDevEvo->lut.defaultBaseLUTState[sd] =
-        pDevEvo->lut.defaultOutputLUTState[sd] =
-            NvKmsLUTStateUninitialized;
-    }
-}
-
 NvBool nvAllocLutSurfacesEvo(NVDevEvoPtr pDevEvo)
 {
     NVDispEvoPtr pDispEvo;
-    NvU32 apiHead, dispIndex, i;
+    NvU32 head, dispIndex, i;
 
-    for (apiHead = 0; apiHead < pDevEvo->numApiHeads; apiHead++) {
-        for (i = 0; i < ARRAY_LEN(pDevEvo->lut.apiHead[apiHead].LUT); i++) {
-            pDevEvo->lut.apiHead[apiHead].LUT[i] = AllocLutSurfaceEvo(pDevEvo);
+    for (head = 0; head < pDevEvo->numHeads; head++) {
+        for (i = 0; i < ARRAY_LEN(pDevEvo->lut.head[head].LUT); i++) {
+            pDevEvo->lut.head[head].LUT[i] = AllocLutSurfaceEvo(pDevEvo);
 
-            if (pDevEvo->lut.apiHead[apiHead].LUT[i] == NULL) {
+            if (pDevEvo->lut.head[head].LUT[i] == NULL) {
                 nvFreeLutSurfacesEvo(pDevEvo);
                 return FALSE;
             }
@@ -357,15 +305,11 @@ NvBool nvAllocLutSurfacesEvo(NVDevEvoPtr pDevEvo)
 
         FOR_ALL_EVO_DISPLAYS(pDispEvo, dispIndex, pDevEvo) {
             // No palette has been loaded yet, so disable the LUT.
-            pDevEvo->lut.apiHead[apiHead].disp[dispIndex].waitForPreviousUpdate = FALSE;
-            pDevEvo->lut.apiHead[apiHead].disp[dispIndex].curBaseLutEnabled = FALSE;
-            pDevEvo->lut.apiHead[apiHead].disp[dispIndex].curOutputLutEnabled = FALSE;
+            pDevEvo->lut.head[head].disp[dispIndex].waitForPreviousUpdate = FALSE;
+            pDevEvo->lut.head[head].disp[dispIndex].curBaseLutEnabled = FALSE;
+            pDevEvo->lut.head[head].disp[dispIndex].curOutputLutEnabled = FALSE;
         }
     }
-
-    // Zero-initalize the LUT notifier state - ensure there's no stale data
-    nvkms_memset(&pDevEvo->lut.notifierState, 0,
-                 sizeof(pDevEvo->lut.notifierState));
 
     if (pDevEvo->hal->caps.needDefaultLutSurface) {
         pDevEvo->lut.defaultLut = AllocLutSurfaceEvo(pDevEvo);
@@ -373,8 +317,6 @@ NvBool nvAllocLutSurfacesEvo(NVDevEvoPtr pDevEvo)
             nvFreeLutSurfacesEvo(pDevEvo);
             return FALSE;
         }
-
-        nvInvalidateDefaultLut(pDevEvo);
 
         pDevEvo->hal->InitDefaultLut(pDevEvo);
     }
@@ -384,13 +326,13 @@ NvBool nvAllocLutSurfacesEvo(NVDevEvoPtr pDevEvo)
 
 void nvFreeLutSurfacesEvo(NVDevEvoPtr pDevEvo)
 {
-    NvU32 head, i, dispIndex, apiHead;
+    NvU32 head, i, dispIndex;
     NVDispEvoPtr pDispEvo;
 
     /* Cancel any queued LUT update timers */
     FOR_ALL_EVO_DISPLAYS(pDispEvo, dispIndex, pDevEvo) {
-        for (apiHead = 0; apiHead < pDevEvo->numApiHeads; apiHead++) {
-            nvCancelLutUpdateEvo(pDispEvo, apiHead);
+        for (head = 0; head < pDevEvo->numHeads; head++) {
+            nvCancelLutUpdateEvo(pDispEvo, head);
         }
     }
 
@@ -399,31 +341,22 @@ void nvFreeLutSurfacesEvo(NVDevEvoPtr pDevEvo)
         nvRMSyncEvoChannel(pDevEvo, pDevEvo->core, __LINE__);
     }
 
-    /* Clear the current lut surface stored in the hardware head state */
-    FOR_ALL_EVO_DISPLAYS(pDispEvo, dispIndex, pDevEvo) {
-        for (head = 0; head < pDevEvo->numHeads; head++) {
-            pDispEvo->headState[head].lut.pCurrSurface = NULL;
-            pDispEvo->headState[head].lut.baseLutEnabled = FALSE;
-            pDispEvo->headState[head].lut.outputLutEnabled = FALSE;
-        }
-    }
-
     if (pDevEvo->lut.defaultLut != NULL) {
-        FreeLutSurfaceEvo(pDevEvo, pDevEvo->lut.defaultLut);
+        FreeLutSurfaceEvo(pDevEvo->lut.defaultLut);
         pDevEvo->lut.defaultLut = NULL;
     }
 
-    for (apiHead = 0; apiHead < pDevEvo->numApiHeads; apiHead++) {
-        for (i = 0; i < ARRAY_LEN(pDevEvo->lut.apiHead[apiHead].LUT); i++) {
-            if (pDevEvo->lut.apiHead[apiHead].LUT[i] != NULL) {
-                FreeLutSurfaceEvo(pDevEvo, pDevEvo->lut.apiHead[apiHead].LUT[i]);
-                pDevEvo->lut.apiHead[apiHead].LUT[i] = NULL;
+    for (head = 0; head < pDevEvo->numHeads; head++) {
+        for (i = 0; i < ARRAY_LEN(pDevEvo->lut.head[head].LUT); i++) {
+            if (pDevEvo->lut.head[head].LUT[i] != NULL) {
+                FreeLutSurfaceEvo(pDevEvo->lut.head[head].LUT[i]);
+                pDevEvo->lut.head[head].LUT[i] = NULL;
             }
         }
     }
 }
 
-void nvUploadDataToLutSurfaceEvo(NVSurfaceEvoPtr pSurfEvo,
+void nvUploadDataToLutSurfaceEvo(NVLutSurfaceEvoPtr pSurfEvo,
                                  const NVEvoLutDataRec *pLUTBuffer,
                                  NVDispEvoPtr pDispEvo)
 {
@@ -439,18 +372,18 @@ void nvUploadDataToLutSurfaceEvo(NVSurfaceEvoPtr pSurfEvo,
         return;
     }
 
-    nvAssert(pSurfEvo->cpuAddress[sd]);
+    nvAssert(pSurfEvo->subDeviceAddress[sd]);
 
     /* The size to copy should not be larger than the surface. */
-    nvAssert(size <= pSurfEvo->planes[0].rmObjectSizeInBytes);
+    nvAssert(size <= pSurfEvo->size);
 
     /* The source, destination, and size should be 4-byte aligned. */
     nvAssert((((NvUPtr)data) & 0x3) == 0);
-    nvAssert((((NvUPtr)pSurfEvo->cpuAddress[sd]) & 0x3) == 0);
+    nvAssert((((NvUPtr)pSurfEvo->subDeviceAddress[sd]) & 0x3) == 0);
     nvAssert((size % 4) == 0);
 
     src = data;
-    dst = (NvU32*)pSurfEvo->cpuAddress[sd];
+    dst = (NvU32*)pSurfEvo->subDeviceAddress[sd];
 
     for (dword = 0; dword < (size/4); dword++) {
         *(dst++) = *(src++);

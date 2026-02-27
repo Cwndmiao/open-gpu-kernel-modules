@@ -75,59 +75,46 @@ static void GetNotifierTimeStamp(volatile const NvU32 *notif,
     } while (1);
 }
 
-static void SetNotifierLegacy(NvBool overlay, volatile void *in, NvBool begun,
-                              NvU64 timeStamp)
+static void ResetNotifierLegacy(NvBool overlay, volatile void *in)
 {
     volatile NvU32 *notif = in;
 
     if (overlay) {
-        notif[NV_DISP_NOTIFICATION_2_INFO16_3] = begun ?
-            DRF_DEF(_DISP, _NOTIFICATION_2__3, _STATUS, _BEGUN) :
+        notif[NV_DISP_NOTIFICATION_2_INFO16_3] =
             DRF_DEF(_DISP, _NOTIFICATION_2__3, _STATUS, _NOT_BEGUN);
 
-        notif[NV_DISP_NOTIFICATION_2_TIME_STAMP_0] = begun ? NvU64_LO32(timeStamp) :
+        notif[NV_DISP_NOTIFICATION_2_TIME_STAMP_0] =
             NVKMS_LIB_SYNC_NOTIFIER_TIMESTAMP_LO_INVALID;
-        notif[NV_DISP_NOTIFICATION_2_TIME_STAMP_1] = begun ? NvU64_HI32(timeStamp) :
-            NVKMS_LIB_SYNC_NOTIFIER_TIMESTAMP_HI_INVALID;
     } else {
-        notif[NV_DISP_BASE_NOTIFIER_1__0] = begun ?
-            DRF_DEF(_DISP, _BASE_NOTIFIER_1__0, _STATUS, _BEGUN) :
+        notif[NV_DISP_BASE_NOTIFIER_1__0] =
             DRF_DEF(_DISP, _BASE_NOTIFIER_1__0, _STATUS, _NOT_BEGUN);
     }
 }
 
-static void SetNotifierFourWord(volatile void *in, NvBool begun,
-                                NvU64 timeStamp)
+static void ResetNotifierFourWord(volatile void *in)
 {
     volatile NvU32 *notif = in;
 
-    notif[NV_DISP_NOTIFICATION_2_INFO16_3] = begun ?
-        DRF_DEF(_DISP, _NOTIFICATION_2__3, _STATUS, _BEGUN) :
+    notif[NV_DISP_NOTIFICATION_2_INFO16_3] =
         DRF_DEF(_DISP, _NOTIFICATION_2__3, _STATUS, _NOT_BEGUN);
 
-    notif[NV_DISP_NOTIFICATION_2_TIME_STAMP_0] = begun ? NvU64_LO32(timeStamp) :
+    notif[NV_DISP_NOTIFICATION_2_TIME_STAMP_0] =
         NVKMS_LIB_SYNC_NOTIFIER_TIMESTAMP_LO_INVALID;
-    notif[NV_DISP_NOTIFICATION_2_TIME_STAMP_1] = begun ? NvU64_HI32(timeStamp) :
-        NVKMS_LIB_SYNC_NOTIFIER_TIMESTAMP_HI_INVALID;
 }
 
-static void SetNotifierFourWordNVDisplay(volatile void *in, NvBool begun,
-                                         NvU64 timeStamp)
+static void ResetNotifierFourWordNVDisplay(volatile void *in)
 {
     volatile NvU32 *notif = in;
 
-    notif[NV_DISP_NOTIFIER__0] = begun ?
-        DRF_DEF(_DISP, _NOTIFIER__0, _STATUS, _BEGUN) :
+    notif[NV_DISP_NOTIFIER__0] =
         DRF_DEF(_DISP, _NOTIFIER__0, _STATUS, _NOT_BEGUN);
 
-    notif[NV_DISP_NOTIFIER__2] = begun ? NvU64_LO32(timeStamp) :
+    notif[NV_DISP_NOTIFIER__2] =
         NVKMS_LIB_SYNC_NOTIFIER_TIMESTAMP_LO_INVALID;
-    notif[NV_DISP_NOTIFIER__3] = begun ? NvU64_HI32(timeStamp) :
-        NVKMS_LIB_SYNC_NOTIFIER_TIMESTAMP_HI_INVALID;
 }
 
-static void SetNotifier(enum NvKmsNIsoFormat format, NvBool overlay,
-                        NvU32 index, void *base, NvBool begun, NvU64 timeStamp)
+void nvKmsResetNotifier(enum NvKmsNIsoFormat format, NvBool overlay,
+                        NvU32 index, void *base)
 {
     const NvU32 sizeInBytes = nvKmsSizeOfNotifier(format, overlay);
     void *notif =
@@ -135,27 +122,15 @@ static void SetNotifier(enum NvKmsNIsoFormat format, NvBool overlay,
 
     switch (format) {
     case NVKMS_NISO_FORMAT_LEGACY:
-        SetNotifierLegacy(overlay, notif, begun, timeStamp);
+        ResetNotifierLegacy(overlay, notif);
         break;
     case NVKMS_NISO_FORMAT_FOUR_WORD:
-        SetNotifierFourWord(notif, begun, timeStamp);
+        ResetNotifierFourWord(notif);
         break;
     case NVKMS_NISO_FORMAT_FOUR_WORD_NVDISPLAY:
-        SetNotifierFourWordNVDisplay(notif, begun, timeStamp);
+        ResetNotifierFourWordNVDisplay(notif);
         break;
     }
-}
-
-void nvKmsSetNotifier(enum NvKmsNIsoFormat format, NvBool overlay,
-                      NvU32 index, void *base, NvU64 timeStamp)
-{
-    SetNotifier(format, overlay, index, base, NV_TRUE, timeStamp);
-}
-
-void nvKmsResetNotifier(enum NvKmsNIsoFormat format, NvBool overlay,
-                        NvU32 index, void *base)
-{
-    SetNotifier(format, overlay, index, base, NV_FALSE, 0);
 }
 
 static void ParseNotifierLegacy(NvBool overlay, volatile const void *in,

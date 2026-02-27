@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2015-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -90,6 +90,34 @@ NvU64 pmaRegmapGetEvictingFrames(void *pMap);
 void pmaRegmapSetEvictingFrames(void *pMap, NvU64 frameEvictionsInProcess);
 
 /*!
+ * @brief Changes the recorded state bits
+ *
+ * Changes the state of the bits given the physical frame number
+ *
+ * @param[in]   pMap         The regmap to change
+ * @param[in]   frameNum     The frame number to change
+ * @param[in]   newState     The new state to change to
+ *
+ * @return void
+ */
+void pmaRegmapChangeState(void *pMap, NvU64 frameNum, PMA_PAGESTATUS newState);
+
+/*!
+ * @brief Changes the recorded state & attrib bits
+ *
+ * Changes the state of the bits given the physical frame number
+ *
+ * @param[in]   pMap         The regmap to change
+ * @param[in]   frameNum     The frame number to change
+ * @param[in]   newState     The new state to change to
+ * @param[in]   writeAttrib  Write attribute bits as well
+ *
+ * @return void
+ */
+void pmaRegmapChangeStateAttrib(void *pMap, NvU64 frameNum,
+                                PMA_PAGESTATUS newState, NvBool writeAttrib);
+
+/*!
  * @brief Changes the recorded state & attrib bits for an entire page
  *
  * Changes the state of the bits for an entire page given the physical
@@ -103,8 +131,8 @@ void pmaRegmapSetEvictingFrames(void *pMap, NvU64 frameEvictionsInProcess);
  *
  * @return void
  */
-void pmaRegmapChangePageStateAttrib(void * pMap, NvU64 startFrame, NvU64 pageSize,
-                                    PMA_PAGESTATUS newState, PMA_PAGESTATUS newStateMask);
+void pmaRegmapChangePageStateAttrib(void * pMap, NvU64 frameNumStart, NvU32 pageSize,
+                                    PMA_PAGESTATUS newState, NvBool writeAttrib);
 
 /*!
  * @brief Changes the state & attrib bits specified by mask
@@ -118,28 +146,9 @@ void pmaRegmapChangePageStateAttrib(void * pMap, NvU64 startFrame, NvU64 pageSiz
  *
  * @return void
  */
-void pmaRegmapChangeStateAttrib(void *pMap, NvU64 frameNum,
-                                PMA_PAGESTATUS newState,
-                                PMA_PAGESTATUS newStateMask);
-
-/*!
- * @brief Changes the state & attrib bits specified by mask
- *
- * Changes the state of the bits given the physical frame number
- * and the number of frames to change
- *
- * @param[in]   pMap         The regmap to change
- * @param[in]   frameNum     The frame number to change
- * @param[in]   numFrames    The number of frames to change
- * @param[in]   newState     The new state to change to
- * @param[in]   newStateMask Specific bits to write
- *
- * @return void
- */
-void pmaRegmapChangeBlockStateAttrib(void *pMap, NvU64 frameNum,
-                                     NvU64 numFrames,
-                                     PMA_PAGESTATUS newState,
-                                     PMA_PAGESTATUS newStateMask);
+void pmaRegmapChangeStateAttribEx(void *pMap, NvU64 frameNum,
+                                  PMA_PAGESTATUS newState,
+                                  PMA_PAGESTATUS newStateMask);
 
 /*!
  * @brief Read the page state & attrib bits
@@ -179,8 +188,8 @@ PMA_PAGESTATUS pmaRegmapRead(void *pMap, NvU64 frameNum, NvBool readAttrib);
  */
 NV_STATUS pmaRegmapScanContiguous(
     void *pMap, NvU64 addrBase, NvU64 rangeStart, NvU64 rangeEnd,
-    NvU64 numPages, NvU64 *freelist, NvU64 pageSize, NvU64 alignment, NvU64 stride, NvU32 strideStart,
-    NvU64 *pagesAllocated, NvBool bSkipEvict, NvBool bReverseAlloc);
+    NvU64 numPages, NvU64 *freelist, NvU32 pageSize, NvU64 alignment,
+    NvU64 *pagesAllocated, NvBool bSkipEvict);
 
 /*!
  * @brief Scan the list for any space
@@ -206,8 +215,8 @@ NV_STATUS pmaRegmapScanContiguous(
  */
 NV_STATUS pmaRegmapScanDiscontiguous(
     void *pMap, NvU64 addrBase, NvU64 rangeStart, NvU64 rangeEnd,
-    NvU64 numPages, NvU64 *freelist, NvU64 pageSize, NvU64 alignment, NvU64 stride, NvU32 strideStart, 
-    NvU64 *pagesAllocated, NvBool bSkipEvict, NvBool bReverseAlloc);
+    NvU64 numPages, NvU64 *freelist, NvU32 pageSize, NvU64 alignment,
+    NvU64 *pagesAllocated, NvBool bSkipEvict);
 
 /*!
  * @brief Gets the total size of specified PMA managed region.
@@ -229,9 +238,9 @@ void pmaRegmapGetSize(void *pMap, NvU64 *pBytesTotal);
  *
  * @param[in]  pMap         Pointer to the regmap for the region
  * @param[in]  pLargestFree Pointer that will return largest free in current region.
- * @param[in]  pLargestFreeOffset Pointer that will return the offset of the largest free chunk.
+ *
  */
-void pmaRegmapGetLargestFree(void *pMap, NvU64 *pLargestFree, NvU64 *pLargestFreeOffset);
+void pmaRegmapGetLargestFree(void *pMap, NvU64 *pLargestFree);
 
 
 /*!

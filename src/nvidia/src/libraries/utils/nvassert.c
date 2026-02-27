@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,26 +21,28 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+/**
+ * @file
+ * @brief UTIL module implementation implements helpter functions for
+ *
+ */
+
 #include "nvport/nvport.h"
 #include "utils/nvassert.h"
 
-#if defined(NVRM) && !defined(NVWATCH) && !defined(GSP_PLUGIN_BUILD)
+#if defined(NVRM) && !defined(NVWATCH)
 #include "containers/map.h"
 #include "os/os.h"
 #include "nvrm_registry.h"
 #include "rmconfig.h"
-#else
-#if !defined(RMCFG_MODULE_ENABLED)
-#define RMCFG_MODULE_x 0
+#elif !defined(RMCFG_FEATURE_ENABLED)
+#define RMCFG_FEATURE_x 0
 #endif
 
-#if !defined(RMCFG_IS_PLATFORM)
-#define RMCFG_FEATURE_PLATFORM_x 0
-#endif
-#endif
+#if NV_PRINTF_ENABLED || NV_JOURNAL_ASSERT_ENABLE
 
-#if RMCFG_MODULE_RCDB && NV_JOURNAL_ASSERT_ENABLE
 // Hook NV_ASSERT into RCDB.
+#if NV_JOURNAL_ASSERT_ENABLE
 void rcdbRmAssert(NvU32 lineNum, NvU64 ip);
 void rcdbRmAssertStatus(NvU32 status, NvU32 lineNum, NvU64 ip);
 #define NV_JOURNAL_ASSERT_FAILURE(lineNum, ip)                  rcdbRmAssert(lineNum, (NvU64)(ip))
@@ -48,16 +50,28 @@ void rcdbRmAssertStatus(NvU32 status, NvU32 lineNum, NvU64 ip);
 #else
 #define NV_JOURNAL_ASSERT_FAILURE(lineNum, ip)                  ((void)0)
 #define NV_JOURNAL_ASSERT_FAILURE_STATUS(lineNum, ip, status)   ((void)0)
+#endif /* NV_JOURNAL_ASSERT_ENABLE*/
+
+#if defined(GSP_PLUGIN_BUILD) || (defined(NVRM) && NVCPU_IS_RISCV64)
+
+#if NV_JOURNAL_ASSERT_ENABLE
+/*
+ * Helper function for NV_ASSERT_FAILED
+ */
+void
+nvAssertFailed(void)
+{
+    NV_JOURNAL_ASSERT_FAILURE(NV_RM_ASSERT_UNKNOWN_LINE_NUM, portUtilGetReturnAddress());
+}
+
+void
+nvAssertOkFailed(NvU32 status)
+{
+    NV_JOURNAL_ASSERT_FAILURE_STATUS(NV_RM_ASSERT_UNKNOWN_LINE_NUM, portUtilGetReturnAddress(), status);
+}
 #endif
 
-#if NV_ASSERT_FAILED_BACKTRACE_ENABLE
-static void nvAssertFailedBacktrace(NvU64 ip);
-
-// Print call stack in dmesg when assert fails
-#define NV_ASSERT_FAILED_BACKTRACE(ip)                          do {nvAssertFailedBacktrace(ip);} while(0)
-#else
-#define NV_ASSERT_FAILED_BACKTRACE(ip)                          ((void)0)
-#endif
+#else //defined(GSP_PLUGIN_BUILD) || (defined(NVRM) && NVCPU_IS_RISCV64)
 
 #if NV_ASSERT_FAILED_USES_STRINGS
 #define NV_ASSERT_FAILED_PRINTF_FMT                  "%s @ %s:%d\n"
@@ -67,13 +81,8 @@ static void nvAssertFailedBacktrace(NvU64 ip);
 #define NV_ASSERT_FAILED_PRINTF_PARAM                ip
 #endif
 
-#if !RMCFG_FEATURE_PLATFORM_GSP && !defined(GSP_PLUGIN_BUILD)
 #define NV_ASSERT_PRINTF(level, fmt, ...)            NV_PRINTF_STRING          \
     (NV_PRINTF_MODULE, level, NV_PRINTF_ADD_PREFIX(fmt), ##__VA_ARGS__)
-#else
-#define NV_ASSERT_PRINTF(level, fmt, ...)
-#define NV_ASSERT_LOG(level, fmt, ...)
-#endif
 
 #define PATH_SEP   '/'
 
@@ -98,7 +107,6 @@ static const char *trimFN(const char *pszFileName)
 }
 #endif
 
-#if NV_PRINTF_ENABLED || NV_JOURNAL_ASSERT_ENABLE
 /*
  * Helper function for NV_ASSERT_FAILED
  */
@@ -115,7 +123,6 @@ nvAssertFailed
         NV_ASSERT_FAILED_PRINTF_PARAM);
     NV_ASSERT_LOG(LEVEL_ERROR, "Assertion failed @ 0x%016x", ip);
     NV_JOURNAL_ASSERT_FAILURE(lineNum, ip);
-    NV_ASSERT_FAILED_BACKTRACE(ip);
 }
 
 /*
@@ -133,11 +140,10 @@ nvAssertOkFailed
 
     NV_ASSERT_PRINTF(LEVEL_ERROR,
         "Assertion failed: %s (0x%08X) returned from " NV_ASSERT_FAILED_PRINTF_FMT,
-        nvstatusToString(status), status, NV_ASSERT_FAILED_PRINTF_PARAM);
+        nvAssertStatusToString(status), status, NV_ASSERT_FAILED_PRINTF_PARAM);
     NV_ASSERT_LOG(LEVEL_ERROR, "Assertion failed: 0x%08X returned from 0x%016llx",
         status, ip);
     NV_JOURNAL_ASSERT_FAILURE_STATUS(lineNum, ip, status);
-    NV_ASSERT_FAILED_BACKTRACE(ip);
 }
 
 /*
@@ -174,7 +180,7 @@ nvCheckOkFailed
 
     NV_ASSERT_PRINTF(level,
         "Check failed: %s (0x%08X) returned from " NV_ASSERT_FAILED_PRINTF_FMT,
-        nvstatusToString(status), status, NV_ASSERT_FAILED_PRINTF_PARAM);
+        nvAssertStatusToString(status), status, NV_ASSERT_FAILED_PRINTF_PARAM);
     NV_ASSERT_LOG(level, "Check failed: 0x%08X returned from 0x%016llx", status, ip);
 }
 
@@ -193,7 +199,6 @@ nvAssertFailedNoLog
     NV_ASSERT_PRINTF(LEVEL_ERROR, "Assertion failed: " NV_ASSERT_FAILED_PRINTF_FMT,
         NV_ASSERT_FAILED_PRINTF_PARAM);
     NV_JOURNAL_ASSERT_FAILURE(lineNum, ip);
-    NV_ASSERT_FAILED_BACKTRACE(ip);
 }
 
 /*
@@ -211,9 +216,8 @@ nvAssertOkFailedNoLog
 
     NV_ASSERT_PRINTF(LEVEL_ERROR,
         "Assertion failed: %s (0x%08X) returned from " NV_ASSERT_FAILED_PRINTF_FMT,
-        nvstatusToString(status), status, NV_ASSERT_FAILED_PRINTF_PARAM);
+        nvAssertStatusToString(status), status, NV_ASSERT_FAILED_PRINTF_PARAM);
     NV_JOURNAL_ASSERT_FAILURE_STATUS(lineNum, ip, status);
-    NV_ASSERT_FAILED_BACKTRACE(ip);
 }
 
 /*
@@ -249,12 +253,75 @@ nvCheckOkFailedNoLog
 
     NV_ASSERT_PRINTF(level,
         "Check failed: %s (0x%08X) returned from " NV_ASSERT_FAILED_PRINTF_FMT,
-        nvstatusToString(status), status, NV_ASSERT_FAILED_PRINTF_PARAM);
+        nvAssertStatusToString(status), status, NV_ASSERT_FAILED_PRINTF_PARAM);
 }
 
-#endif
+#endif // defined(GSP_PLUGIN_BUILD) || (defined(NVRM) && NVCPU_IS_RISCV64)
+#endif // NV_PRINTF_ENABLED || NV_JOURNAL_ASSERT_ENABLE
 
-#if NV_ASSERT_FAILED_BACKTRACE_ENABLE
+/*
+ * Temporarily duplicate the nvstatusToString code to nvAssertStatusToString.
+ *
+ * Ideally, nvassert.c and nvstatus.c should both be included in shared.nvmk.
+ * But nvstatus.c is already directly included in projects from multiple module
+ * branches that also include shared.nvmk.  It is going to take some serious
+ * cross-module magic to move it.
+ */
+
+#if !defined(NV_PRINTF_STRING_SECTION)
+#if defined(NVRM) && NVCPU_IS_RISCV64
+#define NV_PRINTF_STRING_SECTION         __attribute__ ((section (".logging")))
+#else // defined(NVRM) && NVCPU_IS_RISCV64
+#define NV_PRINTF_STRING_SECTION
+#endif // defined(NVRM) && NVCPU_IS_RISCV64
+#endif // !defined(NV_PRINTF_STRING_SECTION)
+
+#undef NV_STATUS_CODE
+#undef SDK_NVSTATUSCODES_H
+#define NV_STATUS_CODE( name, code, string ) static NV_PRINTF_STRING_SECTION   \
+    const char rm_pvt_##name##_str[] = string " [" #name "]";
+#include "nvstatuscodes.h"
+
+#undef NV_STATUS_CODE
+#undef SDK_NVSTATUSCODES_H
+#define NV_STATUS_CODE( name, code, string ) { name, rm_pvt_##name##_str },
+static struct NvStatusCodeString
+{
+    NV_STATUS   statusCode;
+    const char *statusString;
+} g_StatusCodeList[] = {
+   #include "nvstatuscodes.h"
+   { 0xffffffff, "Unknown error code!" } // Some compilers don't like the trailing ','
+};
+#undef NV_STATUS_CODE
+
+/*!
+ * @brief Given an NV_STATUS code, returns the corresponding status string.
+ *
+ * @param[in]   nvStatusIn                  NV_STATUS code for which the string is required
+ *
+ * @returns     Corresponding status string from the nvstatuscodes.h
+ *
+ * TODO: Bug 200025711: convert this to an array-indexed lookup, instead of a linear search
+ *
+*/
+const char *nvAssertStatusToString(NV_STATUS nvStatusIn)
+{
+    static NV_PRINTF_STRING_SECTION const char rm_pvt_UNKNOWN_str[] = "Unknown error code!";
+    NvU32 i;
+    NvU32 n = ((NvU32)(sizeof(g_StatusCodeList))/(NvU32)(sizeof(g_StatusCodeList[0])));
+    for (i = 0; i < n; i++)
+    {
+        if (g_StatusCodeList[i].statusCode == nvStatusIn)
+        {
+            return g_StatusCodeList[i].statusString;
+        }
+    }
+
+    return rm_pvt_UNKNOWN_str;
+}
+
+#if defined(NV_ASSERT_FAILED_BACKTRACE)
 MAKE_MAP(AssertedIPMap, NvU8);
 
 static struct
@@ -336,7 +403,7 @@ void nvAssertDestroy(void)
     osAssertInternal.init = 0;
 }
 
-#else
+#elif defined(NVRM) && !defined(NVWATCH) // ignore in nvlog_decoder/nvwatch build
 
 // We do not expose NV_ASSERT_FAILED_BACKTRACE outside this file. The callers will use these stubs.
 void nvAssertInit(void)

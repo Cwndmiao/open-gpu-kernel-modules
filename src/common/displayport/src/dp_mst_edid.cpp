@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2010-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2010-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -33,7 +33,6 @@
 #include "dp_address.h"
 #include "dp_messagecodings.h"
 #include "dp_messages.h"
-#include "dp_printf.h"
 
 using namespace DisplayPort;
 
@@ -48,8 +47,8 @@ void EdidReadMultistream::startReadingEdid()
     I2cWriteTransaction i2cWriteTransactions[1];
     Address::StringBuffer buffer;
     DP_USED(buffer);
-    DP_PRINTF(DP_NOTICE, "%s(): start for %s", __FUNCTION__,
-                                      topologyAddress.toString(buffer));
+    DP_LOG(("%s(): start for %s", __FUNCTION__,
+                                    topologyAddress.toString(buffer)));
 
     edidReaderManager.reset();
     edid.resetData();
@@ -83,7 +82,7 @@ void EdidReadMultistream::messageCompleted(MessageManager::Message * from)
 
     NvU8 seg;
     NvU8 offset;
-    DP_PRINTF(DP_NOTICE, "%s for %s", __FUNCTION__, topologyAddress.toString(buffer));
+    DP_LOG(("%s for %s", __FUNCTION__, topologyAddress.toString(buffer)));
 
     DP_ASSERT(DDCAddress && "DDCAddress is 0, it is wrong");
 
@@ -127,9 +126,9 @@ void EdidReadMultistream::readNextBlock(NvU8 seg, NvU8 offset)
     DP_ASSERT(sizeof(seg) == 1);
     DP_ASSERT(sizeof(offset) == 1);
 
-    DP_PRINTF(DP_NOTICE, "%s(): for %s (seg/offset) = %d/%d", __FUNCTION__,
-                                      topologyAddress.toString(buffer),
-                                      seg, offset);
+    DP_LOG(("%s(): for %s (seg/offset) = %d/%d", __FUNCTION__,
+                                    topologyAddress.toString(buffer),
+                                    seg, offset));
 
     unsigned nWriteTransactions = 2;
     if (seg)
@@ -162,7 +161,7 @@ void EdidReadMultistream::expired(const void * tag)
 {
     Address::StringBuffer buffer;
     DP_USED(buffer);
-    DP_PRINTF(DP_NOTICE, "%s on %s", __FUNCTION__, topologyAddress.toString(buffer));
+    DP_LOG(("%s on %s", __FUNCTION__, topologyAddress.toString(buffer)));
     startReadingEdid();
 }
 
@@ -170,7 +169,7 @@ void EdidReadMultistream::messageFailed(MessageManager::Message * from, NakData 
 {
     Address::StringBuffer buffer;
     DP_USED(buffer);
-    DP_PRINTF(DP_NOTICE, "%s on %s", __FUNCTION__, topologyAddress.toString(buffer));
+    DP_LOG(("%s on %s", __FUNCTION__, topologyAddress.toString(buffer)));
 
     if (nakData->reason == NakDefer || nakData->reason == NakTimeout)
     {

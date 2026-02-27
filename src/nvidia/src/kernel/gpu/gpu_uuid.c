@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2018-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2018-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -47,8 +47,7 @@ transformGidToUserFriendlyString
     NvU32       gidSize,
     NvU8      **ppGidString,
     NvU32      *pGidStrlen,
-    NvU32       gidFlags,
-    NvU8        prefix
+    NvU32       gidFlags
 )
 {
     NvUuid uuid;
@@ -68,7 +67,7 @@ transformGidToUserFriendlyString
         return NV_ERR_NO_MEMORY;
     }
 
-    nvGetUuidString(&uuid, prefix, (char*)*ppGidString);
+    nvGetGpuUuidString(&uuid, (char*)*ppGidString);
     *pGidStrlen = NV_UUID_STR_LEN;
 
     return NV_OK;
@@ -244,19 +243,18 @@ nvGenerateSmcUuid
 /**
  * @brief Gets UUID ASCII string, "GPU-%08x-%04x-%04x-%04x-%012x"
  *        (SHA-1) or "MIG-%08x-%04x-%04x-%04x-%012x" (SHA-1)
- *        or "DLA-%08x-%04x-%04x-%04x-%012x" (SHA-1)
  *
+ * @param[in]   bMIG         "MIG" or "GPU" UUID prefix
  * @param[in]   pUuid        UUID
- * @param[in]   prefix       Prefix to add for string
  * @param[out]  pUuidStr     Returns UUID string
  *
  * @returns void
  */
-void
-nvGetUuidString
+static void
+_nvGetUuidString
 (
+    NvBool        bMIG,
     const NvUuid *pUuid,
-    NvU8          prefix,
     char         *pUuidStr
 )
 {
@@ -271,26 +269,49 @@ nvGetUuidString
     pGroupEntryNum = sha1GroupEntryNum;
     groupCount = NV_ARRAY_ELEMENTS(sha1GroupEntryNum);
 
-    switch (prefix)
-    {
-        case RM_UUID_PREFIX_GPU:
-            pPrefix = "GPU-";
-            break;
-        case RM_UUID_PREFIX_MIG:
-            pPrefix = "MIG-";
-            break;
-        case RM_UUID_PREFIX_DLA:
-            pPrefix = "DLA-";
-            break;
-        default:
-            pPrefix = "GPU-";
-            break;
-    }
-
+    pPrefix = bMIG ? "MIG-" : "GPU-";
     portMemCopy(pUuidStr, prefixLen, pPrefix, prefixLen);
     pUuidStr += prefixLen;
 
     portStringBufferToHexGroups(pUuidStr, (expectedStringLength - prefixLen),
                                 pUuid->uuid, NV_UUID_LEN,
                                 groupCount, pGroupEntryNum, "-");
+}
+
+/**
+ * @brief Gets UUID ASCII string, "GPU-%08x-%04x-%04x-%04x-%012x"
+ *        (SHA-1)
+ *
+ * @param[in]   pUuid        UUID
+ * @param[out]  pUuidStr     Returns UUID string
+ *
+ * @returns void
+ */
+void
+nvGetGpuUuidString
+(
+    const NvUuid *pUuid,
+    char         *pUuidStr
+)
+{
+    _nvGetUuidString(NV_FALSE, pUuid, pUuidStr);
+}
+
+/**
+ * @brief Gets UUID ASCII string, "MIG-%08x-%04x-%04x-%04x-%012x"
+ *        (SHA-1)
+ *
+ * @param[in]   pUuid        UUID
+ * @param[out]  pUuidStr     Returns UUID string
+ *
+ * @returns void
+ */
+void
+nvGetSmcUuidString
+(
+    const NvUuid *pUuid,
+    char         *pUuidStr
+)
+{
+    _nvGetUuidString(NV_TRUE, pUuid, pUuidStr);
 }

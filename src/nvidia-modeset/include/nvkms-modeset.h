@@ -25,63 +25,23 @@
 #define __NVKMS_MODESET_H__
 
 #include "nvkms-types.h"
-#include "class/cl0092_callback.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-NvBool
-nvGetHwModeTimings(const NVDispEvoRec *pDispEvo,
-                   const NvU32 apiHead,
-                   const struct NvKmsSetModeOneHeadRequest *pRequestHead,
-                   NVHwModeTimingsEvo *pTimings,
-                   NVDpyAttributeColor *pDpyColor,
-                   NVT_VIDEO_INFOFRAME_CTRL *pInfoFrameCtrl,
-                   NVT_VENDOR_SPECIFIC_INFOFRAME_CTRL *pVSInfoFrameCtrl);
-
-NvBool nvGetAllowHeadSurfaceInNvKms(const NVDevEvoRec *pDevEvo,
-                                    const struct NvKmsPerOpenDev *pOpenDev,
-                                    const struct NvKmsSetModeRequest *pRequest);
-
 NvBool nvSetDispModeEvo(NVDevEvoPtr pDevEvo,
-                        struct NvKmsPerOpenDev *pOpenDev,
+                        const struct NvKmsPerOpenDev *pOpenDev,
                         const struct NvKmsSetModeRequest *pRequest,
                         struct NvKmsSetModeReply *pReply,
                         NvBool bypassComposition,
                         NvBool doRasterLock);
 
-typedef NvBool (*NVShutDownApiHeadsTestFunc)(
+typedef NvBool (*NVShutDownHeadsTestFunc)(
     const NVDispEvoRec *pDispEvo,
-    const NvU32 apiHead,
-    void *pData);
+    const NvU32 head);
 
-void nvShutDownApiHeads(NVDevEvoPtr pDevEvo,
-                        struct NvKmsPerOpenDev *pOpenDev,
-                        NVShutDownApiHeadsTestFunc pTestFunc,
-                        void *pData,
-                        NvBool doRasterLock);
-
-NVVBlankCallbackPtr
-nvApiHeadRegisterVBlankCallback(NVDispEvoPtr pDispEvo,
-                                const NvU32 apiHead,
-                                NVVBlankCallbackProc pCallback,
-                                void *pUserData,
-                                NvU8 listIndex);
-
-void nvApiHeadUnregisterVBlankCallback(NVDispEvoPtr pDispEvo,
-                                       NVVBlankCallbackPtr pCallback);
-
-NVRgLine1CallbackPtr
-nvApiHeadAddRgLine1Callback(NVDispEvoRec *pDispEvo,
-                            const NvU32 apiHead,
-                            NVRgLine1CallbackProc pCallbackProc,
-                            void *pUserData);
-
-void nvApiHeadGetScanLine(const NVDispEvoRec *pDispEvo,
-                          const NvU32 apiHead,
-                          NvU16 *pScanLine,
-                          NvBool *pInBlankingPeriod);
+void nvShutDownHeads(NVDevEvoPtr pDevEvo, NVShutDownHeadsTestFunc pTestFunc);
 
 #ifdef __cplusplus
 };

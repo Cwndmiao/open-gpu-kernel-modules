@@ -30,6 +30,7 @@
 extern "C" {
 #endif
 
+NvBool nvDPTimersPending(void);
 NVDPLibTimerPtr nvDPAllocTimer(NVDevEvoPtr pDevEvo);
 void nvDPFreeTimer(NVDPLibTimerPtr pTimer);
 void nvDPFireExpiredTimers(NVDevEvoPtr pDevEvo);

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2015-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -191,7 +191,7 @@ void *mapInsertValue_IMPL
 (
     NonIntrusiveMap *pMap,
     NvU64            key,
-    const void      *pValue
+    void            *pValue
 )
 {
     void *pCurrent;
@@ -202,7 +202,8 @@ void *mapInsertValue_IMPL
     if (NULL == pCurrent)
         return NULL;
 
-    return portMemCopy(pCurrent, pMap->valueSize, pValue, pMap->valueSize);
+    return portMemCopy(pCurrent, pMap->valueSize, pValue,
+                       pMap->valueSize);
 }
 
 NvBool mapInsertExisting_IMPL
@@ -525,14 +526,12 @@ NvBool mapIterNext_IMPL(MapIterBase *pIt)
 {
     NV_ASSERT_OR_RETURN(pIt, NV_FALSE);
 
-#if PORT_IS_CHECKED_BUILD
-    if (pIt->bValid && !CONT_ITER_IS_VALID(pIt->pMap, pIt))
-    {
-        NV_ASSERT(CONT_ITER_IS_VALID(pIt->pMap, pIt));
-        PORT_DUMP_STACK();
-        pIt->bValid = NV_FALSE;
-    }
-#endif
+    //
+    // Check whether the map was mutated during the iteration.
+    // If the map changed (by adding or removing entries),
+    // the iterator becomes invalid and must be reinitialized.
+    //
+    NV_ASSERT_CHECKED(pIt->versionNumber == pIt->pMap->versionNumber);
 
     if (!pIt->pNode)
         return NV_FALSE;

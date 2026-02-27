@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -34,7 +34,7 @@
 //
 
 NvU32
-intrReadRegLeafEnSet_CPU_TU102
+intrReadRegLeafEnSet_TU102
 (
     OBJGPU             *pGpu,
     Intr               *pIntr,
@@ -48,7 +48,7 @@ intrReadRegLeafEnSet_CPU_TU102
 }
 
 NvU32
-intrReadRegLeaf_CPU_TU102
+intrReadRegLeaf_TU102
 (
     OBJGPU             *pGpu,
     Intr               *pIntr,
@@ -62,7 +62,7 @@ intrReadRegLeaf_CPU_TU102
 }
 
 NvU32
-intrReadRegTopEnSet_CPU_TU102
+intrReadRegTopEnSet_TU102
 (
     OBJGPU             *pGpu,
     Intr               *pIntr,
@@ -70,19 +70,13 @@ intrReadRegTopEnSet_CPU_TU102
     THREAD_STATE_NODE  *pThreadState
 )
 {
-    // SW assumptions that there are two top-levels.
-    ct_assert(NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_EN_SET__SIZE_1 <= 2);
-    if (regIndex >= NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_EN_SET__SIZE_1)
-    {
-        return 0x0;
-    }
     return GPU_VREG_RD32_EX(pGpu,
                             NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_EN_SET(regIndex),
                             pThreadState);
 }
 
 NvU32
-intrReadRegTop_CPU_TU102
+intrReadRegTop_TU102
 (
     OBJGPU             *pGpu,
     Intr               *pIntr,
@@ -90,19 +84,13 @@ intrReadRegTop_CPU_TU102
     THREAD_STATE_NODE  *pThreadState
 )
 {
-    // SW assumptions that there are two top-levels.
-    ct_assert(NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP__SIZE_1 <= 2);
-    if (regIndex >= NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP__SIZE_1)
-    {
-        return 0x0;
-    }
     return GPU_VREG_RD32_EX(pGpu,
                             NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP(regIndex),
                             pThreadState);
 }
 
 void
-intrWriteRegLeafEnSet_CPU_TU102
+intrWriteRegLeafEnSet_TU102
 (
     OBJGPU             *pGpu,
     Intr               *pIntr,
@@ -118,7 +106,7 @@ intrWriteRegLeafEnSet_CPU_TU102
 }
 
 void
-intrWriteRegLeafEnClear_CPU_TU102
+intrWriteRegLeafEnClear_TU102
 (
     OBJGPU             *pGpu,
     Intr               *pIntr,
@@ -134,7 +122,7 @@ intrWriteRegLeafEnClear_CPU_TU102
 }
 
 void
-intrWriteRegLeaf_CPU_TU102
+intrWriteRegLeaf_TU102
 (
     OBJGPU             *pGpu,
     Intr               *pIntr,
@@ -150,7 +138,7 @@ intrWriteRegLeaf_CPU_TU102
 }
 
 void
-intrWriteRegTopEnSet_CPU_TU102
+intrWriteRegTopEnSet_TU102
 (
     OBJGPU             *pGpu,
     Intr               *pIntr,
@@ -159,12 +147,6 @@ intrWriteRegTopEnSet_CPU_TU102
     THREAD_STATE_NODE  *pThreadState
 )
 {
-    // SW assumptions that there are two top-levels.
-    ct_assert(NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_EN_SET__SIZE_1 <= 2);
-    if (regIndex >= NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_EN_SET__SIZE_1)
-    {
-        return;
-    }
     GPU_VREG_WR32_EX(pGpu,
                      NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_EN_SET(regIndex),
                      value,
@@ -172,7 +154,7 @@ intrWriteRegTopEnSet_CPU_TU102
 }
 
 void
-intrWriteRegTopEnClear_CPU_TU102
+intrWriteRegTopEnClear_TU102
 (
     OBJGPU             *pGpu,
     Intr               *pIntr,
@@ -181,12 +163,6 @@ intrWriteRegTopEnClear_CPU_TU102
     THREAD_STATE_NODE  *pThreadState
 )
 {
-    // SW assumptions that there are two top-levels.
-    ct_assert(NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_EN_CLEAR__SIZE_1 <= 2);
-    if (regIndex >= NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_EN_CLEAR__SIZE_1)
-    {
-        return;
-    }
     GPU_VREG_WR32_EX(pGpu,
                      NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_EN_CLEAR(regIndex),
                      value,

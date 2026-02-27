@@ -38,29 +38,10 @@ void nvEvo1PrePostIMP(NVDispEvoPtr pDispEvo, NvBool isPre);
 
 void nvEvo1SetDscParams(const NVDispEvoRec *pDispEvo,
                         const NvU32 head,
-                        const NVDscInfoEvoRec *pDscInfo,
-                        const enum nvKmsPixelDepth pixelDepth);
+                        const NVHwModeTimingsEvo *pTimings);
 
 NVEvoChannel* nvEvo1AllocateCoreChannel(NVDevEvoRec *pDevEvo);
 void nvEvo1FreeCoreChannel(NVDevEvoRec *pDevEvo, NVEvoChannel *pChannel);
-
-NvBool nvEvo1NvtToHdmiInfoFramePacketType(const NvU32 srcType, NvU8 *pDstType);
-
-void nvEvo1SendHdmiInfoFrame(const NVDispEvoRec *pDispEvo,
-                             const NvU32 head,
-                             const NvEvoInfoFrameTransmitControl transmitCtrl,
-                             const NVT_INFOFRAME_HEADER *pInfoFrameHeader,
-                             const NvU32 infoframeSize,
-                             NvBool needChecksum);
-
-void nvEvo1DisableHdmiInfoFrame(const NVDispEvoRec *pDispEvo,
-                                const NvU32 head,
-                                const NvU8 nvtInfoFrameType);
-
-void nvEvo1SendDpInfoFrameSdp(const NVDispEvoRec *pDispEvo,
-                              const NvU32 head,
-                              const NvEvoInfoFrameTransmitControl transmitCtrl,
-                              const DPSDP_DESCRIPTOR *sdp);
 
 static inline NvU16 nvEvo1GetColorSpaceFlag(NVDevEvoPtr pDevEvo,
                                             const NvBool colorSpaceOverride)

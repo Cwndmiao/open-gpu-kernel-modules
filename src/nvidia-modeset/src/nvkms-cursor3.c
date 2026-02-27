@@ -27,10 +27,6 @@
 #include <class/clc37a.h>
 #include <class/clc57a.h>
 #include <class/clc67a.h>
-#include <class/clc97a.h>
-#include <class/clca7a.h>
-#include <class/clcb7a.h>
-#include <class/clcc7a.h>
 
 static void WaitForFreeSpace(NVDevEvoPtr pDevEvo,
                              NVC37ADispCursorImmControlPio *pEvoCursorControl)
@@ -49,7 +45,7 @@ static void WaitForFreeSpace(NVDevEvoPtr pDevEvo,
             return;
         }
 
-        if (nvExceedsTimeoutUSec(pDevEvo, &startTime, timeout)) {
+        if (nvExceedsTimeoutUSec(&startTime, timeout)) {
             break;
         }
 
@@ -110,42 +106,6 @@ NVEvoCursorHAL nvEvoCursorC5 = {
 
 NVEvoCursorHAL nvEvoCursorC6 = {
     NVC67A_CURSOR_IMM_CHANNEL_PIO,              /* klass */
-    MoveCursorC3,                               /* MoveCursor */
-    ReleaseElvC3,                               /* ReleaseElv */
-    {                                           /* caps */
-        256,                                    /* maxSize */
-    },
-};
-
-NVEvoCursorHAL nvEvoCursorC9 = {
-    NVC97A_CURSOR_IMM_CHANNEL_PIO,              /* klass */
-    MoveCursorC3,                               /* MoveCursor */
-    ReleaseElvC3,                               /* ReleaseElv */
-    {                                           /* caps */
-        256,                                    /* maxSize */
-    },
-};
-
-NVEvoCursorHAL nvEvoCursorCA = {
-    NVCA7A_CURSOR_IMM_CHANNEL_PIO,              /* klass */
-    MoveCursorC3,                               /* MoveCursor */
-    ReleaseElvC3,                               /* ReleaseElv */
-    {                                           /* caps */
-        256,                                    /* maxSize */
-    },
-};
-
-NVEvoCursorHAL nvEvoCursorCB = {
-    NVCB7A_CURSOR_IMM_CHANNEL_PIO,              /* klass */
-    MoveCursorC3,                               /* MoveCursor */
-    ReleaseElvC3,                               /* ReleaseElv */
-    {                                           /* caps */
-        256,                                    /* maxSize */
-    },
-};
-
-NVEvoCursorHAL nvEvoCursorCC = {
-    NVCC7A_CURSOR_IMM_CHANNEL_PIO,              /* klass */
     MoveCursorC3,                               /* MoveCursor */
     ReleaseElvC3,                               /* ReleaseElv */
     {                                           /* caps */

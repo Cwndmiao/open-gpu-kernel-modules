@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2018-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2018-2019 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -58,7 +58,7 @@ bitVectorClrAll_IMPL
     NvU16 bitVectorLast
 )
 {
-    NvLength byteSize = NV_BITVECTOR_BYTE_SIZE(bitVectorLast);
+    NvU32 byteSize = NV_BITVECTOR_BYTE_SIZE(bitVectorLast);
     NV_ASSERT_OR_RETURN(NULL != pBitVector, NV_ERR_INVALID_ARGUMENT);
 
     portMemSet(&pBitVector->qword, 0x0, byteSize);
@@ -72,13 +72,13 @@ NV_STATUS
 bitVectorClr_IMPL
 (
     NV_BITVECTOR *pBitVector,
-    NvU32 bitVectorLast,
-    NvU32 idx
+    NvU16 bitVectorLast,
+    NvU16 idx
 )
 {
     NvU64 *qword;
-    NvU32 qwordIdx = NV_BITVECTOR_IDX(idx);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(idx);
+    NvU16 qwordIdx = NV_BITVECTOR_IDX(idx);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(idx);
 
     NV_ASSERT_OR_RETURN(NULL != pBitVector, NV_ERR_INVALID_ARGUMENT);
     NV_ASSERT_OR_RETURN(idx < bitVectorLast, NV_ERR_INVALID_ARGUMENT);
@@ -139,9 +139,9 @@ bitVectorSetAll_IMPL
 )
 {
     NvU64 *qword;
-    NvLength byteSize = NV_BITVECTOR_BYTE_SIZE(bitVectorLast);
+    NvU32 byteSize = NV_BITVECTOR_BYTE_SIZE(bitVectorLast);
     NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorLast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorLast - 1);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorLast - 1);
 
     NV_ASSERT_OR_RETURN(NULL != pBitVector, NV_ERR_INVALID_ARGUMENT);
 
@@ -159,16 +159,15 @@ NV_STATUS
 bitVectorSet_IMPL
 (
     NV_BITVECTOR *pBitVector,
-    NvU32 bitVectorLast,
-    NvU32 idx
+    NvU16 bitVectorLast,
+    NvU16 idx
 )
 {
     NvU64 *qword;
-    NvU32 qwordIdx = NV_BITVECTOR_IDX(idx);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(idx);
+    NvU16 qwordIdx = NV_BITVECTOR_IDX(idx);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(idx);
 
     NV_ASSERT_OR_RETURN(NULL != pBitVector, NV_ERR_INVALID_ARGUMENT);
-    NV_ASSERT_OR_RETURN(idx < bitVectorLast, NV_ERR_INVALID_ARGUMENT);
 
     qword = (NvU64 *)&pBitVector->qword;
     qword[qwordIdx] |= NVBIT64(qwordOffset);
@@ -223,16 +222,15 @@ NV_STATUS
 bitVectorInv_IMPL
 (
     NV_BITVECTOR *pBitVector,
-    NvU32 bitVectorLast,
-    NvU32 idx
+    NvU16 bitVectorLast,
+    NvU16 idx
 )
 {
     NvU64 *qword;
-    NvU32 qwordIdx = NV_BITVECTOR_IDX(idx);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(idx);
+    NvU16 qwordIdx = NV_BITVECTOR_IDX(idx);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(idx);
 
     NV_ASSERT_OR_RETURN(NULL != pBitVector, NV_ERR_INVALID_ARGUMENT);
-    NV_ASSERT_OR_RETURN(idx < bitVectorLast, NV_ERR_INVALID_ARGUMENT);
 
     qword = (NvU64 *)&pBitVector->qword;
     qword[qwordIdx] ^= NVBIT64(qwordOffset);
@@ -329,9 +327,9 @@ bitVectorTestAllSet_IMPL
 )
 {
     const NvU64 *qword;
-    NvU32 idx;
+    NvU16 idx;
     NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorLast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorLast - 1);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorLast - 1);
     NvU64 mask;
 
     NV_ASSERT_OR_RETURN(NULL != pBitVector, NV_FALSE);
@@ -362,9 +360,9 @@ bitVectorTestAllCleared_IMPL
 )
 {
     const NvU64 *qword;
-    NvU32 idx;
+    NvU16 idx;
     NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorLast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorLast - 1);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorLast - 1);
     NvU64 mask;
 
     NV_ASSERT_OR_RETURN(NULL != pBitVector, NV_FALSE);
@@ -398,9 +396,9 @@ bitVectorTestEqual_IMPL
 {
     const NvU64 *qwordA;
     const NvU64 *qwordB;
-    NvU32 idx;
+    NvU16 idx;
     NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorALast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorALast - 1);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorALast - 1);
     NvU64 mask;
 
     NV_ASSERT_OR_RETURN(NULL != pBitVectorA, NV_ERR_INVALID_ARGUMENT);
@@ -438,9 +436,9 @@ bitVectorTestIsSubset_IMPL
 {
     const NvU64 *qwordA;
     const NvU64 *qwordB;
-    NvU32 idx;
+    NvU16 idx;
     NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorALast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorALast - 1);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorALast - 1);
     NvU64 mask;
 
     NV_ASSERT_OR_RETURN(NULL != pBitVectorA, NV_ERR_INVALID_ARGUMENT);
@@ -470,13 +468,13 @@ NvBool
 bitVectorTest_IMPL
 (
     const NV_BITVECTOR *pBitVector,
-    NvU32 bitVectorLast,
-    NvU32 idx
+    NvU16 bitVectorLast,
+    NvU16 idx
 )
 {
     const NvU64 *qword;
-    NvU32 qwordIdx = NV_BITVECTOR_IDX(idx);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(idx);
+    NvU16 qwordIdx = NV_BITVECTOR_IDX(idx);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(idx);
 
     NV_ASSERT_OR_RETURN(NULL != pBitVector, NV_FALSE);
     NV_ASSERT_OR_RETURN(idx < bitVectorLast, NV_FALSE);
@@ -510,9 +508,9 @@ bitVectorAnd_IMPL
     NvU64 *qwordDst;
     const NvU64 *qwordA;
     const NvU64 *qwordB;
-    NvU32 idx;
+    NvU16 idx;
     NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorDstLast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorDstLast - 1);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorDstLast - 1);
     NvU64 mask;
 
     NV_ASSERT_OR_RETURN(NULL != pBitVectorDst, NV_ERR_INVALID_ARGUMENT);
@@ -560,9 +558,9 @@ bitVectorOr_IMPL
     NvU64 *qwordDst;
     const NvU64 *qwordA;
     const NvU64 *qwordB;
-    NvU32 idx;
+    NvU16 idx;
     NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorDstLast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorDstLast - 1);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorDstLast - 1);
     NvU64 mask;
 
     NV_ASSERT_OR_RETURN(NULL != pBitVectorDst, NV_ERR_INVALID_ARGUMENT);
@@ -610,9 +608,9 @@ bitVectorXor_IMPL
     NvU64 *qwordDst;
     const NvU64 *qwordA;
     const NvU64 *qwordB;
-    NvU32 idx;
+    NvU16 idx;
     NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorDstLast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorDstLast - 1);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorDstLast - 1);
     NvU64 mask;
 
     NV_ASSERT_OR_RETURN(NULL != pBitVectorDst, NV_ERR_INVALID_ARGUMENT);
@@ -656,9 +654,9 @@ bitVectorComplement_IMPL
 {
     NvU64 *qwordDst;
     const NvU64 *qwordSrc;
-    NvU32 idx;
+    NvU16 idx;
     NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorDstLast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorDstLast - 1);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorDstLast - 1);
     NvU64 mask;
 
     NV_ASSERT_OR_RETURN(NULL != pBitVectorDst, NV_ERR_INVALID_ARGUMENT);
@@ -697,8 +695,8 @@ bitVectorCopy_IMPL
     NvU16 bitVectorSrcLast
 )
 {
-    NvLength byteSizeDst = NV_BITVECTOR_BYTE_SIZE(bitVectorDstLast);
-    NvLength byteSizeSrc = NV_BITVECTOR_BYTE_SIZE(bitVectorSrcLast);
+    NvU32 byteSizeDst = NV_BITVECTOR_BYTE_SIZE(bitVectorDstLast);
+    NvU32 byteSizeSrc = NV_BITVECTOR_BYTE_SIZE(bitVectorSrcLast);
 
     NV_ASSERT_OR_RETURN(NULL != pBitVectorDst, NV_ERR_INVALID_ARGUMENT);
     NV_ASSERT_OR_RETURN(NULL != pBitVectorSrc, NV_ERR_INVALID_ARGUMENT);
@@ -723,9 +721,9 @@ bitVectorCountTrailingZeros_IMPL
 )
 {
     const NvU64 *qword;
-    NvU32 idx;
+    NvU16 idx;
     NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorLast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorLast - 1);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorLast - 1);
     NvU64 mask;
 
     NV_ASSERT_OR_RETURN(NULL != pBitVector, 0);
@@ -760,16 +758,16 @@ bitVectorCountLeadingZeros_IMPL
 )
 {
     const NvU64 *qword;
-    NvU32 idx;
-    NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorLast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorLast - 1);
-    NvU32 qwordUnused = 63 - qwordOffset;
+    NvU16 idx;
+    NvU16 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorLast);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorLast - 1);
+    NvU16 qwordUnused = 63 - qwordOffset;
     NvU64 mask;
 
     NV_ASSERT_OR_RETURN(NULL != pBitVector, 0);
 
     qword = (const NvU64 *)&pBitVector->qword;
-    for (idx = (arraySize - 1); idx != (NvU32)-1; idx--)
+    for (idx = (arraySize - 1); idx != ((NvU16)-1); idx--)
     {
         mask = (idx < arraySize - 1) ? NV_U64_MAX :
                (NV_U64_MAX >> (63 - qwordOffset));
@@ -800,9 +798,9 @@ bitVectorCountSetBits_IMPL
 )
 {
     const NvU64 *qword;
-    NvU32 idx;
-    NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorLast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorLast - 1);
+    NvU16 idx;
+    NvU16 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorLast);
+    NvU16 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorLast - 1);
     NvU64 mask;
     NvU32 count;
 
@@ -832,7 +830,7 @@ bitVectorToRaw_IMPL
     NvU32 rawMaskSize
 )
 {
-    const NvLength byteSize = NV_BITVECTOR_BYTE_SIZE(bitVectorLast);
+    const NvU32 byteSize = NV_BITVECTOR_BYTE_SIZE(bitVectorLast);
 
     NV_ASSERT_OR_RETURN(NULL != pBitVector, NV_ERR_INVALID_ARGUMENT);
     NV_ASSERT_OR_RETURN(NULL != pRawMask, NV_ERR_INVALID_ARGUMENT);
@@ -854,137 +852,13 @@ bitVectorFromRaw_IMPL
     NvU32 rawMaskSize
 )
 {
-    const NvLength byteSize = NV_BITVECTOR_BYTE_SIZE(bitVectorLast);
+    const NvU32 byteSize = NV_BITVECTOR_BYTE_SIZE(bitVectorLast);
 
     NV_ASSERT_OR_RETURN(NULL != pBitVector, NV_ERR_INVALID_ARGUMENT);
     NV_ASSERT_OR_RETURN(NULL != pRawMask, NV_ERR_INVALID_ARGUMENT);
     NV_ASSERT_OR_RETURN(rawMaskSize >= byteSize, NV_ERR_BUFFER_TOO_SMALL);
 
     portMemCopy(&pBitVector->qword, byteSize, pRawMask, byteSize);
-    return NV_OK;
-}
-
-
-/**
- * @brief Gets slice for a range within pBitVector
- *
- * @note range length must be <=64, so the output slice can fit in a NvU64
- */
-NV_STATUS
-bitVectorGetSlice_IMPL
-(
-    NV_BITVECTOR *pBitVector,
-    NvU16 bitVectorLast,
-    NV_RANGE range,
-    NvU64 *slice
-)
-{
-    NvU64 *qword;
-    NvU64 temp;
-    NvU64 offsetLo = NV_BITVECTOR_OFFSET(range.lo);
-    NvU64 offsetHi = NV_BITVECTOR_OFFSET(range.hi);
-    NV_STATUS status = NV_OK;
-
-    NV_ASSERT_OR_RETURN(pBitVector != NULL, NV_ERR_INVALID_ARGUMENT);
-    NV_ASSERT_OR_RETURN(rangeLength(range) <= 8 * sizeof(NvU64), NV_ERR_INVALID_ARGUMENT);
-    NV_ASSERT_OR_RETURN(range.hi != NV_U64_MAX, NV_ERR_INVALID_ARGUMENT); //detect underflow
-    NV_ASSERT_OR_RETURN(rangeContains(rangeMake(0, bitVectorLast - 1), range),
-                        NV_ERR_INVALID_ARGUMENT);
-
-    qword = (NvU64 *)&pBitVector->qword;
-
-    if(NV_BITVECTOR_IDX(range.lo) == NV_BITVECTOR_IDX(range.hi))
-    {
-        // range fits within a single qword index
-        temp   = qword[NV_BITVECTOR_IDX(range.lo)];
-        temp  &= DRF_SHIFTMASK64(offsetHi : offsetLo);
-        temp >>= offsetLo;
-        *slice = temp;
-    }
-    else
-    {
-        // range spreads across 2 qword indexes
-        NV_ASSERT_OR_RETURN(NV_BITVECTOR_IDX(range.lo) == NV_BITVECTOR_IDX(range.hi) - 1,
-                            NV_ERR_INVALID_ARGUMENT);
-
-        temp   = qword[NV_BITVECTOR_IDX(range.lo)];
-        temp  &= DRF_SHIFTMASK64(63 : offsetLo);
-        temp >>= offsetLo;
-        *slice = temp;
-
-        temp   = qword[NV_BITVECTOR_IDX(range.hi)];
-        temp  &= DRF_SHIFTMASK64(offsetHi : 0);
-        temp <<= 64 - offsetLo;
-        *slice |= temp;
-    }
-
-    return status;
-}
-
-/**
- * @brief Causes the least significant N raised bits in pBitVectorSrc to be
- *        raised in pBitVectorDst.
- *
- * @param[out] pBitVectorDst Destination
- * @param[in]  pBitVectorSrc Source
- * @param[in]  n             Count of bits to copy
- *
- * @note it is invalid for the same bitvector to be both dest and source
- * @note n cannot be larger than the size of the bitvector
- */
-NV_STATUS
-bitVectorLowestNBits_IMPL
-(
-    NV_BITVECTOR *pBitVectorDst,
-    NvU16 bitVectorDstLast,
-    const NV_BITVECTOR *pBitVectorSrc,
-    NvU16 bitVectorSrcLast,
-    NvU16 n
-)
-{
-    NvU64 *qwordDst;
-    const NvU64 *qwordSrc;
-    NvU32 idx;
-    NvU32 arraySize = NV_BITVECTOR_ARRAY_SIZE(bitVectorSrcLast);
-    NvU32 qwordOffset = NV_BITVECTOR_OFFSET(bitVectorSrcLast - 1);
-    NvU64 mask;
-    NvU16 count;
-
-    NV_ASSERT_OR_RETURN(NULL != pBitVectorSrc, NV_ERR_INVALID_ARGUMENT);
-    NV_ASSERT_OR_RETURN(NULL != pBitVectorDst, NV_ERR_INVALID_ARGUMENT);
-    NV_ASSERT_OR_RETURN((bitVectorSrcLast == bitVectorDstLast), NV_ERR_INVALID_ARGUMENT);
-    NV_ASSERT_OR_RETURN(pBitVectorDst != pBitVectorSrc, NV_ERR_INVALID_ARGUMENT);
-    NV_ASSERT_OR_RETURN(n < bitVectorSrcLast, NV_ERR_INVALID_ARGUMENT);
-
-    if (n == bitVectorSrcLast)
-        return bitVectorCopy_IMPL(pBitVectorDst, bitVectorDstLast, pBitVectorSrc, bitVectorSrcLast);
-
-    bitVectorClrAll_IMPL(pBitVectorDst, bitVectorDstLast);
-
-    if (n == 0)
-        return NV_OK;
-
-    count = 0;
-    qwordSrc = (const NvU64 *)&pBitVectorSrc->qword;
-    qwordDst = (NvU64 *)&pBitVectorDst->qword;
-    for (idx = 0; idx < arraySize; idx++)
-    {
-        NvU64 bit;
-
-        mask = (idx < arraySize - 1) ? NV_U64_MAX :
-               (NV_U64_MAX >> (63 - qwordOffset));
-
-        FOR_EACH_INDEX_IN_MASK(64, bit, qwordSrc[idx] & mask)
-        {
-            qwordDst[idx] |= NVBIT64(bit);
-
-            count++;
-            if (count == n)
-                return NV_OK;
-        }
-        FOR_EACH_INDEX_IN_MASK_END;
-    }
-
     return NV_OK;
 }
 

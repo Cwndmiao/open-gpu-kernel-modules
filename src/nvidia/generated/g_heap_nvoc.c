@@ -1,11 +1,4 @@
 #define NVOC_HEAP_H_PRIVATE_ACCESS_ALLOWED
-
-// Version of generated metadata structures
-#ifdef NVOC_METADATA_VERSION
-#undef NVOC_METADATA_VERSION
-#endif
-#define NVOC_METADATA_VERSION 2
-
 #include "nvoc/runtime.h"
 #include "nvoc/rtti.h"
 #include "nvtypes.h"
@@ -14,29 +7,40 @@
 #include "utils/nvassert.h"
 #include "g_heap_nvoc.h"
 
-
 #ifdef DEBUG
-char __nvoc_class_id_uniqueness_check__0x556e9a = 1;
+char __nvoc_class_id_uniqueness_check_0x556e9a = 1;
 #endif
 
 extern const struct NVOC_CLASS_DEF __nvoc_class_def_Heap;
+
 extern const struct NVOC_CLASS_DEF __nvoc_class_def_Object;
 
-// Forward declarations for Heap
-void __nvoc_init__Object(Object*);
-void __nvoc_init__Heap(Heap*);
+void __nvoc_init_Heap(Heap*);
 void __nvoc_init_funcTable_Heap(Heap*);
 NV_STATUS __nvoc_ctor_Heap(Heap*);
 void __nvoc_init_dataField_Heap(Heap*);
 void __nvoc_dtor_Heap(Heap*);
+extern const struct NVOC_EXPORT_INFO __nvoc_export_info_Heap;
 
-// Structures used within RTTI (run-time type information)
-extern const struct NVOC_CASTINFO __nvoc_castinfo__Heap;
-extern const struct NVOC_EXPORT_INFO __nvoc_export_info__Heap;
+static const struct NVOC_RTTI __nvoc_rtti_Heap_Heap = {
+    /*pClassDef=*/          &__nvoc_class_def_Heap,
+    /*dtor=*/               (NVOC_DYNAMIC_DTOR) &__nvoc_dtor_Heap,
+    /*offset=*/             0,
+};
 
-// Down-thunk(s) to bridge Heap methods from ancestors (if any)
+static const struct NVOC_RTTI __nvoc_rtti_Heap_Object = {
+    /*pClassDef=*/          &__nvoc_class_def_Object,
+    /*dtor=*/               &__nvoc_destructFromBase,
+    /*offset=*/             NV_OFFSETOF(Heap, __nvoc_base_Object),
+};
 
-// Up-thunk(s) to bridge Heap methods to ancestors (if any)
+static const struct NVOC_CASTINFO __nvoc_castinfo_Heap = {
+    /*numRelatives=*/       2,
+    /*relatives=*/ {
+        &__nvoc_rtti_Heap_Heap,
+        &__nvoc_rtti_Heap_Object,
+    },
+};
 
 const struct NVOC_CLASS_DEF __nvoc_class_def_Heap = 
 {
@@ -49,38 +53,16 @@ const struct NVOC_CLASS_DEF __nvoc_class_def_Heap =
 #endif
     },
     /*objCreatefn=*/        (NVOC_DYNAMIC_OBJ_CREATE) &__nvoc_objCreateDynamic_Heap,
-    /*pCastInfo=*/          &__nvoc_castinfo__Heap,
-    /*pExportInfo=*/        &__nvoc_export_info__Heap
+    /*pCastInfo=*/          &__nvoc_castinfo_Heap,
+    /*pExportInfo=*/        &__nvoc_export_info_Heap
 };
 
-
-// Metadata with per-class RTTI with ancestor(s)
-static const struct NVOC_METADATA__Heap __nvoc_metadata__Heap = {
-    .rtti.pClassDef = &__nvoc_class_def_Heap,    // (heap) this
-    .rtti.dtor      = (NVOC_DYNAMIC_DTOR) &__nvoc_dtor_Heap,
-    .rtti.offset    = 0,
-    .metadata__Object.rtti.pClassDef = &__nvoc_class_def_Object,    // (obj) super
-    .metadata__Object.rtti.dtor      = &__nvoc_destructFromBase,
-    .metadata__Object.rtti.offset    = NV_OFFSETOF(Heap, __nvoc_base_Object),
-};
-
-
-// Dynamic down-casting information
-const struct NVOC_CASTINFO __nvoc_castinfo__Heap = {
-    .numRelatives = 2,
-    .relatives = {
-        &__nvoc_metadata__Heap.rtti,    // [0]: (heap) this
-        &__nvoc_metadata__Heap.metadata__Object.rtti,    // [1]: (obj) super
-    }
-};
-
-const struct NVOC_EXPORT_INFO __nvoc_export_info__Heap = 
+const struct NVOC_EXPORT_INFO __nvoc_export_info_Heap = 
 {
     /*numEntries=*/     0,
     /*pExportEntries=*/  0
 };
 
-void __nvoc_heapDestruct(Heap*);
 void __nvoc_dtor_Object(Object*);
 void __nvoc_dtor_Heap(Heap *pThis) {
     __nvoc_heapDestruct(pThis);
@@ -106,52 +88,34 @@ __nvoc_ctor_Heap_exit:
     return status;
 }
 
-// Vtable initialization
 static void __nvoc_init_funcTable_Heap_1(Heap *pThis) {
     PORT_UNREFERENCED_VARIABLE(pThis);
-} // End __nvoc_init_funcTable_Heap_1
+}
 
-
-// Initialize vtable(s): Nothing to do for empty vtables
 void __nvoc_init_funcTable_Heap(Heap *pThis) {
     __nvoc_init_funcTable_Heap_1(pThis);
 }
 
-// Initialize newly constructed object.
-void __nvoc_init__Heap(Heap *pThis) {
-
-    // Initialize pointers to inherited data.
-    pThis->__nvoc_pbase_Object = &pThis->__nvoc_base_Object;    // (obj) super
-    pThis->__nvoc_pbase_Heap = pThis;    // (heap) this
-
-    // Recurse to superclass initialization function(s).
-    __nvoc_init__Object(&pThis->__nvoc_base_Object);
-
-    // Pointer(s) to metadata structures(s)
-    pThis->__nvoc_base_Object.__nvoc_metadata_ptr = &__nvoc_metadata__Heap.metadata__Object;    // (obj) super
-    pThis->__nvoc_metadata_ptr = &__nvoc_metadata__Heap;    // (heap) this
-
-    // Initialize per-object vtables.
+void __nvoc_init_Object(Object*);
+void __nvoc_init_Heap(Heap *pThis) {
+    pThis->__nvoc_pbase_Heap = pThis;
+    pThis->__nvoc_pbase_Object = &pThis->__nvoc_base_Object;
+    __nvoc_init_Object(&pThis->__nvoc_base_Object);
     __nvoc_init_funcTable_Heap(pThis);
 }
 
-NV_STATUS __nvoc_objCreate_Heap(Heap **ppThis, Dynamic *pParent, NvU32 createFlags)
-{
+NV_STATUS __nvoc_objCreate_Heap(Heap **ppThis, Dynamic *pParent, NvU32 createFlags) {
     NV_STATUS status;
-    Object *pParentObj = NULL;
+    Object *pParentObj;
     Heap *pThis;
 
-    // Assign `pThis`, allocating memory unless suppressed by flag.
-    status = __nvoc_handleObjCreateMemAlloc(createFlags, sizeof(Heap), (void**)&pThis, (void**)ppThis);
-    if (status != NV_OK)
-        return status;
+    pThis = portMemAllocNonPaged(sizeof(Heap));
+    if (pThis == NULL) return NV_ERR_NO_MEMORY;
 
-    // Zero is the initial value for everything.
     portMemSet(pThis, 0, sizeof(Heap));
 
-    pThis->__nvoc_base_Object.createFlags = createFlags;
+    __nvoc_initRtti(staticCast(pThis, Dynamic), &__nvoc_class_def_Heap);
 
-    // Link the child into the parent if there is one unless flagged not to do so.
     if (pParent != NULL && !(createFlags & NVOC_OBJ_CREATE_FLAGS_PARENT_HALSPEC_ONLY))
     {
         pParentObj = dynamicCast(pParent, Object);
@@ -162,31 +126,16 @@ NV_STATUS __nvoc_objCreate_Heap(Heap **ppThis, Dynamic *pParent, NvU32 createFla
         pThis->__nvoc_base_Object.pParent = NULL;
     }
 
-    __nvoc_init__Heap(pThis);
+    __nvoc_init_Heap(pThis);
     status = __nvoc_ctor_Heap(pThis);
     if (status != NV_OK) goto __nvoc_objCreate_Heap_cleanup;
 
-    // Assignment has no effect if NVOC_OBJ_CREATE_FLAGS_IN_PLACE_CONSTRUCT is set.
     *ppThis = pThis;
-
     return NV_OK;
 
 __nvoc_objCreate_Heap_cleanup:
-
-    // Unlink the child from the parent if it was linked above.
-    if (pParentObj != NULL)
-        objRemoveChild(pParentObj, &pThis->__nvoc_base_Object);
-
-    // Do not call destructors here since the constructor already called them.
-    if (createFlags & NVOC_OBJ_CREATE_FLAGS_IN_PLACE_CONSTRUCT)
-        portMemSet(pThis, 0, sizeof(Heap));
-    else
-    {
-        portMemFree(pThis);
-        *ppThis = NULL;
-    }
-
-    // coverity[leaked_storage:FALSE]
+    // do not call destructors here since the constructor already called them
+    portMemFree(pThis);
     return status;
 }
 

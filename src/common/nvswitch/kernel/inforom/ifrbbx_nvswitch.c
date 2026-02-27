@@ -22,8 +22,19 @@
  */
 
 #include "common_nvswitch.h"
+#include "regkey_nvswitch.h"
+#include "nvVer.h"
 #include "inforom/inforom_nvswitch.h"
 
+void
+nvswitch_bbx_collect_current_time
+(
+    nvswitch_device     *device,
+    void                *pBbxState
+)
+{
+    return;
+}
 
 NvlStatus
 nvswitch_inforom_bbx_add_sxid
@@ -35,15 +46,7 @@ nvswitch_inforom_bbx_add_sxid
     NvU32            data2
 )
 {
-    NvlStatus status;
-
-    status = device->hal.nvswitch_bbx_add_sxid(device, exceptionType, data0, data1, data2);
-    if (status != NVL_SUCCESS)
-    {
-        NVSWITCH_PRINT(device, ERROR, "nvswitch_inforom_bbx_add_sxid failed, status=%d\n", status);
-    }
-
-    return status;
+    return -NVL_ERR_NOT_SUPPORTED;
 }
 
 void
@@ -52,14 +55,6 @@ nvswitch_inforom_bbx_unload
     nvswitch_device *device
 )
 {
-    NvlStatus status;
-
-    status = device->hal.nvswitch_bbx_unload(device);
-    if (status != NVL_SUCCESS)
-    {
-        NVSWITCH_PRINT(device, ERROR, "nvswitch_inforom_bbx_unload failed, status=%d\n", status);
-    }
-
     return;
 }
 
@@ -69,47 +64,7 @@ nvswitch_inforom_bbx_load
     nvswitch_device *device
 )
 {
-    NvlStatus status;
-    NvU64 time_ns = 0;
-    NvU32     majorVer;
-    NvU32     minorVer;
-    NvU32     buildNum;
-    NvU8        osType;
-    NvU32       osVersion;
-
-    osType = INFOROM_BBX_OBJ_V1_00_SYSTEM_OS_TYPE_UNIX;
-
-    status = nvswitch_os_get_os_version(&majorVer, &minorVer, &buildNum);
-    if (status != NVL_SUCCESS)
-    {
-        NVSWITCH_PRINT(device, ERROR,
-            "%s: Failed to get OS version, status=%d\n",
-            __FUNCTION__, status);
-        return status;
-    }
-
-    if ((majorVer > 0xff) || (minorVer > 0xff) || (buildNum > 0xffff))
-    {
-        NVSWITCH_PRINT(device, ERROR,
-            "Unexpected OS versions found. majorVer: 0x%x minorVer: 0x%x buildNum: 0x%x\n",
-            majorVer, minorVer, buildNum);
-        return -NVL_ERR_NOT_SUPPORTED;;
-    }
-
-    osVersion =
-        REF_NUM(INFOROM_BBX_OBJ_V1_00_SYSTEM_OS_MAJOR, majorVer) |
-        REF_NUM(INFOROM_BBX_OBJ_V1_00_SYSTEM_OS_MINOR, minorVer) |
-        REF_NUM(INFOROM_BBX_OBJ_V1_00_SYSTEM_OS_BUILD, buildNum);
-
-    time_ns = nvswitch_os_get_platform_time_epoch();
-
-    status = device->hal.nvswitch_bbx_load(device, time_ns, osType, osVersion);
-    if (status != NVL_SUCCESS)
-    {
-        NVSWITCH_PRINT(device, ERROR, "nvswitch_inforom_bbx_load failed, status=%d\n", status);
-    }
-
-    return status;
+    return -NVL_ERR_NOT_SUPPORTED;
 }
 
 NvlStatus
@@ -119,32 +74,5 @@ nvswitch_inforom_bbx_get_sxid
     NVSWITCH_GET_SXIDS_PARAMS *params
 )
 {
-    NvlStatus status;
-
-    status = device->hal.nvswitch_bbx_get_sxid(device, params);
-    if (status != NVL_SUCCESS)
-    {
-        NVSWITCH_PRINT(device, ERROR, "nvswitch_inforom_bbx_load failed, status=%d\n", status);
-    }
-
-    return status;
-}
-
-NvlStatus
-nvswitch_inforom_bbx_get_data
-(
-    nvswitch_device *device,
-    NvU8 dataType,
-    void *params
-)
-{
-    NvlStatus status;
-
-    status = device->hal.nvswitch_bbx_get_data(device, dataType, params);
-    if (status != NVL_SUCCESS)
-    {
-        NVSWITCH_PRINT(device, ERROR, "%s: (type=%d) failed, status=%d\n", __FUNCTION__, dataType, status);
-    }
-
-    return status;
+    return -NVL_ERR_NOT_SUPPORTED;
 }

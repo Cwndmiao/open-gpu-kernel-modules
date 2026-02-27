@@ -24,9 +24,6 @@
 #ifndef _IO_NVSWITCH_H_
 #define _IO_NVSWITCH_H_
 
-#include "nv_list.h"
-#include "ctrl_dev_nvswitch.h"
-
 // NVSWITCH_REG_* MMIO wrappers are to be used for absolute symbolic BAR0 offset
 // register  references like SMC, CLOCK, BUS, and PRIV_MASTER.
 //
@@ -95,7 +92,11 @@ typedef struct engine_descriptor
 // NVSWITCH_REG_RD/WR IO wrappers.
 //
 
-#define NVSWITCH_LIST_LS10_ONLY_ENGINES(_op)     \
+#define NVSWITCH_LIST_ALL_ENGINES(_op)      \
+    _op(XVE)                                \
+    _op(SAW)                                \
+    _op(SOE)                                \
+    _op(SMR)                                \
     _op(GIN)                                \
     _op(XAL)                                \
     _op(XAL_FUNC)                           \
@@ -123,14 +124,6 @@ typedef struct engine_descriptor
     _op(SYSB_PRI_RS_CTRL)                   \
     _op(PRI_MASTER_RS)                      \
     _op(PTIMER)                             \
-    _op(CPR)                                \
-    _op(TILEOUT)                            \
-
-#define NVSWITCH_LIST_ALL_ENGINES(_op)      \
-    _op(XVE)                                \
-    _op(SAW)                                \
-    _op(SOE)                                \
-    _op(SMR)                                \
                                             \
     _op(NPG)                                \
     _op(NPORT)                              \
@@ -141,14 +134,22 @@ typedef struct engine_descriptor
     _op(NVLIPT_LNK)                         \
     _op(NVLTLC)                             \
     _op(NVLDL)                              \
+    _op(CPR)                                \
                                             \
     _op(NXBAR)                              \
     _op(TILE)                               \
+    _op(TILEOUT)                            \
                                             \
     _op(NPG_PERFMON)                        \
     _op(NPORT_PERFMON)                      \
                                             \
     _op(NVLW_PERFMON)                       \
+    _op(RX_PERFMON)                         \
+    _op(TX_PERFMON)                         \
+                                            \
+    _op(NXBAR_PERFMON)                      \
+    _op(TILE_PERFMON)                       \
+    _op(TILEOUT_PERFMON)                    \
 
 #define ENGINE_ID_LIST(_eng)                \
     NVSWITCH_ENGINE_ID_##_eng,
@@ -163,7 +164,6 @@ typedef struct engine_descriptor
 typedef enum nvswitch_engine_id
 {
     NVSWITCH_LIST_ALL_ENGINES(ENGINE_ID_LIST)
-    NVSWITCH_LIST_LS10_ONLY_ENGINES(ENGINE_ID_LIST)
     NVSWITCH_ENGINE_ID_SIZE,
 } NVSWITCH_ENGINE_ID;
 
@@ -312,30 +312,30 @@ typedef enum nvswitch_engine_id
 
 #define NVSWITCH_MAX_SEED_BUFFER_SIZE         NVSWITCH_MAX_SEED_NUM + 1
 
+#define NVSWITCH_MAX_INBAND_BUFFER_SIZE       256*8
+#define NVSWITCH_MAX_INBAND_BITS_SENT_AT_ONCE 32
+#define NVSWITCH_MAX_INBAND_BUFFER_ENTRIES    NVSWITCH_MAX_INBAND_BUFFER_SIZE/NVSWITCH_MAX_INBAND_BITS_SENT_AT_ONCE
+
 //
-// Storing list entries for sending to FM 
+// Inband data structure
 //
-typedef struct
+struct nvswitch_inband_data
 {
-    NVListRec entry;
-    NvU8      data[NVSWITCH_INBAND_DATA_SIZE];
-    NvU32     dataSize;
-} nvswitch_inband_data_list;
+    // Inband bufer at sender Minion
+    NvU32  sendBuffer[NVSWITCH_MAX_INBAND_BUFFER_ENTRIES];
 
-typedef struct
-{
-    // Temp entry being received
-    nvswitch_inband_data_list *message;
+    // Inband buffer at receiver Minion
+    NvU32  receiveBuffer[NVSWITCH_MAX_INBAND_BUFFER_ENTRIES];
 
-    //
-    // Persistent messages are stored even if the listener (e.g. FM) is
-    // not present.
-    //
-    NVListRec persistent_list;
+    // Is the current Minion a sender or receiver of Inband Data?
+    NvBool bIsSenderMinion;
 
-    // Stores messages if and only if the listener is present.
-    NVListRec nonpersistent_list;
-} nvswitch_inband_receive_data;
+    // Bool to say fail or not
+    NvBool bTransferFail;
+
+    // # of transmisions done - count
+    // NvU32 txCount;
+};
 
 typedef struct
 {
@@ -347,15 +347,14 @@ typedef struct
     NvBool egress_packet_latched;
 
     NvBool nea;    // Near end analog
-    NvBool nedr;   // Near end digital
-    NvBool nedw;
+    NvBool ned;    // Near end digital
 
     NvU32  lane_rxdet_status_mask;
 
     NvBool bIsRepeaterMode;
 
     // Minion Inband Data structure
-    nvswitch_inband_receive_data inbandData;
+    struct nvswitch_inband_data inBandData;
 
 } NVSWITCH_LINK_TYPE;
 

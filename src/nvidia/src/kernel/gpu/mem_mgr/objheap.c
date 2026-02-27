@@ -20,7 +20,7 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-/***************************** Heap Routines *******************************\
+/***************************** Heap Rotuines *******************************\
 *         Heap object function definitions.                                 *
 \***************************************************************************/
 

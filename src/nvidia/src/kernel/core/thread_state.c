@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1993-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -39,11 +39,9 @@
 #include "os/os.h"
 #include "containers/map.h"
 #include "nvrm_registry.h"
-#include "gpu_mgr/gpu_mgr.h"
 #include "gpu/gpu.h"
 #include "gpu/gpu_timeout.h"
 
-#include "virtualization/hypervisor/hypervisor.h"
 #include "diagnostics/journal.h"
 
 THREAD_STATE_DB threadStateDatabase;
@@ -158,7 +156,6 @@ NV_STATUS threadStateGlobalAlloc(void)
 
     // Init the thread sequencer id counter to 0.
     threadStateDatabase.threadSeqCntr = 0;
-    threadStateDatabase.gspIsrThreadSeqCntr = 0;
 
     threadStateDatabase.spinlock = portSyncSpinlockCreate(portMemAllocatorGetGlobalNonPaged());
     if (threadStateDatabase.spinlock == NULL)
@@ -184,6 +181,7 @@ NV_STATUS threadStateGlobalAlloc(void)
     }
 
     mapInitIntrusive(&threadStateDatabase.dbRoot);
+    mapInitIntrusive(&threadStateDatabase.dbRootPreempted);
 
     return rmStatus;
 }
@@ -207,6 +205,7 @@ void threadStateGlobalFree(void)
     }
 
     mapDestroy(&threadStateDatabase.dbRoot);
+    mapDestroy(&threadStateDatabase.dbRootPreempted);
 
     tlsShutdown();
 }
@@ -246,13 +245,13 @@ NvU32 threadStateGetSetupFlags(void)
 static void _threadStateSetNextCpuYieldTime(THREAD_STATE_NODE *pThreadNode)
 {
     NvU64 timeInNs;
-    timeInNs = osGetMonotonicTimeNs();
+    osGetCurrentTick(&timeInNs);
 
     pThreadNode->timeout.nextCpuYieldTime = timeInNs +
         (TIMEOUT_DEFAULT_OS_RESCHEDULE_INTERVAL_SECS) * 1000000 * 1000;
 }
 
-void threadStateYieldCpuIfNecessary(OBJGPU *pGpu, NvBool bQuiet)
+void threadStateYieldCpuIfNecessary(OBJGPU *pGpu)
 {
     NV_STATUS rmStatus;
     THREAD_STATE_NODE *pThreadNode = NULL;
@@ -261,12 +260,12 @@ void threadStateYieldCpuIfNecessary(OBJGPU *pGpu, NvBool bQuiet)
     rmStatus = threadStateGetCurrent(&pThreadNode, pGpu);
     if ((rmStatus == NV_OK) && pThreadNode )
     {
-        timeInNs = osGetMonotonicTimeNs();
+        osGetCurrentTick(&timeInNs);
         if (timeInNs >= pThreadNode->timeout.nextCpuYieldTime)
         {
             if (NV_OK == osSchedule())
             {
-                NV_PRINTF_COND(bQuiet, LEVEL_INFO, LEVEL_WARNING, "Yielding\n");
+                NV_PRINTF(LEVEL_WARNING, "Yielding\n");
             }
 
             _threadStateSetNextCpuYieldTime(pThreadNode);
@@ -306,11 +305,11 @@ static NV_STATUS _threadNodeInitTime(THREAD_STATE_NODE *pThreadNode)
         // Note that MODS does not have interrupt timeout requirements and there are
         // existing code paths that violates the timeout
         //
-        computeTimeoutMsecs = TIMEOUT_DPC_ISR_INTERVAL_MS;
-        nonComputeTimeoutMsecs = TIMEOUT_DPC_ISR_INTERVAL_MS;
+        computeTimeoutMsecs = 500;
+        nonComputeTimeoutMsecs = 500;
     }
 
-    timeInNs = osGetMonotonicTimeNs();
+    osGetCurrentTick(&timeInNs);
 
     if (firstInit)
     {
@@ -325,24 +324,6 @@ static NV_STATUS _threadNodeInitTime(THREAD_STATE_NODE *pThreadNode)
     {
         nonComputeTimeoutMsecs = pThreadNode->timeout.overrideTimeoutMsecs;
         computeTimeoutMsecs = pThreadNode->timeout.overrideTimeoutMsecs;
-    }
-
-    if ((pThreadNode->flags & THREAD_STATE_FLAGS_DEVICE_INIT) != 0)
-    {
-        //
-        // Even on platforms with strict timing requirements (e.g. WDDM) there
-        // is an exception for initialization. While init time is an important
-        // performance metric, we do not want to functionally fail because of
-        // an arbitrary deadline. Thus, we set the timeout to give plenty of
-        // buffer room for some of the slower platforms:
-        // - P40 can take ~30 seconds when booting in passthrough due to
-        //   Hyper-V intercepting all MMIO accesses (bug 1900927)
-        // - Hopper+ can take 3+ seconds due to memory link initialization
-        //
-        const NvU32 DEVICE_INIT_TIMEOUT_MS = 60 * 1000;
-
-        computeTimeoutMsecs = NV_MAX(computeTimeoutMsecs, DEVICE_INIT_TIMEOUT_MS);
-        nonComputeTimeoutMsecs = NV_MAX(nonComputeTimeoutMsecs, DEVICE_INIT_TIMEOUT_MS);
     }
 
     _threadStateSetNextCpuYieldTime(pThreadNode);
@@ -422,7 +403,7 @@ static NV_STATUS _threadNodeCheckTimeout(OBJGPU *pGpu, THREAD_STATE_NODE *pThrea
         return NV_ERR_INVALID_STATE;
     }
 
-    timeInNs = osGetMonotonicTimeNs();
+    osGetCurrentTick(&timeInNs);
     if (pElapsedTimeUs)
     {
         *pElapsedTimeUs = (timeInNs - pThreadNode->timeout.enterTime) / 1000;
@@ -508,21 +489,27 @@ static void _threadStateLogInitCaller(THREAD_STATE_NODE *pThreadNode, NvU64 func
 }
 
 /**
- * @brief Common initialization logic for both stack and heap thread state nodes
- * 
- * @param[in/out] pThreadNode The node to initialize 
- * @param[in] flags Thread state flags
- * @param[in] bUsingHeap NV_TRUE if heap-allocated, NV_FALSE if stack-allocated
- * 
- * @return NV_OK on success, error code on failure
+ * @brief Initialize a threadState for regular threads (non-interrupt context)
+ *
+ * @param[in/out] pThreadNode
+ * @param[in] flags
+ *
  */
-static NV_STATUS _threadStateInitCommon(THREAD_STATE_NODE *pThreadNode, NvU32 flags, NvBool bUsingHeap)
+void threadStateInit(THREAD_STATE_NODE *pThreadNode, NvU32 flags)
 {
     NV_STATUS rmStatus;
     NvU64 funcAddr;
 
+    // Isrs should be using threadStateIsrInit().
+    NV_ASSERT((flags & (THREAD_STATE_FLAGS_IS_ISR_LOCKLESS |
+                        THREAD_STATE_FLAGS_IS_ISR |
+                        THREAD_STATE_FLAGS_DEFERRED_INT_HANDLER_RUNNING)) == 0);
+
+    // Check to see if ThreadState is enabled
+    if (!(threadStateDatabase.setupFlags & THREAD_STATE_SETUP_FLAGS_ENABLED))
+        return;
+
     portMemSet(pThreadNode, 0, sizeof(*pThreadNode));
-    pThreadNode->bUsingHeap = bUsingHeap;
     pThreadNode->threadSeqId = portAtomicIncrementU32(&threadStateDatabase.threadSeqCntr);
     pThreadNode->cpuNum = osGetCurrentProcessorNumber();
     pThreadNode->flags = flags;
@@ -540,36 +527,50 @@ static NV_STATUS _threadStateInitCommon(THREAD_STATE_NODE *pThreadNode, NvU32 fl
 
     rmStatus = osGetCurrentThread(&pThreadNode->threadId);
     if (rmStatus != NV_OK)
-        return rmStatus;
+        return;
 
-    NV_ASSERT_OR_RETURN(pThreadNode->cpuNum < threadStateDatabase.maxCPUs, 
-                        NV_ERR_INVALID_STATE);
+    NV_ASSERT_OR_RETURN_VOID(pThreadNode->cpuNum < threadStateDatabase.maxCPUs);
 
     funcAddr = (NvU64) (NV_RETURN_ADDRESS());
 
     portSyncSpinlockAcquire(threadStateDatabase.spinlock);
     if (!mapInsertExisting(&threadStateDatabase.dbRoot, (NvU64)pThreadNode->threadId, pThreadNode))
     {
-        // Reset the threadId as insertion failed. bValid is already NV_FALSE
-        pThreadNode->threadId = 0;
-        portSyncSpinlockRelease(threadStateDatabase.spinlock);
-        return NV_ERR_GENERIC;
+        rmStatus = NV_ERR_OBJECT_NOT_FOUND;
+        // Place in the Preempted List if threadId is already present in the API list
+        if (mapInsertExisting(&threadStateDatabase.dbRootPreempted, (NvU64)pThreadNode->threadId, pThreadNode))
+        {
+            pThreadNode->flags |= THREAD_STATE_FLAGS_PLACED_ON_PREEMPT_LIST;
+            pThreadNode->bValid = NV_TRUE;
+            rmStatus = NV_OK;
+        }
+        else
+        {
+            // Reset the threadId as insertion failed on both maps. bValid is already NV_FALSE
+            pThreadNode->threadId = 0;
+            portSyncSpinlockRelease(threadStateDatabase.spinlock);
+            return;
+        }
+    }
+    else
+    {
+        pThreadNode->bValid = NV_TRUE;
+        rmStatus = NV_OK;
     }
 
-    pThreadNode->bValid = NV_TRUE;
     _threadStateLogInitCaller(pThreadNode, funcAddr);
 
     portSyncSpinlockRelease(threadStateDatabase.spinlock);
 
     _threadStatePrintInfo(pThreadNode);
 
+    NV_ASSERT(rmStatus == NV_OK);
     threadPriorityStateAlloc();
 
     if (TLS_MIRROR_THREADSTATE)
     {
         THREAD_STATE_NODE **pTls = (THREAD_STATE_NODE **)tlsEntryAcquire(TLS_ENTRY_ID_THREADSTATE);
-        NV_ASSERT_OR_RETURN(pTls != NULL, NV_ERR_INVALID_STATE);
-
+        NV_ASSERT_OR_RETURN_VOID(pTls != NULL);
         if (*pTls != NULL)
         {
             NV_PRINTF(LEVEL_WARNING,
@@ -578,76 +579,6 @@ static NV_STATUS _threadStateInitCommon(THREAD_STATE_NODE *pThreadNode, NvU32 fl
         }
         *pTls = pThreadNode;
     }
-    return NV_OK;
-}
-
-/**
- * @brief Initialize a threadState for regular threads (non-interrupt context)
- *  Use the new UAF-safe API for new code, threadStateAlloc().
- * @param[in/out] pThreadNode
- * @param[in] flags
- *
- */
-void threadStateInit(THREAD_STATE_NODE *pThreadNode, NvU32 flags)
-{
-    NvU32 osFlags;
-
-    // Isrs should be using threadStateIsrInit().
-    NV_ASSERT_OR_RETURN_VOID((flags & (THREAD_STATE_FLAGS_IS_ISR_LOCKLESS |
-        THREAD_STATE_FLAGS_IS_ISR |
-        THREAD_STATE_FLAGS_DEFERRED_INT_HANDLER_RUNNING)) == 0);
-
-    // Check to see if ThreadState is enabled
-    if (!(threadStateDatabase.setupFlags & THREAD_STATE_SETUP_FLAGS_ENABLED))
-        return;
-
-    osFlags = osGetCurrentProcessFlags();
-
-    if (osFlags & OS_CURRENT_PROCESS_FLAG_KERNEL_THREAD)
-        flags |= THREAD_STATE_FLAGS_IS_KERNEL_THREAD;
-
-    if (osFlags & OS_CURRENT_PROCESS_FLAG_EXITING)
-        flags |= THREAD_STATE_FLAGS_IS_EXITING;
-
-    // Use common initialization logic (stack-allocated)
-    // Note: Legacy void API ignores errors for backward compatibility
-    _threadStateInitCommon(pThreadNode, flags, NV_FALSE);
-}
-
-/**
- * @brief Allocate a heap-based threadState
- * @param[in] flags Thread state flags
- *
- * @return Heap-allocated THREAD_STATE_NODE* on success, NULL on failure
- */
-THREAD_STATE_NODE* threadStateAlloc(NvU32 flags)
-{
-    THREAD_STATE_NODE *pHeapNode;
-    NV_STATUS rmStatus;
-
-    // Isrs should be using threadStateIsrInit().
-    NV_ASSERT_OR_RETURN((flags & (THREAD_STATE_FLAGS_IS_ISR_LOCKLESS |
-        THREAD_STATE_FLAGS_IS_ISR |
-        THREAD_STATE_FLAGS_DEFERRED_INT_HANDLER_RUNNING)) == 0, NULL);
-
-    // Check to see if ThreadState is enabled
-    if (!(threadStateDatabase.setupFlags & THREAD_STATE_SETUP_FLAGS_ENABLED))
-        return NULL;
-
-    // Allocate heap node directly
-    pHeapNode = portMemAllocNonPaged(sizeof(THREAD_STATE_NODE));
-    if (pHeapNode == NULL)
-        return NULL;
-
-    rmStatus = _threadStateInitCommon(pHeapNode, flags, NV_TRUE);
-    if (rmStatus != NV_OK)
-        goto cleanup_heap;
-
-    return pHeapNode;
-
-cleanup_heap:
-    portMemFree(pHeapNode);
-    return NULL;
 }
 
 /**
@@ -700,9 +631,7 @@ TlsMirror_Exit:
     if (rmStatus != NV_OK)
         return;
 
-    portSyncSpinlockAcquire(threadStateDatabase.spinlock);
     threadStateDatabase.ppISRDeferredIntHandlerThreadNode[pGpu->gpuInstance] = pThreadNode;
-    portSyncSpinlockRelease(threadStateDatabase.spinlock);
 }
 
 /**
@@ -753,8 +682,6 @@ TlsMirror_Exit:
 
     NV_ASSERT_OR_RETURN_VOID(pThreadNode->cpuNum < threadStateDatabase.maxCPUs);
 
-    portSyncSpinlockAcquire(threadStateDatabase.spinlock);
-
     //
     // We use a cpu/gpu indexed structure to store the threadNode pointer
     // instead of a tree indexed by threadId because threadId is no longer
@@ -765,27 +692,17 @@ TlsMirror_Exit:
     pThreadStateIsrLockless = &threadStateDatabase.pIsrlocklessThreadNode[pThreadNode->cpuNum];
     NV_ASSERT(pThreadStateIsrLockless->ppIsrThreadStateGpu[pGpu->gpuInstance] == NULL);
     pThreadStateIsrLockless->ppIsrThreadStateGpu[pGpu->gpuInstance] = pThreadNode;
-    portSyncSpinlockRelease(threadStateDatabase.spinlock);
 }
 
-void threadStateOnlyProcessWorkISRAndDeferredIntHandler
-(
-    THREAD_STATE_NODE *pThreadNode,
-    OBJGPU *pGpu,
-    NvU32 flags
-)
-{
-    NV_ASSERT_OR_RETURN_VOID(pGpu &&
-        (flags & (THREAD_STATE_FLAGS_IS_ISR | THREAD_STATE_FLAGS_DEFERRED_INT_HANDLER_RUNNING)));
-
-    if (!(threadStateDatabase.setupFlags & THREAD_STATE_SETUP_FLAGS_ENABLED))
-        return;
-
-    // Process any work needed before exiting.
-    _threadStateFreeProcessWork(pThreadNode);
-}
-
-void threadStateOnlyFreeISRAndDeferredIntHandler
+/**
+ * @brief Free the thread state for locked ISR and bottom-half
+ *
+ * @param[in/out] pThreadNode
+ * @param[in] pGpu
+ * @param[in] flags THREAD_STATE_FLAGS_IS_ISR or THREAD_STATE_FLAGS_DEFERRED_INT_HANDLER_RUNNING
+ *
+ */
+void threadStateFreeISRAndDeferredIntHandler
 (
     THREAD_STATE_NODE *pThreadNode,
     OBJGPU *pGpu,
@@ -800,15 +717,16 @@ void threadStateOnlyFreeISRAndDeferredIntHandler
     if (!(threadStateDatabase.setupFlags & THREAD_STATE_SETUP_FLAGS_ENABLED))
         return;
 
+    // Process any work needed before exiting.
+    _threadStateFreeProcessWork(pThreadNode);
+
     if (threadStateDatabase.setupFlags & THREAD_STATE_SETUP_FLAGS_CHECK_TIMEOUT_AT_FREE_ENABLED)
     {
         rmStatus = _threadNodeCheckTimeout(NULL /*pGpu*/, pThreadNode, NULL /*pElapsedTimeUs*/);
         NV_ASSERT(rmStatus == NV_OK);
     }
 
-    portSyncSpinlockAcquire(threadStateDatabase.spinlock);
     threadStateDatabase.ppISRDeferredIntHandlerThreadNode[pGpu->gpuInstance] = NULL;
-    portSyncSpinlockRelease(threadStateDatabase.spinlock);
 
     if (TLS_MIRROR_THREADSTATE)
     {
@@ -829,26 +747,6 @@ void threadStateOnlyFreeISRAndDeferredIntHandler
                      r);
         }
     }
-}
-
-/**
- * @brief Free the thread state for locked ISR and bottom-half
- *
- * @param[in/out] pThreadNode
- * @param[in] pGpu
- * @param[in] flags THREAD_STATE_FLAGS_IS_ISR or THREAD_STATE_FLAGS_DEFERRED_INT_HANDLER_RUNNING
- *
- */
-void threadStateFreeISRAndDeferredIntHandler
-(
-    THREAD_STATE_NODE *pThreadNode,
-    OBJGPU *pGpu,
-    NvU32 flags
-)
-{
-    threadStateOnlyProcessWorkISRAndDeferredIntHandler(pThreadNode, pGpu, flags);
-
-    threadStateOnlyFreeISRAndDeferredIntHandler(pThreadNode, pGpu, flags);
 }
 
 /**
@@ -896,7 +794,14 @@ void threadStateFree(THREAD_STATE_NODE *pThreadNode, NvU32 flags)
     }
 
     portSyncSpinlockAcquire(threadStateDatabase.spinlock);
-    pMap = &threadStateDatabase.dbRoot;
+    if (pThreadNode->flags & THREAD_STATE_FLAGS_PLACED_ON_PREEMPT_LIST)
+    {
+        pMap = &threadStateDatabase.dbRootPreempted;
+    }
+    else
+    {
+        pMap = &threadStateDatabase.dbRoot;
+    }
 
     pNode = mapFind(pMap, (NvU64)pThreadNode->threadId);
 
@@ -938,12 +843,6 @@ void threadStateFree(THREAD_STATE_NODE *pThreadNode, NvU32 flags)
                      r);
         }
     }
-
-    // Free heap memory if this node was heap-allocated
-    if (pThreadNode->bUsingHeap)
-    {
-        portMemFree(pThreadNode);
-    }
 }
 
 /**
@@ -975,11 +874,9 @@ void threadStateFreeISRLockless(THREAD_STATE_NODE *pThreadNode, OBJGPU *pGpu, Nv
         NV_ASSERT(rmStatus == NV_OK);
     }
 
-    portSyncSpinlockAcquire(threadStateDatabase.spinlock);
     pThreadStateIsrlockless = &threadStateDatabase.pIsrlocklessThreadNode[pThreadNode->cpuNum];
     NV_ASSERT(pThreadStateIsrlockless->ppIsrThreadStateGpu[pGpu->gpuInstance] != NULL);
     pThreadStateIsrlockless->ppIsrThreadStateGpu[pGpu->gpuInstance] = NULL;
-    portSyncSpinlockRelease(threadStateDatabase.spinlock);
 
     if (TLS_MIRROR_THREADSTATE)
     {
@@ -1069,8 +966,14 @@ static NV_STATUS _threadStateGet
         }
     }
 
+    // Try the Preempted list first before trying the API list
     portSyncSpinlockAcquire(threadStateDatabase.spinlock);
-    pNode = mapFind(&threadStateDatabase.dbRoot, (NvU64) threadId);
+    pNode = mapFind(&threadStateDatabase.dbRootPreempted, (NvU64) threadId);
+    if (pNode == NULL)
+    {
+        // Not found on the Preempted, try the API list
+        pNode = mapFind(&threadStateDatabase.dbRoot, (NvU64) threadId);
+    }
     portSyncSpinlockRelease(threadStateDatabase.spinlock);
 
     *ppThreadNode = pNode;
@@ -1212,7 +1115,7 @@ void threadStateLogTimeout(OBJGPU *pGpu, NvU64 funcAddr, NvU32 lineNum)
         // Log the Timeout in the RM Journal
         RmRC2GpuTimeout3_RECORD* pRec = NULL;
 
-        rcdbAddAssertJournalRecWithLine(pGpu, lineNum, (void**)&pRec,
+        rcdbAddAssertJournalRecWithLine(pGpu, lineNum, (void**)&pRec, 
                                 RmGroup, RmRC2GpuTimeout_V3,
                                 sizeof(RmRC2GpuTimeout3_RECORD),
                                 DRF_DEF(_RM, _ASSERT, _TYPE, _INFO),
@@ -1270,9 +1173,16 @@ NV_STATUS threadStateCheckTimeout(OBJGPU *pGpu, NvU64 *pElapsedTimeUs)
     return rmStatus;
 }
 
-static void _threadStateSetTimeoutOverride(THREAD_STATE_NODE *pThreadNode, NvU64 newTimeoutMs)
+//
+// Set override timeout value for specified thread
+//
+void threadStateSetTimeoutOverride(THREAD_STATE_NODE *pThreadNode, NvU64 newTimeoutMs)
 {
-    NvU64 timeInNs = osGetMonotonicTimeNs();
+    NvU64 timeInNs;
+
+    pThreadNode->timeout.overrideTimeoutMsecs = newTimeoutMs;
+
+    osGetCurrentTick(&timeInNs);
 
     _threadStateSetNextCpuYieldTime(pThreadNode);
 
@@ -1289,24 +1199,6 @@ static void _threadStateSetTimeoutOverride(THREAD_STATE_NODE *pThreadNode, NvU64
     }
 }
 
-//
-// Set override timeout value for specified thread
-//
-void threadStateSetTimeoutOverride(THREAD_STATE_NODE *pThreadNode, NvU64 newTimeoutMs)
-{
-    pThreadNode->timeout.overrideTimeoutMsecs = newTimeoutMs;
-    _threadStateSetTimeoutOverride(pThreadNode, newTimeoutMs);
-}
-
-//
-// One-time override timeout for specified thread; does not apply across timeout resets
-//
-void threadStateSetTimeoutSingleOverride(THREAD_STATE_NODE *pThreadNode, NvU64 newTimeoutMs)
-{
-    // Does not cache override in overrideTimeoutMsecs, so it is not re-applied upon reset.
-    _threadStateSetTimeoutOverride(pThreadNode, newTimeoutMs);
-}
-
 NV_STATUS threadStateEnqueueCallbackOnFree
 (
     THREAD_STATE_NODE          *pThreadNode,
@@ -1315,12 +1207,12 @@ NV_STATUS threadStateEnqueueCallbackOnFree
 {
     THREAD_STATE_FREE_CALLBACK *pCbListNode;
 
+    if (!(pThreadNode->flags & THREAD_STATE_FLAGS_STATE_FREE_CB_ENABLED))
+        return NV_ERR_INVALID_OPERATION;
+
     if ((pThreadNode == NULL) || (pCallback == NULL) ||
         (pCallback->pCb == NULL))
         return NV_ERR_INVALID_ARGUMENT;
-
-    if (!(pThreadNode->flags & THREAD_STATE_FLAGS_STATE_FREE_CB_ENABLED))
-        return NV_ERR_INVALID_OPERATION;
 
     // Add from tail to maintain FIFO semantics.
     pCbListNode = listAppendNew(&pThreadNode->cbList);

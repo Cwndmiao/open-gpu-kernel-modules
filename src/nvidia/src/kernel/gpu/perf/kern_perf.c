@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -30,10 +30,9 @@
 
 /* ------------------------ Includes --------------------------------------- */
 #include "gpu/perf/kern_perf.h"
+#include "gpu/perf/kern_perf_1hz.h"
 #include "gpu/perf/kern_perf_boost.h"
-#include "gpu/timer/objtmr.h"
-#include "platform/platform_request_handler.h"
-#include "platform/chipset/chipset.h"
+#include "objtmr.h"
 
 /* ------------------------ Global Variables ------------------------------- */
 /* ------------------------ Static Function Prototypes --------------------- */
@@ -54,49 +53,28 @@ kperfConstructEngine_IMPL(OBJGPU *pGpu, KernelPerf *pKernelPerf, ENGDESCRIPTOR e
 NV_STATUS
 kperfStateInitLocked_IMPL(OBJGPU *pGpu, KernelPerf *pKernelPerf)
 {
-
     NV_STATUS status = NV_OK;
 
     // Initialize SW state corresponding to SLI GPU Boost synchronization.
     status = kperfGpuBoostSyncStateInit(pGpu, pKernelPerf);
 
-    {
-        OBJSYS                  *pSys                    = SYS_GET_INSTANCE();
-        PlatformRequestHandler  *pPlatformRequestHandler = SYS_GET_PFM_REQ_HNDLR(pSys);
-
-
-        // Initialize PFM_REQ_HNDLR module which is a child of OBJSYS
-        if (pPlatformRequestHandler != NULL)
-        {
-            pfmreqhndlrStateInit(pPlatformRequestHandler);
-        }
-    }
-
     return status;
 }
-
+ 
 /*!
  * @copydoc kperfStateLoad
  */
 NV_STATUS
 kperfStateLoad_IMPL(OBJGPU *pGpu, KernelPerf *pKernelPerf, NvU32 flags)
 {
+    OBJTMR         *pTmr    = GPU_GET_TIMER(pGpu);
+
+    pKernelPerf->timer1HzCallback.bEnableTimerUpdates = NV_TRUE;
+
+    tmrScheduleCallbackRelSec(pTmr, kperfTimerProc, TMR_POBJECT_KERNEL_PERF_1HZ, 1, TMR_FLAG_RECUR, 0);
+
     // Initialize SW state corresponding to SLI GPU Boost synchronization.
     kperfGpuBoostSyncStateInit(pGpu, pKernelPerf);
-
-    {
-        OBJSYS                  *pSys                    = SYS_GET_INSTANCE();
-        PlatformRequestHandler  *pPlatformRequestHandler = SYS_GET_PFM_REQ_HNDLR(pSys);
-
-
-        // Load PFM_REQ_HNDLR module which is a child of OBJSYS
-        // Skip pfmreqhndlrStateLoad on eGPU
-        if (!(pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_EXTERNAL_GPU)) &&
-             (pPlatformRequestHandler != NULL))
-        {
-            pfmreqhndlrStateLoad(pPlatformRequestHandler);
-        }
-    }
 
     return NV_OK;
 }
@@ -112,40 +90,13 @@ kperfStateUnload_IMPL
     NvU32          flags
 )
 {
-    {
-        OBJSYS                  *pSys                    = SYS_GET_INSTANCE();
-        PlatformRequestHandler  *pPlatformRequestHandler = SYS_GET_PFM_REQ_HNDLR(pSys);
+    OBJTMR         *pTmr    = GPU_GET_TIMER(pGpu);
 
-        if ((pPlatformRequestHandler != NULL))
-        {
-            // Unload PFM_REQ_HNDLR module which is a child of OBJSYS
-            pfmreqhndlrStateUnload(pPlatformRequestHandler);
-        }
-    }
+    pKernelPerf->timer1HzCallback.bEnableTimerUpdates = NV_FALSE;
+
+    tmrCancelCallback(pTmr, TMR_POBJECT_KERNEL_PERF_1HZ);
 
     return NV_OK;
-}
-
-/*!
- * @copydoc kperfStateDestroy
-*/
-void
-kperfStateDestroy_IMPL
-(
-    OBJGPU        *pGpu,
-    KernelPerf    *pKernelPerf
-)
-{
-    {
-        OBJSYS                  *pSys                    = SYS_GET_INSTANCE();
-        PlatformRequestHandler  *pPlatformRequestHandler = SYS_GET_PFM_REQ_HNDLR(pSys);
-
-        // destroy PFM_REQ_HNDLR module state
-        if (pPlatformRequestHandler != NULL)
-        {
-            pfmreqhndlrStateDestroy(pPlatformRequestHandler);
-        }
-    }
 }
 
 /*!

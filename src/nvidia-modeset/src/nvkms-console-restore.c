@@ -51,9 +51,7 @@ static NvBool FindMode(NVDpyEvoPtr pDpyEvo,
 
         params.request.dpyId = pDpyEvo->id;
         params.request.modeIndex = index++;
-        params.request.modeValidation.overrides =
-            NVKMS_MODE_VALIDATION_REQUIRE_BOOT_CLOCKS |
-            NVKMS_MODE_VALIDATION_MAX_ONE_HARDWARE_HEAD;
+        params.request.modeValidation.overrides = NVKMS_MODE_VALIDATION_REQUIRE_BOOT_CLOCKS;
 
         nvValidateModeIndex(pDpyEvo, &params.request, &params.reply);
 
@@ -116,160 +114,70 @@ static NVDpyIdList UpdateConnectedDpys(NVDispEvoPtr pDispEvo)
 
 static void FlipBaseToNull(NVDevEvoPtr pDevEvo)
 {
-    struct NvKmsFlipRequestOneHead *pFlipApiHead = NULL;
-    NvU32 numFlipApiHeads = 0, i;
+    struct NvKmsFlipParams *pParams = nvCalloc(1, sizeof(*pParams));
+    struct NvKmsFlipRequest *pRequest;
     NvU32 sd;
     NVDispEvoPtr pDispEvo;
     NvBool ret = TRUE;
 
-    /* First count the number of active heads. */
-    FOR_ALL_EVO_DISPLAYS(pDispEvo, sd, pDevEvo) {
-        NvU32 apiHead;
-        for (apiHead = 0; apiHead < pDevEvo->numApiHeads; apiHead++) {
-            if (!nvApiHeadIsActive(pDispEvo, apiHead)) {
-                continue;
-            }
-            numFlipApiHeads++;
-        }
-    }
-
-    if (numFlipApiHeads == 0) {
-        // If no heads require changes, there's nothing to do.
-        return;
-    }
-
-    /* Allocate an array of head structures */
-    pFlipApiHead = nvCalloc(numFlipApiHeads, sizeof(pFlipApiHead[0]));
-
-    if (!pFlipApiHead) {
+    if (!pParams) {
         nvEvoLogDevDebug(pDevEvo, EVO_LOG_WARN,
             "Failed to allocate flip parameters for console restore base flip "
             "to NULL");
         return;
     }
 
-    i = 0;
+    pRequest = &pParams->request;
+
     FOR_ALL_EVO_DISPLAYS(pDispEvo, sd, pDevEvo) {
-        NvU32 apiHead;
-        for (apiHead = 0; apiHead < pDevEvo->numApiHeads; apiHead++) {
-            struct NvKmsFlipCommonParams *pRequestApiHead = NULL;
+        struct NvKmsFlipRequestOneSubDevice *pRequestSd =
+            &pRequest->sd[sd];
+        NvU32 head;
+        for (head = 0; head < pDevEvo->numHeads; head++) {
+            struct NvKmsFlipCommonParams *pRequestHead =
+                &pRequestSd->head[head];
             NvU32 layer;
 
-            if (!nvApiHeadIsActive(pDispEvo, apiHead)) {
+            if (!nvHeadIsActive(pDispEvo, head)) {
                 continue;
             }
 
-            pFlipApiHead[i].sd = sd;
-            pFlipApiHead[i].head = apiHead;
-            pRequestApiHead = &pFlipApiHead[i].flip;
-            i++;
-            nvAssert(i <= numFlipApiHeads);
+            pRequestSd->requestedHeadsBitMask |= NVBIT(head);
 
-            // Disable HDR on head
-            pRequestApiHead->tf.specified = TRUE;
-            pRequestApiHead->tf.val = NVKMS_OUTPUT_TF_NONE;
-
-            pRequestApiHead->hdrInfoFrame.specified = TRUE;
-            pRequestApiHead->hdrInfoFrame.enabled = FALSE;
-
-            pRequestApiHead->colorimetry.specified = TRUE;
-            pRequestApiHead->colorimetry.val = NVKMS_OUTPUT_COLORIMETRY_DEFAULT;
-
-            for (layer = 0; layer < pDevEvo->apiHead[apiHead].numLayers; layer++) {
-                pRequestApiHead->layer[layer].surface.specified = TRUE;
+            for (layer = 0; layer < pDevEvo->head[head].numLayers; layer++) {
+                pRequestHead->layer[layer].surface.specified = TRUE;
                 // No need to specify sizeIn/sizeOut as we are flipping NULL surface.
-                pRequestApiHead->layer[layer].compositionParams.specified = TRUE;
-                pRequestApiHead->layer[layer].completionNotifier.specified = TRUE;
-                pRequestApiHead->layer[layer].syncObjects.specified = TRUE;
-
-                // Disable HDR on layers
-                pRequestApiHead->layer[layer].hdr.enabled = FALSE;
-                pRequestApiHead->layer[layer].hdr.specified = TRUE;
-
-                pRequestApiHead->layer[layer].colorSpace.val =
-                    NVKMS_INPUT_COLOR_SPACE_NONE;
-                pRequestApiHead->layer[layer].colorSpace.specified = TRUE;
-
-                pRequestApiHead->layer[layer].tf.val =
-                    NVKMS_INPUT_TF_LINEAR;
-                pRequestApiHead->layer[layer].tf.specified = TRUE;
+                pRequestHead->layer[layer].compositionParams.specified = TRUE;
+                pRequestHead->layer[layer].completionNotifier.specified = TRUE;
+                pRequestHead->layer[layer].syncObjects.specified = TRUE;
             }
+
+            pRequest->commit = TRUE;
         }
     }
 
-    ret = nvFlipEvo(pDevEvo, pDevEvo->pNvKmsOpenDev,
-                    pFlipApiHead,
-                    numFlipApiHeads,
-                    TRUE  /* commit */,
-                    NULL  /* pReply */,
-                    FALSE /* skipUpdate */,
-                    FALSE /* allowFlipLock */);
-    nvFree(pFlipApiHead);
+    // If no heads require changes, there's nothing to do.
+    if (pRequest->commit) {
+        ret = nvFlipEvo(pDevEvo, pDevEvo->pNvKmsOpenDev, pRequest,
+                        &pParams->reply, FALSE /* skipUpdate */,
+                        FALSE /* allowFlipLock */);
+    }
+    nvFree(pParams);
 
     if (!ret) {
         nvAssert(!"Console restore failed to flip base to NULL");
     }
 
     FOR_ALL_EVO_DISPLAYS(pDispEvo, sd, pDevEvo) {
-        NvU32 apiHead;
-        for (apiHead = 0; apiHead < pDevEvo->numApiHeads; apiHead++) {
+        NvU32 head;
+        for (head = 0; head < pDevEvo->numHeads; head++) {
             NvBool stoppedBase;
-            ret = nvIdleBaseChannelOneApiHead(pDispEvo, apiHead, &stoppedBase);
+            ret = nvRMIdleBaseChannel(pDevEvo, head, sd, &stoppedBase);
             if (!ret) {
                 nvAssert(!"Console restore failed to idle base");
             }
         }
     }
-}
-
-/*!
- * Return the mask of active api heads on this pDispEvo.
- */
-static NvU32 GetActiveApiHeadMask(NVDispEvoPtr pDispEvo)
-{
-    NvU32 apiHead;
-    NvU32 apiHeadMask = 0;
-
-    for (apiHead = 0; apiHead < NVKMS_MAX_HEADS_PER_DISP; apiHead++) {
-        if (nvApiHeadIsActive(pDispEvo, apiHead)) {
-            apiHeadMask |= 1 << apiHead;
-        }
-    }
-
-    return apiHeadMask;
-}
-
-static NvU32 PickApiHead(const NVDpyEvoRec *pDpyEvo,
-                         const NvU32 availableApiHeadsMask)
-{
-    const NvU32 possibleApiHeads = availableApiHeadsMask &
-        nvDpyGetPossibleApiHeadsMask(pDpyEvo);
-    const NvU32 activeApiHeadsMask =
-        GetActiveApiHeadMask(pDpyEvo->pDispEvo);
-
-    NvU32 head;
-
-    if (possibleApiHeads == 0) {
-        return NV_INVALID_HEAD;
-    }
-
-    if ((pDpyEvo->apiHead != NV_INVALID_HEAD) &&
-            ((NVBIT(pDpyEvo->apiHead) & possibleApiHeads) != 0x0)) {
-        return pDpyEvo->apiHead;
-    }
-
-    if ((possibleApiHeads & ~activeApiHeadsMask) != 0x0) {
-        head = BIT_IDX_32(LOWESTBIT(possibleApiHeads &
-                                    ~activeApiHeadsMask));
-    } else {
-        head = BIT_IDX_32(LOWESTBIT(possibleApiHeads));
-    }
-    
-    if (head >= NV_MAX_HEADS) {
-        return NV_INVALID_HEAD;
-    }
-    
-    return head;
 }
 
 static NvBool InitModeOneHeadRequest(
@@ -278,7 +186,7 @@ static NvBool InitModeOneHeadRequest(
     const struct NvKmsMode *pOverrideMode,
     const struct NvKmsSize *pOverrideViewPortSizeIn,
     const struct NvKmsPoint *pOverrideViewPortPointIn,
-    const NvU32 apiHead,
+    const NvU32 head,
     struct NvKmsSetModeOneHeadRequest *pRequestHead)
 {
 
@@ -301,8 +209,7 @@ static NvBool InitModeOneHeadRequest(
 
     pRequestHead->dpyIdList = nvAddDpyIdToEmptyDpyIdList(pDpyEvo->id);
     pRequestHead->modeValidationParams.overrides =
-        NVKMS_MODE_VALIDATION_REQUIRE_BOOT_CLOCKS |
-        NVKMS_MODE_VALIDATION_MAX_ONE_HARDWARE_HEAD;
+        NVKMS_MODE_VALIDATION_REQUIRE_BOOT_CLOCKS;
     if (pOverrideViewPortSizeIn != NULL) {
         pRequestHead->viewPortSizeIn = *pOverrideViewPortSizeIn;
     } else {
@@ -326,7 +233,7 @@ static NvBool InitModeOneHeadRequest(
         pFlip->layer[NVKMS_MAIN_LAYER].sizeIn.val;
 
     /* Disable other layers except Main */
-    for (layer = 0; layer < pDevEvo->apiHead[apiHead].numLayers; layer++) {
+    for (layer = 0; layer < pDevEvo->head[head].numLayers; layer++) {
 
         if (layer == NVKMS_MAIN_LAYER) {
             pFlip->layer[layer].csc.matrix = NVKMS_IDENTITY_CSC_MATRIX;
@@ -341,9 +248,9 @@ static NvBool InitModeOneHeadRequest(
 
     // Disable other features.
     pFlip->cursor.imageSpecified = TRUE;
-    pFlip->lut.input.specified = TRUE;
-    pFlip->lut.output.specified = TRUE;
-    pFlip->lut.synchronous = TRUE;
+    pRequestHead->lut.input.specified = TRUE;
+    pRequestHead->lut.output.specified = TRUE;
+    pRequestHead->lut.synchronous = TRUE;
     pRequestHead->allowGsync = FALSE;
     pRequestHead->allowAdaptiveSync =
         NVKMS_ALLOW_ADAPTIVE_SYNC_DISABLED;
@@ -356,21 +263,24 @@ ConstructModeOneHeadRequestForOneDpy(NVDpyEvoRec *pDpyEvo,
                                      NVSurfaceEvoPtr pSurfaceEvo,
                                      struct NvKmsSetModeParams *pParams,
                                      const NvU32 dispIndex,
-                                     NvU32 *pAvailableApiHeadsMask)
+                                     NvU32 *pAvailableHeadsMask)
 {
     NvBool ret = FALSE;
-    const NvU32 apiHead = PickApiHead(pDpyEvo, *pAvailableApiHeadsMask);
+    const NvU32 possibleHeads = *pAvailableHeadsMask &
+                                 pDpyEvo->pConnectorEvo->validHeadMask;
 
-    if ((apiHead == NV_INVALID_HEAD) || pDpyEvo->isVrHmd) {
+    if (possibleHeads == 0 || pDpyEvo->isVrHmd) {
         goto done;
     }
+
+    const NvU32 head = BIT_IDX_32(LOWESTBIT(possibleHeads));
 
     NVDispEvoRec *pDispEvo = pDpyEvo->pDispEvo;
     struct NvKmsSetModeRequest *pRequest = &pParams->request;
     struct NvKmsSetModeOneDispRequest *pRequestDisp =
         &pRequest->disp[dispIndex];
     struct NvKmsSetModeOneHeadRequest *pRequestHead =
-        &pRequestDisp->head[apiHead];
+        &pRequestDisp->head[head];
 
     NVDevEvoRec *pDevEvo = pDispEvo->pDevEvo;
 
@@ -379,7 +289,7 @@ ConstructModeOneHeadRequestForOneDpy(NVDpyEvoRec *pDpyEvo,
                                 NULL /* Use default Mode */,
                                 NULL /* Use default ViewPortSizeIn */,
                                 NULL /* Use default ViewPortPointIn */,
-                                apiHead,
+                                head,
                                 pRequestHead)) {
         goto done;
     }
@@ -412,7 +322,7 @@ ConstructModeOneHeadRequestForOneDpy(NVDpyEvoRec *pDpyEvo,
         pRequestHead->viewPortOutSpecified = TRUE;
     }
 
-    *pAvailableApiHeadsMask &= ~NVBIT(apiHead);
+    *pAvailableHeadsMask &= ~NVBIT(head);
 
     ret = TRUE;
 
@@ -573,7 +483,7 @@ ConstructModeRequestForTiledDisplay(const NVDispEvoRec *pDispEvo,
                                     struct NvKmsSetModeParams *pParams,
                                     const NvU32 dispIndex,
                                     NVDpyIdList tiledDisplayDpysList,
-                                    NvU32 *pAvailableApiHeadsMask)
+                                    NvU32 *pAvailableHeadsMask)
 {
     NVDevEvoRec *pDevEvo = pDispEvo->pDevEvo;
     /*
@@ -597,16 +507,16 @@ ConstructModeRequestForTiledDisplay(const NVDispEvoRec *pDispEvo,
     struct NvKmsSetModeRequest *pRequest = &pParams->request;
     struct NvKmsSetModeOneDispRequest *pRequestDisp =
         &pRequest->disp[dispIndex];
-    NvU32 firstClaimedApiHead = NV_INVALID_HEAD;
-    NvU32 claimedApiHeadMask = 0x0;
+    NvU32 firstClaimedHead = NV_INVALID_HEAD;
+    NvU32 claimedHeadMask = 0x0;
     NVDpyEvoRec *pDpyEvo;
-    NvU32 apiHead;
+    NvU32 head;
 
     /*
      * Return failure if not enough number of heads available to construct
      * modeset request for Tiled-Display.
      */
-    if (nvPopCount32(*pAvailableApiHeadsMask) <
+    if (nvPopCount32(*pAvailableHeadsMask) <
         nvCountDpyIdsInDpyIdList(tiledDisplayDpysList)) {
         return FALSE;
     }
@@ -627,20 +537,20 @@ ConstructModeRequestForTiledDisplay(const NVDispEvoRec *pDispEvo,
             .x = pDpyDisplayIdInfo->tile_location.x * viewPortSizeIn.width,
             .y = pDpyDisplayIdInfo->tile_location.y * viewPortSizeIn.height
         };
-        const NvU32 localAvailableApiHeadsMask =
-            *pAvailableApiHeadsMask & ~claimedApiHeadMask;
-        const NvU32 apiHead = PickApiHead(pDpyEvo,
-            localAvailableApiHeadsMask);
+        const NvU32 possibleHeads = *pAvailableHeadsMask &
+                                     pDpyEvo->pConnectorEvo->validHeadMask &
+                                     ~claimedHeadMask;
 
-        if ((apiHead == NV_INVALID_HEAD) || pDpyEvo->isVrHmd) {
+        if (possibleHeads == 0 || pDpyEvo->isVrHmd) {
             goto failed;
         }
 
+        const NvU32 head = BIT_IDX_32(LOWESTBIT(possibleHeads));
         struct NvKmsSetModeOneHeadRequest *pRequestHead =
-            &pRequestDisp->head[apiHead];
+            &pRequestDisp->head[head];
         struct NvKmsMode mode;
 
-        if (firstClaimedApiHead == NV_INVALID_HEAD) {
+        if (firstClaimedHead == NV_INVALID_HEAD) {
             /*
              * Find mode of native dimensions reported in Tiled-Display
              * information.
@@ -653,20 +563,20 @@ ConstructModeRequestForTiledDisplay(const NVDispEvoRec *pDispEvo,
                 goto failed;
             }
 
-            firstClaimedApiHead = apiHead;
+            firstClaimedHead = head;
         } else {
             /* All tiles should support same set of modes */
-            mode = pRequestDisp->head[firstClaimedApiHead].mode;
+            mode = pRequestDisp->head[firstClaimedHead].mode;
         }
 
-        claimedApiHeadMask |= NVBIT(apiHead);
+        claimedHeadMask |= NVBIT(head);
 
         if (!InitModeOneHeadRequest(pDpyEvo,
                                     pSurfaceEvo,
                                     &mode,
                                     &viewPortSizeIn,
                                     &viewPortPointIn,
-                                    apiHead,
+                                    head,
                                     pRequestHead)) {
             goto failed;
         }
@@ -682,19 +592,19 @@ ConstructModeRequestForTiledDisplay(const NVDispEvoRec *pDispEvo,
                           FALSE /* doRasterLock */)) {
         goto failed;
     }
-    *pAvailableApiHeadsMask &= ~claimedApiHeadMask;
+    *pAvailableHeadsMask &= ~claimedHeadMask;
 
     return TRUE;
 
 failed:
 
-    for (apiHead = 0; apiHead < ARRAY_LEN(pRequestDisp->head); apiHead++) {
-        if ((NVBIT(apiHead) & claimedApiHeadMask) == 0x0) {
+    for (head = 0; head < ARRAY_LEN(pRequestDisp->head); head++) {
+        if ((NVBIT(head) & claimedHeadMask) == 0x0) {
             continue;
         }
-        nvkms_memset(&pRequestDisp->head[apiHead],
+        nvkms_memset(&pRequestDisp->head[head],
                      0,
-                     sizeof(pRequestDisp->head[apiHead]));
+                     sizeof(pRequestDisp->head[head]));
     }
 
     return FALSE;
@@ -706,15 +616,12 @@ static NvBool isDpMSTModeActiveOnAnyConnector(NVDevEvoPtr pDevEvo)
     NVDispEvoPtr pDispEvo;
 
     FOR_ALL_EVO_DISPLAYS(pDispEvo, i, pDevEvo) {
-        NvU32 apiHead;
+        NvU32 head;
 
-        for (apiHead = 0; apiHead < pDevEvo->numApiHeads; apiHead++) {
-            const NVDispApiHeadStateEvoRec *pApiHeadState =
-                &pDispEvo->apiHeadState[apiHead];
-            const NVDpyEvoRec *pDpyEvo =
-                nvGetOneArbitraryDpyEvo(pApiHeadState->activeDpys, pDispEvo);
-            const NVConnectorEvoRec *pConnectorEvo = (pDpyEvo != NULL) ?
-                pDpyEvo->pConnectorEvo : NULL;
+        for (head = 0; head < pDevEvo->numHeads; head++) {
+            const NVDispHeadStateEvoRec *pHeadState =
+                &pDispEvo->headState[head];
+            const NVConnectorEvoRec *pConnectorEvo = pHeadState->pConnectorEvo;
 
             if ((pConnectorEvo != NULL) &&
                     nvConnectorUsesDPLib(pConnectorEvo)) {
@@ -739,14 +646,12 @@ static NvBool isDpMSTModeActiveOnAnyConnector(NVDevEvoPtr pDevEvo)
  * If a framebuffer console surface was successfully imported from RM, then use
  * the core channel to set a mode that displays it.
  *
- * This enables as many heads as possible in a clone configuration.
- * In the first pass we select connected active dpys, in the second pass
- * any other connected boot dpys, and in a third pass any other
- * remaining connected dpys:
+ * Enables as many heads as possible in a clone configuration. In first pass
+ * for connected boot dpys and in second pass for other remaining dpys:
  *
- *   1. Populate modeset request to enable the given dpy.
+ *   1. Populate modeset request to enable given dpy.
  *
- *   2. Do modeset request validation, if it fails then disable scaling. If
+ *   2. Do modeset request validation, if fails then disable scaling. If
  *   modeset request validation fails even after disabling scaling then do not
  *   enable that dpy.
  *
@@ -810,17 +715,13 @@ NvBool nvEvoRestoreConsole(NVDevEvoPtr pDevEvo, const NvBool allowMST)
     // Construct the request.
     //
     // To start with, try to enable as many connected dpys as possible,
-    // preferring the connected active displays first.
+    // preferring boot displays first.
     struct NvKmsSetModeRequest *pRequest = &params->request;
     NvBool foundDpysConfigForConsoleRestore = FALSE;
 
     FOR_ALL_EVO_DISPLAYS(pDispEvo, dispIndex, pDevEvo) {
-        NvU32 availableApiHeadsMask = NVBIT(pDevEvo->numApiHeads) - 1;
+        NvU32 availableHeadsMask = NVBIT(pDevEvo->numHeads) - 1;
         NVDpyIdList connectedDpys = UpdateConnectedDpys(pDispEvo);
-        const NVDpyIdList activeDpys = nvActiveDpysOnDispEvo(pDispEvo);
-        const NVDpyIdList connectedActiveDpys =
-            nvIntersectDpyIdListAndDpyIdList(connectedDpys,
-                                             activeDpys);
         const NVDpyIdList connectedBootDpys =
             nvIntersectDpyIdListAndDpyIdList(connectedDpys,
                                              pDispEvo->bootDisplays);
@@ -829,7 +730,7 @@ NvBool nvEvoRestoreConsole(NVDevEvoPtr pDevEvo, const NvBool allowMST)
         int pass;
 
         pRequest->requestedDispsBitMask |= NVBIT(dispIndex);
-        pRequestDisp->requestedHeadsBitMask = availableApiHeadsMask;
+        pRequestDisp->requestedHeadsBitMask = availableHeadsMask;
 
         // Only enable heads on the subdevice that actually contains the
         // console.
@@ -839,36 +740,31 @@ NvBool nvEvoRestoreConsole(NVDevEvoPtr pDevEvo, const NvBool allowMST)
 
         NVDpyIdList handledDpysList = nvEmptyDpyIdList();
 
-        for (pass = 0; pass < 3; pass++) {
+        for (pass = 0; pass < 2; pass++) {
             NVDpyIdList candidateDpys;
             NVDpyEvoPtr pDpyEvo;
 
-            if (availableApiHeadsMask == 0) {
+            if (availableHeadsMask == 0) {
                 break;
             }
 
             if (pass == 0) {
-                candidateDpys = connectedActiveDpys;
-            } else if (pass == 1) {
-                candidateDpys = nvDpyIdListMinusDpyIdList(connectedBootDpys,
-                    connectedActiveDpys);
-            } else if (pass == 2) {
+                candidateDpys = connectedBootDpys;
+            } else {
                 candidateDpys = nvDpyIdListMinusDpyIdList(connectedDpys,
                                                           connectedBootDpys);
-                candidateDpys = nvDpyIdListMinusDpyIdList(candidateDpys,
-                                                          connectedActiveDpys);
             }
 
             FOR_ALL_EVO_DPYS(pDpyEvo, candidateDpys, pDispEvo) {
                 NvBool isTiledDisplayFound = FALSE;
-                TiledDisplayInfo tiledDisplayInfo = { };
+                TiledDisplayInfo tiledDisplayInfo = { 0 };
                 NvBool isTiledDisplayEnable = FALSE;
                 const NVT_DISPLAYID_INFO *pDpyDisplayIdInfo =
                     pDpyEvo->parsedEdid.valid ?
                         &pDpyEvo->parsedEdid.info.ext_displayid : NULL;
                 NvBool done = FALSE;
 
-                if (availableApiHeadsMask == 0) {
+                if (availableHeadsMask == 0) {
                     break;
                 }
 
@@ -902,7 +798,7 @@ NvBool nvEvoRestoreConsole(NVDevEvoPtr pDevEvo, const NvBool allowMST)
                                                     params,
                                                     dispIndex,
                                                     tiledDisplayInfo.detectedDpysList,
-                                                    &availableApiHeadsMask);
+                                                    &availableHeadsMask);
                     isTiledDisplayEnable = done;
                 }
 
@@ -923,7 +819,7 @@ NvBool nvEvoRestoreConsole(NVDevEvoPtr pDevEvo, const NvBool allowMST)
                                                     pSurfaceEvo,
                                                     params,
                                                     dispIndex,
-                                                    &availableApiHeadsMask);
+                                                    &availableHeadsMask);
                     isTiledDisplayEnable =
                         done && tiledDisplayInfo.isCapToScaleSingleTile;
                 }
@@ -970,10 +866,7 @@ done:
 
     /* If console restore failed then simply shut down all heads */
     if (!ret) {
-        nvShutDownApiHeads(pDevEvo, pDevEvo->pNvKmsOpenDev,
-                           NULL /* pTestFunc, shut down all heads */,
-                           NULL /* pData */,
-                           FALSE /* doRasterLock */);
+        nvShutDownHeads(pDevEvo, NULL /* pTestFunc, shut down all heads */);
     }
 
     // If restoring the console from here succeeded, then skip triggering RM's

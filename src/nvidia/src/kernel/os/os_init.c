@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1993-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-/***************************** HW State Routines ***************************\
+/***************************** HW State Rotuines ***************************\
 *                                                                           *
 *         Common Operating System Object Function Pointer Initializations.  *
 *         All the function pointers in the OS object are initialized here.  *
@@ -41,7 +41,6 @@
 #include "core/locks.h"
 #include "gpu/gpu.h"
 #include "gpu/gpu_access.h"
-#include "kernel/diagnostics/xid_context.h"
 #include "nv_ref.h"
 #include "virtualization/hypervisor/hypervisor.h"
 
@@ -49,7 +48,23 @@
 #include "gpu/bif/kernel_bif.h"
 
 #include "kernel/gpu/rc/kernel_rc.h"
-#include "platform/nbsi/nbsi_read.h"
+
+#include "g_os_private.h"
+
+//
+// Functions to fill function stubs
+//
+static void initOSFunctionPointers(OBJOS *);
+
+//
+// Helper functions to assist the above functions
+//
+static void initMiscOSFunctionPointers(OBJOS *);
+static void initCommonMiscOSFunctionPointers(OBJOS *);
+static void initStubMiscOSFunctionPointers(OBJOS *);
+static void initWinNTStubOSFunctionPointers(OBJOS *);
+static void initMacOSCoreOSFunctionPointers(OBJOS *);
+static void initAPIOSFunctionPointers(OBJOS *);
 
 // Bug check code string common to all OS
 const char *ppOsBugCheckBugcodeStr[] = OS_BUG_CHECK_BUGCODE_STR;
@@ -57,16 +72,114 @@ const char *ppOsBugCheckBugcodeStr[] = OS_BUG_CHECK_BUGCODE_STR;
 NV_STATUS
 constructObjOS(OBJOS *pOS)
 {
+    // Stub out function pointers
+    initOSFunctionPointers(pOS);
+
     // Now call the OS specific initialization
     osInitObjOS(pOS);
 
     return NV_OK;
 }
 
+static void
+initOSFunctionPointers(OBJOS *pOS)
+{
+    initMiscOSFunctionPointers(pOS);
+    initWinNTStubOSFunctionPointers(pOS);
+    initMacOSCoreOSFunctionPointers(pOS);
+    initAPIOSFunctionPointers(pOS);
+}
+
+static void
+initMiscOSFunctionPointers(OBJOS *pOS)
+{
+    initCommonMiscOSFunctionPointers(pOS);
+    initStubMiscOSFunctionPointers(pOS);
+}
+
+static void
+initCommonMiscOSFunctionPointers(OBJOS *pOS)
+{
+    // Common OS function pointers.
+    pOS->osGetSimulationMode             = osGetSimulationMode;
+}
+
+static void
+initStubMiscOSFunctionPointers(OBJOS *pOS)
+{
+    // Stubbed OS function pointers.
+    pOS->osSimEscapeWrite               = stubOsSimEscapeWrite;
+    pOS->osSimEscapeWriteBuffer         = stubOsSimEscapeWriteBuffer;
+    pOS->osSimEscapeRead                = stubOsSimEscapeRead;
+    pOS->osSimEscapeReadBuffer          = stubOsSimEscapeReadBuffer;
+
+    pOS->osCheckCallback                = stubOsCheckCallback;
+    pOS->osRCCallback                   = stubOsRCCallback;
+
+    pOS->osPageArrayGetPhysAddr         = stubOsPageArrayGetPhysAddr;
+
+    pOS->osInternalReserveAllocCallback = stubOsInternalReserveAllocCallback;
+    pOS->osInternalReserveFreeCallback  = stubOsInternalReserveFreeCallback;
+}
+
+static void
+initWinNTStubOSFunctionPointers(OBJOS *pOS)
+{
+    pOS->osQADbgRegistryInit         = stubOsQADbgRegistryInit;
+    pOS->osQueueWorkItem             = stubOsQueueWorkItem;
+    pOS->osQueueWorkItemWithFlags    = stubOsQueueWorkItemWithFlags;
+    pOS->osQueueSystemWorkItem       = stubOsQueueSystemWorkItem;
+    pOS->osCallACPI_MXMX             = stubOsCallACPI_MXMX;
+    pOS->osCallACPI_DDC              = stubOsCallACPI_DDC;
+    pOS->osCallACPI_BCL              = stubOsCallACPI_BCL;
+    pOS->osCallACPI_ON               = stubOsCallACPI_ON;
+    pOS->osCallACPI_OFF              = stubOsCallACPI_OFF;
+    pOS->osCallACPI_NVHG_GPUON       = stubOsCallWMI_NVHG_GPUON;
+    pOS->osCallACPI_NVHG_GPUOFF      = stubOsCallWMI_NVHG_GPUOFF;
+    pOS->osCallACPI_NVHG_GPUSTA      = stubOsCallWMI_NVHG_GPUSTA;
+    pOS->osCallACPI_NVHG_MXDS        = stubOsCallWMI_NVHG_MXDS;
+    pOS->osCallACPI_NVHG_MXMX        = stubOsCallWMI_NVHG_MXMX;
+    pOS->osCallACPI_NVHG_DOS         = stubOsCallWMI_NVHG_DOS;
+    pOS->osCallACPI_NVHG_ROM         = stubOsCallWMI_NVHG_ROM;
+    pOS->osCallACPI_NVHG_DCS         = stubOsCallWMI_NVHG_DCS;
+    pOS->osCallACPI_DOD              = stubOsCallWMI_DOD;
+    pOS->osSetupVBlank               = stubOsSetupVBlank;
+    pOS->osCallACPI_NBPS             = stubOsCallACPI_NBPS;
+    pOS->osCallACPI_NBSL             = stubOsCallACPI_NBSL;
+    pOS->osCallACPI_DSM              = stubOsCallACPI_DSM;
+    pOS->osCallACPI_OPTM_GPUON       = stubOsCallWMI_OPTM_GPUON;
+    pOS->osGetUefiVariable           = stubOsGetUefiVariable;
+    pOS->osCallACPI_MXDS             = stubOsCallACPI_MXDS;
+    pOS->osCallACPI_MXDM             = stubOsCallACPI_MXDM;
+    pOS->osCallACPI_MXID             = stubOsCallACPI_MXID;
+    pOS->osCallACPI_LRST             = stubOsCallACPI_LRST;
+}
+
+static void
+initMacOSCoreOSFunctionPointers(OBJOS *pOS)
+{
+    pOS->osNv_rdcr4                      = stubOsnv_rdcr4;
+    pOS->osNv_rdxcr0                     = stubOsnv_rdxcr0;
+    pOS->osNv_cpuid                      = stubOsnv_cpuid;
+    pOS->osNv_rdmsr                      = stubOsnv_rdmsr;
+    pOS->osNv_wrmsr                      = stubOsnv_wrmsr;
+    pOS->osRobustChannelsDefaultState    = stubOsRobustChannelsDefaultState;
+    pOS->osCallACPI_MXMX                 = stubOsCallACPI_MXMX;
+    pOS->osCallACPI_DDC                  = stubOsCallACPI_DDC;
+    pOS->osCallACPI_BCL                  = stubOsCallACPI_BCL;
+    pOS->osGetUefiVariable               = stubOsGetUefiVariable;
+}
+
+static void
+initAPIOSFunctionPointers(OBJOS *pOS)
+{
+    pOS->osRmInitRm                      = osRmInitRm;
+}
+
 //
 // Function to find the maximum number of cores in the system
 //
-NvU32 osGetMaximumCoreCount(void)
+NvU32 osGetMaximumCoreCount()
 {
     //
     // Windows provides an API to query this that supports CPU hotadd that our
@@ -227,18 +340,9 @@ void vgpuDevWriteReg032(
         return;
     }
 
-    if (NV_OK != kbifGetPciConfigSpacePriMirror_HAL(pGpu, GPU_GET_KERNEL_BIF(pGpu),
-                                                    &configSpaceMirrorBase, &configSpaceMirrorSize))
-    {
-        *vgpuHandled = NV_FALSE;
-        return;
-    }
+    NV_ASSERT_OK(kbifGetPciConfigSpacePriMirror_HAL(pGpu, GPU_GET_KERNEL_BIF(pGpu),
+                                                    &configSpaceMirrorBase, &configSpaceMirrorSize));
 
-    if (IS_VIRTUAL_WITH_SRIOV(pGpu))
-    {
-        configSpaceSize = configSpaceMirrorSize;
-    }
-    else
     {
         configSpaceSize = NV_CONFIG_PCI_NV_12;
     }
@@ -299,26 +403,17 @@ NvU32 vgpuDevReadReg032(
     OBJSYS        *pSys = SYS_GET_INSTANCE();
     OBJHYPERVISOR *pHypervisor = SYS_GET_HYPERVISOR(pSys);
 
-
-    if (!pGpu || !GPU_GET_KERNEL_BIF(pGpu) ||
-        (!IS_VIRTUAL(pGpu) && !(pHypervisor && pHypervisor->bDetected && pHypervisor->bIsHVMGuest)))
+    if(!pGpu ||
+       !pHypervisor || !pHypervisor->bDetected || !pHypervisor->bIsHVMGuest ||
+       !GPU_GET_KERNEL_BIF(pGpu))
     {
         *vgpuHandled = NV_FALSE;
         return 0;
     }
 
-    if (NV_OK != kbifGetPciConfigSpacePriMirror_HAL(pGpu, GPU_GET_KERNEL_BIF(pGpu),
-                                                    &configSpaceMirrorBase, &configSpaceMirrorSize))
-    {
-        *vgpuHandled = NV_FALSE;
-        return 0;
-    }
+    NV_ASSERT_OK(kbifGetPciConfigSpacePriMirror_HAL(pGpu, GPU_GET_KERNEL_BIF(pGpu),
+                                                    &configSpaceMirrorBase, &configSpaceMirrorSize));
 
-    if (IS_VIRTUAL_WITH_SRIOV(pGpu))
-    {
-        configSpaceSize = configSpaceMirrorSize;
-    }
-    else
     {
         configSpaceSize = NV_CONFIG_PCI_NV_12;
     }
@@ -363,26 +458,108 @@ NvU32 vgpuDevReadReg032(
     return 0;
 }
 
-NvU64 osGetMaxUserVa(void);
 
 /**
- * @brief Get the Max User VA address shift
+ * @brief Adds a filter to trap a certain CPU virtual address range
  *
- * The max user VA address shift may not be power-2 aligned,
- * so do some math to round it up.
+ * Sets up a filter so all accesses to an address range are sent through the
+ * specified callback.
  *
- * @return max user VA address shift
+ * Only one filter is allowed for any given address.
+ *
+ * @param[in] rangeStart  start of CPU address range (inclusive)
+ * @param[in] rangeEnd end of CPU address range (inclusive)
+ * @param[in] pCb Callback function
+ * @param[in] pPriv opaque point to data pass to callback
+ *
+ * @return NV_OK is success, appropriate error otherwise.
  */
-NvU32
-osGetCpuVaAddrShift(void)
+NV_STATUS
+osMemAddFilter
+(
+    NvU64           rangeStart,
+    NvU64           rangeEnd,
+    OSMemFilterCb  *pCb,
+    void           *pPriv
+)
 {
-    NvU64 maxUserVa = osGetMaxUserVa();
+    OBJSYS             *pSys = SYS_GET_INSTANCE();
+    POSMEMFILTERDATA    pFilterData = NULL;
 
-    //
-    // Add 1 to account for kernel VA space, on the assumption
-    // that kernel VA space is the top half of the address space.
-    //
-    return (64 - portUtilCountLeadingZeros64(maxUserVa - 1)) + 1;
+    pFilterData = portMemAllocNonPaged(sizeof(OSMEMFILTERDATA));
+    if (pFilterData == NULL)
+    {
+        NV_PRINTF(LEVEL_ERROR,
+                  "Failed to alloc mem for os mem filter data!\n");
+        return NV_ERR_INSUFFICIENT_RESOURCES;
+    }
+
+    pFilterData->node.keyStart = rangeStart;
+    pFilterData->node.keyEnd   = rangeEnd;
+    pFilterData->pPriv         = pPriv;
+    pFilterData->pFilterCb     = pCb;
+    pFilterData->node.Data     = (void *)pFilterData;
+
+    return btreeInsert(&pFilterData->node, &pSys->pMemFilterList);
+}
+
+/**
+ * @brief Remove a filter added with @ref osMemAddFilter
+ *
+ * @param[in] rangeStart memory address to remove filter from.
+ */
+NV_STATUS
+osMemRemoveFilter
+(
+    NvU64       rangeStart
+)
+{
+    OBJSYS     *pSys = SYS_GET_INSTANCE();
+    PNODE       pNode = NULL;
+
+    if (btreeSearch(rangeStart, &pNode, pSys->pMemFilterList) != NV_OK)
+    {
+        NV_PRINTF(LEVEL_INFO,
+                  "Failed to find filter data for the given range start address!\n");
+        return NV_ERR_INVALID_ARGUMENT;
+    }
+
+    NV_ASSERT(pNode);
+    NV_ASSERT(pNode->keyStart == rangeStart);
+
+    if (btreeUnlink(pNode, &pSys->pMemFilterList) != NV_OK)
+    {
+        NV_PRINTF(LEVEL_ERROR, "Failed to unlink filter data!\n");
+        return NV_ERR_INVALID_STATE;
+    }
+
+    portMemFree(pNode->Data);
+    pNode = NULL;
+
+    return NV_OK;
+}
+
+/**
+ * @brief Retrieves a filter added with @ref osMemAddFilter.
+ *
+ * @param[in] address Address to search for
+ *
+ * @return Appropriate filter data if a filter exists, NULL otherwise.
+ */
+POSMEMFILTERDATA
+osMemGetFilter(NvUPtr address)
+{
+    OBJSYS     *pSys;
+    PNODE       pNode = NULL;
+
+    pSys = SYS_GET_INSTANCE();
+    if (!pSys)
+        return NULL;
+
+    if (btreeSearch(address, &pNode, pSys->pMemFilterList) != NV_OK)
+        return NULL;
+
+    return pNode->Data;
 }
 
 /*!
@@ -402,7 +579,7 @@ osGetCpuVaAddrShift(void)
  *                               full call stack that is much helpful for debugging.
  */
 
-void osPagedSegmentAccessCheck(void)
+void osPagedSegmentAccessCheck()
 {
     OBJSYS    *pSys = SYS_GET_INSTANCE();
     OBJOS     *pOS  = SYS_GET_OS(pSys);
@@ -439,10 +616,6 @@ NV_STATUS osReadRegistryDword
     NV_ASSERT_OR_RETURN(pData != NULL, NV_ERR_INVALID_ARGUMENT);
 
     status = osReadRegistryDwordBase(pGpu, pRegParmStr, pData);
-    if (status != NV_OK)
-    {
-        status = nbsiReadRegistryDword(pGpu, pRegParmStr, pData);
-    }
 
     return status;
 }
@@ -473,15 +646,11 @@ NV_STATUS osReadRegistryString
     NV_ASSERT_OR_RETURN(!(*pCbLen != 0 && pData == NULL), NV_ERR_INVALID_ARGUMENT);
 
     status = osReadRegistryStringBase(pGpu, pRegParmStr, pData, pCbLen);
-    if (status != NV_OK)
-    {
-        status = nbsiReadRegistryString(pGpu, pRegParmStr, pData, pCbLen);
-    }
 
     return status;
 }
 
-static void nvErrorLog2(void *pVoid, XidContext context, NvBool oobLogging, const char *pFormat, va_list arglist)
+void nvErrorLog(void *pVoid, NvU32 num, const char *pFormat, va_list arglist)
 {
     if ((pFormat == NULL) || (*pFormat == '\0'))
     {
@@ -490,7 +659,7 @@ static void nvErrorLog2(void *pVoid, XidContext context, NvBool oobLogging, cons
 
     OBJGPU    *pGpu    = reinterpretCast(pVoid, OBJGPU *);
 
-#if RMCFG_MODULE_OOB || \
+#if RMCFG_MODULE_SMBPBI || \
     (RMCFG_MODULE_KERNEL_RC && !RMCFG_FEATURE_PLATFORM_GSP)
     char *errorString = portMemAllocNonPaged(MAX_ERROR_STRING);
     if (errorString == NULL)
@@ -506,39 +675,25 @@ static void nvErrorLog2(void *pVoid, XidContext context, NvBool oobLogging, cons
     if (msglen == 0)
         goto done;
 
-    if (pGpu != NULL && oobLogging)
-    {
-        gpuLogOobXidMessage(pGpu, context.xid, errorString, msglen);
-    }
-
     {
         KernelRc *pKernelRc = GPU_GET_KERNEL_RC(pGpu);
         if (pKernelRc != NULL)
-        {
-            krcReportXid(pGpu, pKernelRc,
-                         context,
-                         errorString);
-        }
+            krcReportXid(pGpu, pKernelRc, num, errorString);
     }
 
 done:
     portMemFree(errorString);
-#endif // RMCFG_MODULE_OOB || (RMCFG_MODULE_KERNEL_RC &&
+#endif // RMCFG_MODULE_SMBPBI || (RMCFG_MODULE_KERNEL_RC &&
        // !RMCFG_FEATURE_PLATFORM_GSP)
 
-    osErrorLogV(pGpu, context, pFormat, arglist);
-}
-
-void nvErrorLog(void *pVoid, XidContext context, const char *pFormat, va_list arglist)
-{
-    nvErrorLog2(pVoid, context, NV_TRUE, pFormat, arglist);
+    osErrorLogV(pGpu, num, pFormat, arglist);
 }
 
 void
 nvErrorLog_va
 (
-    void       * pVoid,
-    NvU32        num,
+    void * pVoid,
+    NvU32 num,
     const char * pFormat,
     ...
 )
@@ -546,23 +701,6 @@ nvErrorLog_va
     va_list arglist;
 
     va_start(arglist, pFormat);
-    nvErrorLog2(pVoid, (XidContext){.xid = num}, NV_TRUE, pFormat, arglist);
-    va_end(arglist);
-}
-
-void
-nvErrorLog2_va
-(
-    void       * pVoid,
-    XidContext   context,
-    NvBool       oobLogging,
-    const char * pFormat,
-    ...
-)
-{
-    va_list arglist;
-
-    va_start(arglist, pFormat);
-    nvErrorLog2(pVoid, context, oobLogging, pFormat, arglist);
+    nvErrorLog(pVoid, num, pFormat, arglist);
     va_end(arglist);
 }

@@ -29,7 +29,6 @@
 #include "nvkms-3dvision.h"
 #include "nvkms-evo.h"
 #include "nvkms-ioctl.h"
-#include "nvkms-modetimings.h"
 
 #include "nv_mode_timings_utils.h"
 #include "nv_vasprintf.h"
@@ -38,12 +37,9 @@
 
 #include "nvkms-api.h"
 
-#include "dp/nvdp-connector-event-sink.h"
-
 typedef struct {
     enum NvKmsModeSource source;
     NvBool patchedStereoTimings;
-    NvBool dscPassThrough;
 } EvoValidateModeFlags;
 
 static NvBool
@@ -71,8 +67,7 @@ static NvBool ConstructModeTimingsMetaData(
     const struct NvKmsModeValidationParams *pParams,
     struct NvKmsMode *pKmsMode,
     EvoValidateModeFlags *pFlags,
-    NVT_VIDEO_INFOFRAME_CTRL *pInfoFrameCtrl,
-    NVT_VENDOR_SPECIFIC_INFOFRAME_CTRL *pVSInfoFrameCtrl);
+    NVT_VIDEO_INFOFRAME_CTRL *pInfoFrameCtrl);
 
 static NvBool ValidateMode(NVDpyEvoPtr pDpyEvo,
                            const struct NvKmsMode *pKmsMode,
@@ -144,6 +139,7 @@ nvValidateModeEvo(NVDpyEvoPtr pDpyEvo,
         .timings = pRequest->mode.timings,
     };
     EvoValidateModeFlags evoFlags;
+    NVT_VIDEO_INFOFRAME_CTRL dummyInfoFrameCtrl;
 
     nvkms_memset(pReply, 0, sizeof(*pReply));
 
@@ -151,8 +147,7 @@ nvValidateModeEvo(NVDpyEvoPtr pDpyEvo,
                                       &pRequest->modeValidation,
                                       &kmsMode,
                                       &evoFlags,
-                                      NULL /* pInfoFrameCtrl */,
-                                      NULL /* pVSInfoFrameCtrl */)) {
+                                      &dummyInfoFrameCtrl)) {
         pReply->valid = FALSE;
         return;
     }
@@ -182,21 +177,17 @@ nvValidateModeEvo(NVDpyEvoPtr pDpyEvo,
  *
  * Currently only frame packed 3D modes are supported, as we rely on
  * Kepler's HW support for this mode.
- *
- * If hdmi 3D is supported, then only one of hdmi3D or hdmi3DAvailable
- * will be returned true, based on if it was requested.
  */
-static void GetHdmi3DValue(const NVDpyEvoRec *pDpyEvo,
-                           const struct NvKmsModeValidationParams *pParams,
-                           const NVT_TIMING *pTiming, 
-                           NvBool *hdmi3D,
-                           NvBool *hdmi3DAvailable)
+static NvBool GetHdmi3DValue(const NVDpyEvoRec *pDpyEvo,
+                             const struct NvKmsModeValidationParams *pParams,
+                             const NVT_TIMING *pTiming)
 {
     /* This should only be used in paths where we have a valid parsed EDID. */
 
     nvAssert(pDpyEvo->parsedEdid.valid);
 
-    if ((NVT_GET_TIMING_STATUS_TYPE(pTiming->etc.status) ==
+    if ((pParams->stereoMode == NVKMS_STEREO_HDMI_3D) &&
+        (NVT_GET_TIMING_STATUS_TYPE(pTiming->etc.status) ==
          NVT_TYPE_EDID_861ST) &&
         nvDpyEvoSupportsHdmi3D(pDpyEvo)) {
 
@@ -209,15 +200,32 @@ static void GetHdmi3DValue(const NVDpyEvoRec *pDpyEvo,
             if ((vic == hdmi3DMap.Vic) &&
                 (hdmi3DMap.StereoStructureMask &
                  NVT_HDMI_3D_SUPPORTED_FRAMEPACK_MASK)) {
-                *hdmi3D = pParams->stereoMode == NVKMS_STEREO_HDMI_3D;
-                *hdmi3DAvailable = pParams->stereoMode != NVKMS_STEREO_HDMI_3D;
-                return;
+                return TRUE;
             }
         }
     }
 
-    *hdmi3D = FALSE;
-    *hdmi3DAvailable = FALSE;
+    return FALSE;
+}
+
+/*
+ * For Kepler HW HDMI 1.4 frame packed stereo, HW combines two flips
+ * into a single top-down double-height frame, and it needs a
+ * doubled refresh rate to accommodate this.
+ */
+static void UpdateNvModeTimingsForHdmi3D(NvModeTimings *pModeTimings,
+                                         NvBool enableHdmi3D)
+{
+    if (enableHdmi3D) {
+        pModeTimings->pixelClockHz *= 2;
+        pModeTimings->RRx1k *= 2;
+    } else {
+        nvAssert((pModeTimings->pixelClockHz % 2) == 0);
+        pModeTimings->pixelClockHz /= 2;
+
+        nvAssert((pModeTimings->RRx1k % 2) == 0);
+        pModeTimings->RRx1k /= 2;
+    }
 }
 
 /*
@@ -237,11 +245,6 @@ static NvBool DpYuv420Required(const NVDpyEvoRec *pDpyEvo,
 
     if (!pDevEvo->caps.supportsDP13) {
         // The GPU doesn't support YUV420.
-        return FALSE;
-    }
-
-    if (!nvDPLibDpyIsYuv420ModeSupported(pDpyEvo)) {
-        // The dpy doesn't support YUV420.
         return FALSE;
     }
 
@@ -356,7 +359,6 @@ ValidateModeIndexEdid(NVDpyEvoPtr pDpyEvo,
         NVT_TIMING timing = pDpyEvo->parsedEdid.info.timing[i];
         EvoValidateModeFlags flags;
         struct NvKmsMode kmsMode = { };
-        NvBool hdmi3D = FALSE;
 
         /* Skip this mode if it was marked invalid by nvtiming. */
 
@@ -403,12 +405,10 @@ ValidateModeIndexEdid(NVDpyEvoPtr pDpyEvo,
          * Currently only frame packed 3D modes are supported, as we rely on
          * Kepler's HW support for this mode.
          */
-        GetHdmi3DValue(pDpyEvo, pParams, &timing, &hdmi3D,
-                       &pReply->hdmi3DAvailable);
-        nvKmsUpdateNvModeTimingsForHdmi3D(&kmsMode.timings, hdmi3D);
+        kmsMode.timings.hdmi3D = GetHdmi3DValue(pDpyEvo, pParams, &timing);
 
-        if (!!(timing.etc.flag & NVT_FLAG_DISPLAYID_T7_DSC_PASSTHRU)) {
-            flags.dscPassThrough = TRUE;
+        if (kmsMode.timings.hdmi3D) {
+            UpdateNvModeTimingsForHdmi3D(&kmsMode.timings, TRUE);
         }
 
         kmsMode.timings.yuv420Mode = GetYUV420Value(pDpyEvo, pParams, &timing);
@@ -422,49 +422,6 @@ ValidateModeIndexEdid(NVDpyEvoPtr pDpyEvo,
                                      pInfoString,
                                      &pReply->validSyncs,
                                      &pReply->modeUsage);
-
-        /*
-         * The client did not request hdmi3D, but this mode supports hdmi3D.
-         * Re-validate the mode with hdmi3D enabled.  If that passes, report
-         * to the client that the mode could be used with hdmi3D if they choose
-         * later.
-         */
-        if (pReply->valid && pReply->hdmi3DAvailable) {
-            /*
-             * Use dummy validSyncs and modeUsage so the original result isn't
-             * affected.
-             *
-             * Create a temporary KMS mode so that we can enable hdmi3D in it
-             * without perturbing the currently validated mode.
-             *
-             * Put all of this in a temporary heap allocation, to conserve
-             * stack.
-             */
-            struct workArea {
-                struct NvKmsModeValidationValidSyncs stereoValidSyncs;
-                struct NvKmsUsageBounds stereoModeUsage;
-                struct NvKmsMode stereoKmsMode;
-            } *pWorkArea = nvCalloc(1, sizeof(*pWorkArea));
-
-            if (pWorkArea == NULL) {
-                pReply->hdmi3DAvailable = FALSE;
-            } else {
-                pWorkArea->stereoKmsMode = kmsMode;
-                nvKmsUpdateNvModeTimingsForHdmi3D(
-                    &pWorkArea->stereoKmsMode.timings, TRUE);
-
-                pReply->hdmi3DAvailable =
-                    ValidateMode(pDpyEvo,
-                                 &pWorkArea->stereoKmsMode,
-                                 &flags,
-                                 pParams,
-                                 pInfoString,
-                                 &pWorkArea->stereoValidSyncs,
-                                 &pWorkArea->stereoModeUsage);
-                nvFree(pWorkArea);
-            }
-        }
-
         /*
          * if this is a detailed timing, then flag it as such; this
          * will be used later when searching for the AutoSelect mode
@@ -501,13 +458,16 @@ ValidateModeIndexEdid(NVDpyEvoPtr pDpyEvo,
          */
         if (flags.patchedStereoTimings) {
             enum NvYuv420Mode yuv420Mode = kmsMode.timings.yuv420Mode;
-            hdmi3D = kmsMode.timings.hdmi3D;
+            NvBool hdmi3D = kmsMode.timings.hdmi3D;
 
             NVT_TIMINGtoNvModeTimings(&pDpyEvo->parsedEdid.info.timing[i],
                                       &kmsMode.timings);
             kmsMode.timings.yuv420Mode = yuv420Mode;
+            kmsMode.timings.hdmi3D = hdmi3D;
 
-            nvKmsUpdateNvModeTimingsForHdmi3D(&kmsMode.timings, hdmi3D);
+            if (hdmi3D) {
+                UpdateNvModeTimingsForHdmi3D(&kmsMode.timings, TRUE);
+            }
         }
 
         pReply->mode.timings = kmsMode.timings;
@@ -534,267 +494,321 @@ ValidateModeIndexEdid(NVDpyEvoPtr pDpyEvo,
 // 1400x1050, 1440x900, 1680x1050, 1920x1200
 
 static const NvModeTimings VesaModesTable[] = {
-#define VESA_MODES_TABLE_ENTRY(_RRx1k,                   \
-                               _pixelClockHz,            \
-                               _hVisible, _hSyncStart,   \
-                               _hSyncEnd, _hTotal,       \
-                               _vVisible, _vSyncStart,   \
-                               _vSyncEnd, _vTotal,       \
-                               _hSyncPos, _hSyncNeg,     \
-                               _vSyncPos, _vSyncNeg)     \
-     { .pixelClockHz = _pixelClockHz,                    \
-       .RRx1k = _RRx1k,                                  \
-       .hVisible = _hVisible, .hSyncStart = _hSyncStart, \
-       .hSyncEnd = _hSyncEnd, .hTotal = _hTotal,         \
-       .hSkew = 0,                                       \
-       .vVisible = _vVisible, .vSyncStart = _vSyncStart, \
-       .vSyncEnd = _vSyncEnd, .vTotal = _vTotal,         \
-       .sizeMM = {                                       \
-           .w = 0, .h = 0 },                             \
-       .interlaced = FALSE, .doubleScan = FALSE,         \
-       .hSyncPos = _hSyncPos, .hSyncNeg = _hSyncNeg,     \
-       .vSyncPos = _vSyncPos, .vSyncNeg = _vSyncNeg,     \
-       .hdmi3D = FALSE,                                  \
-       .yuv420Mode = NV_YUV420_MODE_NONE, }
+    /*
+     * { RRx1k, PClkHz;
+     *   hVisible, hSyncStart, hSyncEnd, hTotal,
+     *   hSkew,
+     *   vVisible, vSyncStart, vSyncEnd, vTotal,
+     *   { widthMM, heightMM },
+     *   interlaced, doubleScan,
+     *   hSyncPos, hSyncNeg, vSyncPos, vSyncNeg, hdmi3D, yuv420 },
+     */
 
     // VESA Standard 640x350 @ 85Hz
-    VESA_MODES_TABLE_ENTRY(
-      85080, 31500000,
+    { 85080, 31500000,
       640, 672, 736, 832,
+      0,
       350, 382, 385, 445,
-      TRUE, FALSE, FALSE, TRUE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, FALSE, TRUE, FALSE, FALSE },
 
     // VESA Standard 640x400 @ 85Hz
-    VESA_MODES_TABLE_ENTRY(
-      85080, 31500000,
+    { 85080, 31500000,
       640, 672, 736, 832,
+      0,
       400, 401, 404, 445,
-      FALSE, TRUE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 720x400 @ 85Hz
-    VESA_MODES_TABLE_ENTRY(
-      85039, 35500000,
+    { 85039, 35500000,
       720, 756, 828, 936,
+      0,
       400, 401, 404, 446,
-      FALSE, TRUE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, TRUE, FALSE, FALSE, FALSE },
 
     // Industry Standard 640x480 @ 60Hz
-    VESA_MODES_TABLE_ENTRY(
-      59940, 25175000,
+    { 59940, 25175000,
       640, 656, 752, 800,
+      0,
       480, 490, 492, 525,
-      FALSE, TRUE, FALSE, TRUE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, FALSE, TRUE, FALSE, FALSE },
 
     // VESA Standard 640x480 @ 72Hz
-    VESA_MODES_TABLE_ENTRY(
-      72809, 31500000,
+    { 72809, 31500000,
       640, 664, 704, 832,
+      0,
       480, 489, 492, 520,
-      FALSE, TRUE, FALSE, TRUE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, FALSE, TRUE, FALSE, FALSE },
 
     // VESA Standard 640x480 @ 75Hz
-    VESA_MODES_TABLE_ENTRY(
-      75000, 31500000,
+    { 75000, 31500000,
       640, 656, 720, 840,
+      0,
       480, 481, 484, 500,
-      FALSE, TRUE, FALSE, TRUE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, FALSE, TRUE, FALSE, FALSE },
 
     // VESA Standard 640x480 @ 85Hz
-    VESA_MODES_TABLE_ENTRY(
-      85008, 36000000,
+    { 85008, 36000000,
       640, 696, 752, 832,
+      0,
       480, 481, 484, 509,
-      FALSE, TRUE, FALSE, TRUE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, FALSE, TRUE, FALSE, FALSE },
 
     // VESA Standard 800x600 @ 56Hz
-    VESA_MODES_TABLE_ENTRY(
-      56250, 36000000,
+    { 56250, 36000000,
       800, 824, 896, 1024,
+      0,
       600, 601, 603, 625,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 800x600 @ 60Hz
-    VESA_MODES_TABLE_ENTRY(
-      60317, 40000000,
+    { 60317, 40000000,
       800, 840, 968, 1056,
+      0,
       600, 601, 605, 628,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 800x600 @ 72Hz
-    VESA_MODES_TABLE_ENTRY(
-      72188, 50000000,
+    { 72188, 50000000,
       800, 856, 976, 1040,
+      0,
       600, 637, 643, 666,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 800x600 @ 75Hz
-    VESA_MODES_TABLE_ENTRY(
-      75000, 49500000,
+    { 75000, 49500000,
       800, 816, 896, 1056,
+      0,
       600, 601, 604, 625,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 800x600 @ 85Hz
-    VESA_MODES_TABLE_ENTRY(
-      85137, 56300000,
+    { 85137, 56300000,
       800, 832, 896, 1048,
+      0,
       600, 601, 604, 631,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1024x768i @ 87Hz
-    VESA_MODES_TABLE_ENTRY(
-      86958, 44900000,
+    { 86958, 44900000,
       1024, 1032, 1208, 1264,
+      0,
       768, 768, 776, 817,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      TRUE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1024x768 @ 60Hz
-    VESA_MODES_TABLE_ENTRY(
-      60004, 65000000,
+    { 60004, 65000000,
       1024, 1048, 1184, 1344,
+      0,
       768, 771, 777, 806,
-      FALSE, TRUE, FALSE, TRUE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, FALSE, TRUE, FALSE, FALSE },
 
     // VESA Standard 1024x768 @ 70Hz
-    VESA_MODES_TABLE_ENTRY(
-      70069, 75000000,
+    { 70069, 75000000,
       1024, 1048, 1184, 1328,
+      0,
       768, 771, 777, 806,
-      FALSE, TRUE, FALSE, TRUE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, FALSE, TRUE, FALSE, FALSE },
 
     // VESA Standard 1024x768 @ 75Hz
-    VESA_MODES_TABLE_ENTRY(
-      75029, 78750000,
+    { 75029, 78750000,
       1024, 1040, 1136, 1312,
+      0,
       768, 769, 772, 800,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1024x768 @ 85Hz
-    VESA_MODES_TABLE_ENTRY(
-      84997, 94500000,
+    { 84997, 94500000,
       1024, 1072, 1168, 1376,
+      0,
       768, 769, 772, 808,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1152x864 @ 75Hz
-    VESA_MODES_TABLE_ENTRY(
-      75000, 108000000,
+    { 75000, 108000000,
       1152, 1216, 1344, 1600,
+      0,
       864, 865, 868, 900,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1280x960 @ 60Hz
-    VESA_MODES_TABLE_ENTRY(
-      60000, 108000000,
+    { 60000, 108000000,
       1280, 1376, 1488, 1800,
+      0,
       960, 961, 964, 1000,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1280x960 @ 85Hz
-    VESA_MODES_TABLE_ENTRY(
-      85002, 148500000,
+    { 85002, 148500000,
       1280, 1344, 1504, 1728,
+      0,
       960, 961, 964, 1011,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1280x1024 @ 60Hz
-    VESA_MODES_TABLE_ENTRY(
-      60020, 108000000,
+    { 60020, 108000000,
       1280, 1328, 1440, 1688,
+      0,
       1024, 1025, 1028, 1066,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1280x1024 @ 75Hz
-    VESA_MODES_TABLE_ENTRY(
-      75025, 135000000,
+    { 75025, 135000000,
       1280, 1296, 1440, 1688,
+      0,
       1024, 1025, 1028, 1066,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1280x1024 @ 85Hz
-    VESA_MODES_TABLE_ENTRY(
-      85024, 157500000,
+    { 85024, 157500000,
       1280, 1344, 1504, 1728,
+      0,
       1024, 1025, 1028, 1072,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1600x1200 @ 60Hz
-    VESA_MODES_TABLE_ENTRY(
-      60000, 162000000,
+    { 60000, 162000000,
       1600, 1664, 1856, 2160,
+      0,
       1200, 1201, 1204, 1250,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1600x1200 @ 65Hz
-    VESA_MODES_TABLE_ENTRY(
-      65000, 175500000,
+    { 65000, 175500000,
       1600, 1664, 1856, 2160,
+      0,
       1200, 1201, 1204, 1250,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1600x1200 @ 70Hz
-    VESA_MODES_TABLE_ENTRY(
-      70000, 189000000,
+    { 70000, 189000000,
       1600, 1664, 1856, 2160,
+      0,
       1200, 1201, 1204, 1250,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1600x1200 @ 75Hz
-    VESA_MODES_TABLE_ENTRY(
-      75000, 202500000,
+    { 75000, 202500000,
       1600, 1664, 1856, 2160,
+      0,
       1200, 1201, 1204, 1250,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1600x1200 @ 85Hz
-    VESA_MODES_TABLE_ENTRY(
-      85000, 229500000,
+    { 85000, 229500000,
       1600, 1664, 1856, 2160,
+      0,
       1200, 1201, 1204, 1250,
-      TRUE, FALSE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      TRUE, FALSE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1792x1344 @ 60Hz
-    VESA_MODES_TABLE_ENTRY(
-      60014, 204800000,
+    { 60014, 204800000,
       1792, 1920, 2120, 2448,
+      0,
       1344, 1345, 1348, 1394,
-      FALSE, TRUE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1792x1344 @ 75Hz
-    VESA_MODES_TABLE_ENTRY(
-      74997, 261000000,
+    { 74997, 261000000,
       1792, 1888, 2104, 2456,
+      0,
       1344, 1345, 1348, 1417,
-      FALSE, TRUE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1856x1392 @ 60Hz
-    VESA_MODES_TABLE_ENTRY(
-      60009, 218300000,
+    { 60009, 218300000,
       1856, 1952, 2176, 2528,
+      0,
       1392, 1393, 1396, 1439,
-      FALSE, TRUE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1856x1392 @ 75Hz
-    VESA_MODES_TABLE_ENTRY(
-      75000, 288000000,
+    { 75000, 288000000,
       1856, 1984, 2208, 2560,
+      0,
       1392, 1393, 1396, 1500,
-      FALSE, TRUE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1920x1440 @ 60Hz
-    VESA_MODES_TABLE_ENTRY(
-      60000, 234000000,
+    { 60000, 234000000,
       1920, 2048, 2256, 2600,
+      0,
       1440, 1441, 1444, 1500,
-      FALSE, TRUE, TRUE, FALSE ),
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, TRUE, FALSE, FALSE, FALSE },
 
     // VESA Standard 1920x1440 @ 75Hz
-    VESA_MODES_TABLE_ENTRY(
-      75000, 297000000,
+    { 75000, 297000000,
       1920, 2064, 2288, 2640,
+      0,
       1440, 1441, 1444, 1500,
-      FALSE, TRUE, TRUE, FALSE ),
-#undef VESA_MODES_TABLE_ENTRY
+      { 0, 0 },
+      FALSE, FALSE,
+      FALSE, TRUE, TRUE, FALSE, FALSE, FALSE },
 };
 
 
@@ -896,7 +910,8 @@ static NvBool IsVesaMode(const NvModeTimings *pModeTimings,
  */
 
 static void LogModeValidationBegin(NVEvoInfoStringPtr pInfoString,
-                                   const NvModeTimings *pModeTimings)
+                                   const NvModeTimings *pModeTimings,
+                                   const char *modeName)
 {
     nvEvoLogInfoString(pInfoString, "%d x %d @ %d Hz%s",
                        pModeTimings->hVisible,
@@ -926,6 +941,7 @@ static void LogModeValidationEnd(const NVDispEvoRec *pDispEvo,
         nvFree(buf);
     }
 }
+
 
 /*!
  * Print mode timings to the NVEvoInfoStringPtr.
@@ -967,7 +983,6 @@ void nvEvoLogModeValidationModeTimings(NVEvoInfoStringPtr
                        pModeTimings->hSyncNeg ? "-H " : "",
                        pModeTimings->vSyncPos ? "+V " : "",
                        pModeTimings->vSyncNeg ? "-V " : "");
-
 
     if (pModeTimings->interlaced && pModeTimings->doubleScan) {
         extra = "Interlace DoubleScan";
@@ -1214,66 +1229,43 @@ static NvBool ValidateModeTimings(
         }
     }
 
-    /*
-     * Reject modes with too high pclk, except when using HDMI FRL or
-     * DisplayPort. FRL and DP have features like DSC that cannot be trivially
-     * checked against a pixel clock rate limit. Instead:
-     *
-     * - DPlib will perform link assessment to determine whether both the
-     *   monitor and GPU can drive a particular bandwidth.
-     *
-     * - hdmipacket will perform the equivalent for FRL.
-     *
-     * TMDS will only be considered on a connection capable of HDMI FRL for the
-     * mode being validated if nvHdmiIsTmdsPossible returns TRUE in the
-     * following callpath:
-     *
-     *     ValidateMode
-     *     |_ ValidateModeTimings
-     *     |_ nvConstructHwModeTimingsEvo
-     *        |_ GetDfpProtocol
-     *           |_ GetDfpHdmiProtocol
-     *              |_ nvHdmiIsTmdsPossible
-     */
+    /* reject modes with too high pclk */
 
-    if (!(nvHdmiDpySupportsFrl(pDpyEvo) ||
-          nvConnectorUsesDPLib(pDpyEvo->pConnectorEvo))) {
-        if ((overrides & NVKMS_MODE_VALIDATION_NO_MAX_PCLK_CHECK) == 0) {
+    if ((overrides & NVKMS_MODE_VALIDATION_NO_MAX_PCLK_CHECK) == 0) {
 
-            NvU32 maxPixelClockKHz = pDpyEvo->maxPixelClockKHz;
-            NvU32 realPixelClock = HzToKHz(pModeTimings->pixelClockHz);
-            if (pModeTimings->yuv420Mode != NV_YUV420_MODE_NONE) {
-                realPixelClock /= 2;
+        NvU32 maxPixelClockKHz = pDpyEvo->maxPixelClockKHz;
+        NvU32 realPixelClock = HzToKHz(pModeTimings->pixelClockHz);
+        if (pModeTimings->yuv420Mode == NV_YUV420_MODE_SW) {
+            realPixelClock /= 2;
+        }
+
+        if (realPixelClock > maxPixelClockKHz) {
+            NvU32 hdmi3DPixelClock = realPixelClock;
+
+            if (pModeTimings->hdmi3D) {
+                hdmi3DPixelClock /= 2;
             }
 
-            if (realPixelClock > maxPixelClockKHz) {
-                NvU32 hdmi3DPixelClock = realPixelClock;
+            if (is3DVisionStereo &&
+                pDpyEvo->stereo3DVision.requiresModetimingPatching &&
+                (realPixelClock - maxPixelClockKHz < 5000)) {
 
-                if (pModeTimings->hdmi3D) {
-                    hdmi3DPixelClock /= 2;
-                }
+                nvAssert(!pModeTimings->hdmi3D);
 
-                if (is3DVisionStereo &&
-                    pDpyEvo->stereo3DVision.requiresModetimingPatching &&
-                    (realPixelClock - maxPixelClockKHz < 5000)) {
+                nvEvoLogInfoString(pInfoString,
+                    "PixelClock (" NV_FMT_DIV_1000_POINT_1 " MHz) is slightly higher than Display Device maximum (" NV_FMT_DIV_1000_POINT_1 " MHz), but is within tolerance for 3D Vision Stereo.",
+                    NV_VA_DIV_1000_POINT_1(realPixelClock),
+                    NV_VA_DIV_1000_POINT_1(maxPixelClockKHz));
 
-                    nvAssert(!pModeTimings->hdmi3D);
+            } else {
 
-                    nvEvoLogInfoString(pInfoString,
-                        "PixelClock (" NV_FMT_DIV_1000_POINT_1 " MHz) is slightly higher than Display Device maximum (" NV_FMT_DIV_1000_POINT_1 " MHz), but is within tolerance for 3D Vision Stereo.",
-                        NV_VA_DIV_1000_POINT_1(realPixelClock),
-                        NV_VA_DIV_1000_POINT_1(maxPixelClockKHz));
-
-                } else {
-
-                    LogModeValidationEnd(pDispEvo, pInfoString,
-                        "PixelClock (" NV_FMT_DIV_1000_POINT_1 " MHz%s) too high for Display Device (Max: " NV_FMT_DIV_1000_POINT_1 " MHz)",
-                        NV_VA_DIV_1000_POINT_1(hdmi3DPixelClock),
-                        pModeTimings->hdmi3D ?
-                        ", doubled for HDMI 3D" : "",
-                        NV_VA_DIV_1000_POINT_1(maxPixelClockKHz));
-                    return FALSE;
-                }
+                LogModeValidationEnd(pDispEvo, pInfoString,
+                    "PixelClock (" NV_FMT_DIV_1000_POINT_1 " MHz%s) too high for Display Device (Max: " NV_FMT_DIV_1000_POINT_1 " MHz)",
+                    NV_VA_DIV_1000_POINT_1(hdmi3DPixelClock),
+                    pModeTimings->hdmi3D ?
+                    ", doubled for HDMI 3D" : "",
+                    NV_VA_DIV_1000_POINT_1(maxPixelClockKHz));
+                return FALSE;
             }
         }
     }
@@ -1283,7 +1275,7 @@ static NvBool ValidateModeTimings(
     if ((overrides & NVKMS_MODE_VALIDATION_NO_EDID_MAX_PCLK_CHECK) == 0) {
 
         NvU32 realPixelClock = HzToKHz(pModeTimings->pixelClockHz);
-        if (pModeTimings->yuv420Mode != NV_YUV420_MODE_NONE) {
+        if (pModeTimings->yuv420Mode == NV_YUV420_MODE_SW) {
             realPixelClock /= 2;
         }
 
@@ -1557,13 +1549,6 @@ static NvBool ValidateModeTimings(
         return FALSE;
     }
 
-    if (flags->dscPassThrough &&
-            (pParams->dscMode == NVKMS_DSC_MODE_FORCE_DISABLE)) {
-        LogModeValidationEnd(pDispEvo, pInfoString,
-                             "Mode is only supported with DSC pass-through, but DSC is force disabled");
-        return FALSE;
-    }
-
     return TRUE;
 }
 
@@ -1572,51 +1557,28 @@ static NvBool ValidateModeTimings(
  * particular ViewPort.
  */
 
-static
-void LogViewPort(NVEvoInfoStringPtr pInfoString,
-                 const NVHwModeTimingsEvo timings[NVKMS_MAX_HEADS_PER_DISP],
-                 const NvU32 numHeads)
+static void LogViewPort(NVEvoInfoStringPtr pInfoString,
+                        const NVHwModeTimingsEvo *pTimings)
 {
-    NvU32 head;
-    char str[64] = { }, *s = NULL;
-
-    nvAssert(numHeads <= 2);
-
-    nvEvoLogInfoString(pInfoString,
-            "DualHead Mode: %s", (numHeads > 1) ? "Yes" : "No");
+    const NVHwModeViewPortEvo *pViewPort = &pTimings->viewPort;
+    const struct NvKmsRect viewPortOut = nvEvoViewPortOutClientView(pTimings);
 
     /* print the viewport name, size, and taps */
-    nvkms_memset(str, 0, sizeof(str));
-    for (head = 0, s = str; head < numHeads; head++) {
-        const struct NvKmsRect viewPortOut =
-            nvEvoViewPortOutClientView(&timings[head]);
-        size_t n = str + sizeof(str) - s;
-        s += nvkms_snprintf(s, n, "%s%dx%d+%d+%d", (s != str) ? ", " : "",
-                            viewPortOut.width, viewPortOut.height,
-                            viewPortOut.x, viewPortOut.x);
-    }
-    nvEvoLogInfoString(pInfoString,
-               "Viewport                 %s", str);
 
-    nvkms_memset(str, 0, sizeof(str));
-    for (head = 0, s = str; head < numHeads; head++) {
-        const NVHwModeViewPortEvo *pViewPort = &timings[head].viewPort;
-        size_t n = str + sizeof(str) - s;
-        s += nvkms_snprintf(s, n, "%s%d", (s != str) ? ", " : "",
-                            NVEvoScalerTapsToNum(pViewPort->hTaps));
-    }
     nvEvoLogInfoString(pInfoString,
-               "  Horizontal Taps        %s", str);
+               "Viewport                 %dx%d+%d+%d",
+               viewPortOut.width,
+               viewPortOut.height,
+               viewPortOut.x,
+               viewPortOut.y);
 
-    nvkms_memset(str, 0, sizeof(str));
-    for (head = 0, s = str; head < numHeads; head++) {
-        const NVHwModeViewPortEvo *pViewPort = &timings[head].viewPort;
-        size_t n = str + sizeof(str) - s;
-        s += nvkms_snprintf(s, n, "%s%d", (s != str) ? ", " : "",
-                            NVEvoScalerTapsToNum(pViewPort->vTaps));
-    }
     nvEvoLogInfoString(pInfoString,
-               "  Vertical Taps          %s", str);
+               "  Horizontal Taps        %d",
+               NVEvoScalerTapsToNum(pViewPort->hTaps));
+
+    nvEvoLogInfoString(pInfoString,
+               "  Vertical Taps          %d",
+               NVEvoScalerTapsToNum(pViewPort->hTaps));
 }
 
 /*
@@ -1636,33 +1598,15 @@ static NvBool ValidateMode(NVDpyEvoPtr pDpyEvo,
     const NvModeTimings *pModeTimings = &pKmsMode->timings;
     NVDispEvoPtr pDispEvo = pDpyEvo->pDispEvo;
     NVDevEvoRec *pDevEvo = pDispEvo->pDevEvo;
-    NvBool b2Heads1Or = FALSE;
+
     char localModeName[NV_MAX_MODE_NAME_LEN];
 
     NVHwModeTimingsEvo *pTimingsEvo =
         nvPreallocGet(pDevEvo,
                       PREALLOC_TYPE_VALIDATE_MODE_HW_MODE_TIMINGS,
                       sizeof(*pTimingsEvo));
-    HDMI_FRL_CONFIG *pHdmiFrlConfig =
-        nvPreallocGet(pDevEvo,
-                      PREALLOC_TYPE_VALIDATE_MODE_HDMI_FRL_CONFIG,
-                      sizeof(*pHdmiFrlConfig));
-    NVDscInfoEvoRec *pDscInfo =
-         nvPreallocGet(pDevEvo,
-                      PREALLOC_TYPE_VALIDATE_MODE_DSC_INFO,
-                      sizeof(*pDscInfo));
-    NVHwModeTimingsEvo *impOutTimings =
-        nvPreallocGet(pDevEvo,
-                      PREALLOC_TYPE_VALIDATE_MODE_IMP_OUT_HW_MODE_TIMINGS,
-                      sizeof(*impOutTimings) *
-                        NVKMS_MAX_HEADS_PER_DISP);
-    NvU32 impOutNumHeads = 0x0;
-    NvU32 head;
-    NvBool ret = FALSE;
 
-    const NvKmsDpyOutputColorFormatInfo supportedColorFormats =
-        nvDpyGetOutputColorFormatInfo(pDpyEvo);
-    NVDpyAttributeColor dpyColor;
+    NvBool ret = FALSE;
 
     if (modeName[0] == '\0') {
         nvBuildModeName(pModeTimings->hVisible, pModeTimings->vVisible,
@@ -1673,30 +1617,13 @@ static NvBool ValidateMode(NVDpyEvoPtr pDpyEvo,
     /* Initialize the EVO hwModeTimings structure */
 
     nvkms_memset(pTimingsEvo, 0, sizeof(*pTimingsEvo));
-    nvkms_memset(pHdmiFrlConfig, 0, sizeof(*pHdmiFrlConfig));
-    nvkms_memset(pDscInfo, 0, sizeof(*pDscInfo));
-    nvkms_memset(impOutTimings, 0, sizeof(*impOutTimings) * NVKMS_MAX_HEADS_PER_DISP);
 
     /* begin logging of ModeValidation for this mode */
 
-    LogModeValidationBegin(pInfoString, pModeTimings);
+    LogModeValidationBegin(pInfoString, pModeTimings, modeName);
 
     if (!ValidateModeTimings(pDpyEvo, pKmsMode, flags, pParams,
                              pInfoString, pValidSyncs)) {
-        goto done;
-    }
-
-    nvEvoLogInfoString(pInfoString,
-            "DSCPassThrough: %s", flags->dscPassThrough ? "Yes" : "No");
-
-    if (pTimingsEvo->yuv420Mode != NV_YUV420_MODE_NONE) {
-        dpyColor.format = NV_KMS_DPY_ATTRIBUTE_CURRENT_COLOR_SPACE_YCbCr420;
-        dpyColor.bpc = NV_KMS_DPY_ATTRIBUTE_CURRENT_COLOR_BPC_8;
-        dpyColor.range = NV_KMS_DPY_ATTRIBUTE_COLOR_RANGE_LIMITED;
-        dpyColor.colorimetry = NVKMS_OUTPUT_COLORIMETRY_DEFAULT;
-    } else if (!nvGetDefaultDpyColor(&supportedColorFormats, &dpyColor)) {
-        LogModeValidationEnd(pDispEvo, pInfoString,
-                             "Failed to get default color space and Bpc");
         goto done;
     }
 
@@ -1723,8 +1650,6 @@ static NvBool ValidateMode(NVDpyEvoPtr pDpyEvo,
                                      pKmsMode,
                                      NULL, /* pViewPortSizeIn */
                                      NULL, /* pViewPortOut */
-                                     flags->dscPassThrough,
-                                     &dpyColor,
                                      pTimingsEvo,
                                      pParams,
                                      pInfoString)) {
@@ -1734,37 +1659,10 @@ static NvBool ValidateMode(NVDpyEvoPtr pDpyEvo,
         goto done;
     }
 
-    b2Heads1Or = nvEvoUse2Heads1OR(pDpyEvo, pTimingsEvo, pParams);
-
-    if (nvDpyIsHdmiEvo(pDpyEvo)) {
-        NvBool foundFrlConfig = FALSE;
-        do {
-            if (nvHdmiFrlQueryConfigOneColorSpaceAndBpc(pDpyEvo,
-                                                        &pKmsMode->timings,
-                                                        pTimingsEvo,
-                                                        &dpyColor,
-                                                        b2Heads1Or,
-                                                        pParams,
-                                                        pHdmiFrlConfig,
-                                                        pDscInfo)) {
-                foundFrlConfig = TRUE;
-                break; 
-            }
-        } while (nvDowngradeColorSpaceAndBpc(pDpyEvo, &supportedColorFormats, &dpyColor));
-
-        if (!foundFrlConfig) {
-            LogModeValidationEnd(pDispEvo, pInfoString,
-                "Unable to determine HDMI 2.1 Fixed Rate Link configuration.");
-            goto done;
-        }
-
-    } else {
-        if (!nvDPValidateModeEvo(pDpyEvo, pTimingsEvo, &dpyColor, b2Heads1Or,
-                                 pDscInfo, pParams)) {
-            LogModeValidationEnd(pDispEvo,
-                                 pInfoString, "DP Bandwidth check failed");
-            goto done;
-        }
+    if (!nvDPValidateModeEvo(pDpyEvo, pTimingsEvo, pParams)) {
+        LogModeValidationEnd(pDispEvo,
+                             pInfoString, "DP Bandwidth check failed");
+        goto done;
     }
 
     /*
@@ -1779,48 +1677,22 @@ static NvBool ValidateMode(NVDpyEvoPtr pDpyEvo,
 
 
     /* Run the raster timings through IMP checking. */
+
     if (!nvConstructHwModeTimingsImpCheckEvo(pDpyEvo->pConnectorEvo,
-                                             pTimingsEvo,
-                                             pDscInfo,
-                                             b2Heads1Or,
-                                             &dpyColor,
-                                             pParams,
-                                             impOutTimings,
-                                             &impOutNumHeads,
-                                             pInfoString)) {
+                                             pTimingsEvo, pParams, pInfoString,
+                                             0 /* head */)) {
         LogModeValidationEnd(pDispEvo, pInfoString,
                              "GPU extended capability check failed");
         goto done;
     }
 
-    nvAssert(impOutNumHeads > 0);
-
     /* Log modevalidation information about the viewport. */
 
-    LogViewPort(pInfoString, impOutTimings, impOutNumHeads);
+    LogViewPort(pInfoString, pTimingsEvo);
 
-    /*
-     * Copy out the usage bounds that passed validation; note we intersect
-     * the usage bounds across the hardware heads that would be used with
-     * this apiHead, accumulating the results in pModeUsage.
-     */
-    for (head = 0; head < impOutNumHeads; head++) {
-        if (head == 0) {
-            *pModeUsage = impOutTimings[0].viewPort.possibleUsage;
-        } else {
-            struct NvKmsUsageBounds *pTmpUsageBounds =
-                nvPreallocGet(pDevEvo,
-                    PREALLOC_TYPE_VALIDATE_MODE_TMP_USAGE_BOUNDS,
-                    sizeof(*pTmpUsageBounds));
+    /* Copy out the usage bounds that passed validation */
 
-            nvIntersectUsageBounds(pModeUsage,
-                                   &impOutTimings[head].viewPort.possibleUsage,
-                                   pTmpUsageBounds);
-            *pModeUsage = *pTmpUsageBounds;
-
-            nvPreallocRelease(pDevEvo, PREALLOC_TYPE_VALIDATE_MODE_TMP_USAGE_BOUNDS);
-        }
-    }
+    nvkms_memcpy(pModeUsage, &pTimingsEvo->viewPort.possibleUsage, sizeof(*pModeUsage));
 
     /* Whew, if we got this far, the mode is valid. */
 
@@ -1830,9 +1702,6 @@ static NvBool ValidateMode(NVDpyEvoPtr pDpyEvo,
 
 done:
     nvPreallocRelease(pDevEvo, PREALLOC_TYPE_VALIDATE_MODE_HW_MODE_TIMINGS);
-    nvPreallocRelease(pDevEvo, PREALLOC_TYPE_VALIDATE_MODE_HDMI_FRL_CONFIG);
-    nvPreallocRelease(pDevEvo, PREALLOC_TYPE_VALIDATE_MODE_DSC_INFO);
-    nvPreallocRelease(pDevEvo, PREALLOC_TYPE_VALIDATE_MODE_IMP_OUT_HW_MODE_TIMINGS);
 
     return ret;
 }
@@ -1870,25 +1739,11 @@ const NVT_TIMING *nvFindEdidNVT_TIMING
     const struct NvKmsModeValidationParams *pParams
 )
 {
-    const NVParsedEdidEvoRec *pParsedEdid = &pDpyEvo->parsedEdid;
-    const NVT_HDMI_FORUM_INFO *pHdmiInfo = &pParsedEdid->info.hdmiForumInfo;
     NvModeTimings tmpModeTimings;
-    int match861stOnly;
     int i;
 
     if (!pDpyEvo->parsedEdid.valid) {
         return NULL;
-    }
-
-    /*
-     * In the first pass, attempt to match the pModeTimings with CEA/CTA 861
-     * video formats if the monitor prefers them, or if HDMI 3D is requested.
-     */
-    if (nvDpyIsHdmiEvo(pDpyEvo) &&
-        (pModeTimings->hdmi3D || pHdmiInfo->uhd_vic)) {
-        match861stOnly = 1;
-    } else {
-        match861stOnly = 0;
     }
 
     tmpModeTimings = *pModeTimings;
@@ -1898,69 +1753,32 @@ const NVT_TIMING *nvFindEdidNVT_TIMING
      * in ValidateModeIndexEdid(), so that the modeTimings can be
      * compared with the NVT_TIMINGs in the parsed EDID.
      */
-    nvKmsUpdateNvModeTimingsForHdmi3D(&tmpModeTimings, FALSE);
+    if (tmpModeTimings.hdmi3D) {
+        UpdateNvModeTimingsForHdmi3D(&tmpModeTimings, FALSE);
+    }
 
     /*
      * The NVT_TIMINGs we compare against below won't have hdmi3D or
      * yuv420 set; clear those flags in tmpModeTimings so that we can
      * do a more meaningful comparison.
      */
+    tmpModeTimings.hdmi3D = FALSE;
     tmpModeTimings.yuv420Mode = NV_YUV420_MODE_NONE;
 
-    for (; match861stOnly >= 0; match861stOnly--) {
-        for (i = 0; i < pDpyEvo->parsedEdid.info.total_timings; i++) {
-            const NVT_TIMING *pTiming = &pDpyEvo->parsedEdid.info.timing[i];
-
-            if (match861stOnly &&
-                (NVT_GET_TIMING_STATUS_TYPE(pTiming->etc.status) !=
-                 NVT_TYPE_EDID_861ST)) {
-                continue;
-            }
-
-            if (NVT_TIMINGmatchesNvModeTimings(pTiming, &tmpModeTimings, pParams) &&
-                /*
-                 * Only consider the mode a match if the yuv420
-                 * configuration of pTiming would match pModeTimings.
-                 */
-                (pModeTimings->yuv420Mode ==
-                 GetYUV420Value(pDpyEvo, pParams, pTiming))) {
-                return pTiming;
-            }
+    for (i = 0; i < pDpyEvo->parsedEdid.info.total_timings; i++) {
+        const NVT_TIMING *pTiming = &pDpyEvo->parsedEdid.info.timing[i];
+        if (NVT_TIMINGmatchesNvModeTimings(pTiming, &tmpModeTimings, pParams) &&
+            /*
+             * Only consider the mode a match if the yuv420
+             * configuration of pTiming would match pModeTimings.
+             */
+            (pModeTimings->yuv420Mode ==
+             GetYUV420Value(pDpyEvo, pParams, pTiming))) {
+            return pTiming;
         }
     }
 
     return NULL;
-}
-
-static void ConstructVSInfoFrameCtrls(
-    const NVT_TIMING *pTiming,
-    const NvBool hdmi3D,
-    NVT_VENDOR_SPECIFIC_INFOFRAME_CTRL *pVSCtrl)
-{
-    if (!hdmi3D && (NVT_GET_TIMING_STATUS_TYPE(pTiming->etc.status) !=
-                    NVT_TYPE_HDMI_EXT)) {
-        pVSCtrl->Enable = FALSE;
-        pVSCtrl->VSIFVersion = NVT_VSIF_VERSION_NONE;
-        return;
-    }
-
-    pVSCtrl->Enable = TRUE;
-    pVSCtrl->VSIFVersion = NVT_VSIF_VERSION_H14B_VSIF;
-
-    if (hdmi3D) {
-        pVSCtrl->HDMIFormat  = NVT_HDMI_VS_BYTE4_HDMI_VID_FMT_3D;
-        pVSCtrl->HDMI_VIC    = NVT_HDMI_VS_BYTE5_HDMI_VIC_NA;
-        pVSCtrl->ThreeDStruc = NVT_HDMI_VS_BYTE5_HDMI_3DS_FRAMEPACK;
-    } else if (NVT_GET_TIMING_STATUS_TYPE(pTiming->etc.status) ==
-               NVT_TYPE_HDMI_EXT) {
-       pVSCtrl->HDMIFormat  = NVT_HDMI_VS_BYTE4_HDMI_VID_FMT_EXT;
-       pVSCtrl->HDMI_VIC    = NVT_GET_TIMING_STATUS_SEQ(pTiming->etc.status);
-       pVSCtrl->ThreeDStruc = NVT_HDMI_VS_BYTE5_HDMI_3DS_NA;
-    }
-
-    pVSCtrl->ThreeDDetail = NVT_HDMI_VS_BYTE_OPT1_HDMI_3DEX_NA;
-    pVSCtrl->MetadataPresent = 0;
-    pVSCtrl->MetadataType = NVT_HDMI_VS_BYTE_OPT2_HDMI_METADATA_TYPE_NA;
 }
 
 /*!
@@ -1983,13 +1801,11 @@ static NvBool ConstructModeTimingsMetaData(
     const struct NvKmsModeValidationParams *pParams,
     struct NvKmsMode *pKmsMode,
     EvoValidateModeFlags *pFlags,
-    NVT_VIDEO_INFOFRAME_CTRL *pInfoFrameCtrl,
-    NVT_VENDOR_SPECIFIC_INFOFRAME_CTRL *pVSInfoFrameCtrl)
+    NVT_VIDEO_INFOFRAME_CTRL *pInfoFrameCtrl)
 {
     const NVDispEvoRec *pDispEvo = pDpyEvo->pDispEvo;
     EvoValidateModeFlags flags = { 0 };
     NVT_VIDEO_INFOFRAME_CTRL infoFrameCtrl;
-    NVT_VENDOR_SPECIFIC_INFOFRAME_CTRL vsInfoFrameCtrl = { };
     NvModeTimings modeTimings = pKmsMode->timings;
     const NVT_TIMING *pTiming;
 
@@ -2023,9 +1839,12 @@ static NvBool ConstructModeTimingsMetaData(
 
             /* Restore the yuv420 and hdmi3D flags from the client's mode. */
             modeTimings.yuv420Mode = pKmsMode->timings.yuv420Mode;
+            modeTimings.hdmi3D = pKmsMode->timings.hdmi3D;
 
             /* Re-apply adjustments for hdmi3D. */
-            nvKmsUpdateNvModeTimingsForHdmi3D(&modeTimings, pKmsMode->timings.hdmi3D);
+            if (modeTimings.hdmi3D) {
+                UpdateNvModeTimingsForHdmi3D(&modeTimings, TRUE);
+            }
 
         }
 
@@ -2036,15 +1855,8 @@ static NvBool ConstructModeTimingsMetaData(
         }
 
         /* Validate hdmi3D. */
-        NvBool hdmi3D = FALSE;
-        NvBool hdmi3DAvailable = FALSE;
-        GetHdmi3DValue(pDpyEvo, pParams, &timing, &hdmi3D, &hdmi3DAvailable);
-        if ((modeTimings.hdmi3D != hdmi3D) && !hdmi3DAvailable) {
+        if (modeTimings.hdmi3D != GetHdmi3DValue(pDpyEvo, pParams, &timing)) {
             return FALSE;
-        }
-
-        if (!!(timing.etc.flag & NVT_FLAG_DISPLAYID_T7_DSC_PASSTHRU)) {
-            flags.dscPassThrough = TRUE;
         }
 
         if (pParams->stereoMode == NVKMS_STEREO_HDMI_3D) {
@@ -2070,7 +1882,6 @@ static NvBool ConstructModeTimingsMetaData(
          */
         if (nvDpyIsHdmiEvo(pDpyEvo)) {
             NvTiming_ConstructVideoInfoframeCtrl(&timing, &infoFrameCtrl);
-            ConstructVSInfoFrameCtrls(&timing, hdmi3D, &vsInfoFrameCtrl);
         }
 
         goto done;
@@ -2090,12 +1901,7 @@ static NvBool ConstructModeTimingsMetaData(
 
 done:
     *pFlags = flags;
-    if (pInfoFrameCtrl != NULL) {
-        *pInfoFrameCtrl = infoFrameCtrl;
-    }
-    if (pVSInfoFrameCtrl != NULL) {
-        *pVSInfoFrameCtrl = vsInfoFrameCtrl;
-    }
+    *pInfoFrameCtrl = infoFrameCtrl;
     pKmsMode->timings = modeTimings;
 
     return TRUE;
@@ -2117,13 +1923,11 @@ NvBool nvValidateModeForModeset(NVDpyEvoRec *pDpyEvo,
                                 const struct NvKmsMode *pKmsMode,
                                 const struct NvKmsSize *pViewPortSizeIn,
                                 const struct NvKmsRect *pViewPortOut,
-                                NVDpyAttributeColor *pDpyColor,
-                                NVHwModeTimingsEvo *pTimingsEvo,
-                                NVT_VIDEO_INFOFRAME_CTRL *pInfoFrameCtrl,
-                                NVT_VENDOR_SPECIFIC_INFOFRAME_CTRL *pVSInfoFrameCtrl)
+                                NVHwModeTimingsEvo *pTimingsEvo)
 {
     EvoValidateModeFlags flags;
     struct NvKmsMode kmsMode = *pKmsMode;
+    NVT_VIDEO_INFOFRAME_CTRL infoFrameCtrl;
     struct NvKmsModeValidationValidSyncs dummyValidSyncs;
 
     nvkms_memset(pTimingsEvo, 0, sizeof(*pTimingsEvo));
@@ -2132,8 +1936,7 @@ NvBool nvValidateModeForModeset(NVDpyEvoRec *pDpyEvo,
                                       pParams,
                                       &kmsMode,
                                       &flags,
-                                      pInfoFrameCtrl,
-                                      pVSInfoFrameCtrl)) {
+                                      &infoFrameCtrl)) {
         return FALSE;
     }
 
@@ -2150,13 +1953,13 @@ NvBool nvValidateModeForModeset(NVDpyEvoRec *pDpyEvo,
                                      &kmsMode,
                                      pViewPortSizeIn,
                                      pViewPortOut,
-                                     flags.dscPassThrough,
-                                     pDpyColor,
                                      pTimingsEvo,
                                      pParams,
                                      &dummyInfoString)) {
         return FALSE;
     }
+
+    pTimingsEvo->infoFrameCtrl = infoFrameCtrl;
 
     return TRUE;
 }

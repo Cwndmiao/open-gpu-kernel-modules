@@ -1,5 +1,5 @@
 /* 
- * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2017, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -20,22 +20,28 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#pragma once
+#ifndef _clc570_h_
+#define _clc570_h_
 
-#include <nvtypes.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-//
-// This file was generated with FINN, an NVIDIA coding tool.
-// Source file:      class/clc570.finn
-//
+#include "nvtypes.h"
 
-#define NVC570_DISPLAY (0xc570U) /* finn: Evaluated from "NVC570_ALLOCATION_PARAMETERS_MESSAGE_ID" */
+#include "class/cl5070.h"
 
-#define NVC570_ALLOCATION_PARAMETERS_MESSAGE_ID (0xc570U)
+#define  NVC570_DISPLAY                                             (0x0000C570)
 
-typedef struct NVC570_ALLOCATION_PARAMETERS {
-    NvU32 numHeads; // Number of HEADs in this chip/display
-    NvU32 numSors;  // Number of SORs in this chip/display
-    NvU32 numPiors; // Number of PIORs in this chip/display
+typedef struct
+{
+    NvU32   numHeads; // Number of HEADs in this chip/display
+    NvU32   numSors;  // Number of SORs in this chip/display
+    NvU32   numPiors; // Number of PIORs in this chip/display
 } NVC570_ALLOCATION_PARAMETERS;
 
+#ifdef __cplusplus
+};     /* extern "C" */
+#endif
+
+#endif /* _clc570_h_ */

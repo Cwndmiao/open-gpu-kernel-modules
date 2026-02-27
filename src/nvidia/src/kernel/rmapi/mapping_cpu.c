@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1993-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -47,8 +47,6 @@
 #include "entry_points.h"
 
 static void RmUnmapBusAperture (OBJGPU *, NvP64, NvU64, NvBool, NvP64);
-
-#include "gpu/conf_compute/conf_compute.h"
 
 typedef struct RS_CPU_MAP_PARAMS RmMapParams;
 typedef struct RS_CPU_UNMAP_PARAMS RmUnmapParams;
@@ -102,16 +100,57 @@ rmapiGetEffectiveAddrSpace
     NV_ADDRESS_SPACE *pAddrSpace
 )
 {
-    return kbusGetEffectiveAddressSpace_HAL(pGpu, pMemDesc, mapFlags, pAddrSpace);
-}
+    NV_ADDRESS_SPACE addrSpace;
+    NvBool bDirectSysMappingAllowed = NV_TRUE;
 
-// Asserts to check caching type matches across sdk and nv_memory_types
-ct_assert(NVOS33_FLAGS_CACHING_TYPE_CACHED        == NV_MEMORY_CACHED);
-ct_assert(NVOS33_FLAGS_CACHING_TYPE_UNCACHED      == NV_MEMORY_UNCACHED);
-ct_assert(NVOS33_FLAGS_CACHING_TYPE_WRITECOMBINED == NV_MEMORY_WRITECOMBINED);
-ct_assert(NVOS33_FLAGS_CACHING_TYPE_WRITEBACK     == NV_MEMORY_WRITEBACK);
-ct_assert(NVOS33_FLAGS_CACHING_TYPE_DEFAULT       == NV_MEMORY_DEFAULT);
-ct_assert(NVOS33_FLAGS_CACHING_TYPE_UNCACHED_WEAK == NV_MEMORY_UNCACHED_WEAK);
+    KernelBus *pKernelBus = GPU_GET_KERNEL_BUS(pGpu);
+
+    NV_ASSERT_OK_OR_RETURN(
+        kbusIsDirectMappingAllowed_HAL(pGpu, pKernelBus, pMemDesc, mapFlags,
+                                      &bDirectSysMappingAllowed));
+
+    //
+    // Bug 1482818: Deprecate reflected mappings in production code.
+    //  The usage of reflected writes, in addition to causing several deadlock
+    //  scenarios involving P2P transfers, are disallowed on NVLINK (along with
+    //  reflected reads), and should no longer be used.
+    //  The below PDB property should be unset once the remaining usages in MODS
+    //  have been culled. (Bug 1780557)
+    //
+    if ((memdescGetAddressSpace(pMemDesc) == ADDR_SYSMEM) &&
+        !bDirectSysMappingAllowed &&
+        (DRF_VAL(OS33, _FLAGS, _MAPPING, mapFlags) != NVOS33_FLAGS_MAPPING_DIRECT) &&
+        !kbusIsReflectedMappingAccessAllowed(pKernelBus))
+    {
+        NV_ASSERT(0);
+        return NV_ERR_NOT_SUPPORTED;
+    }
+
+    if (memdescGetFlag(pMemDesc, MEMDESC_FLAGS_MAP_SYSCOH_OVER_BAR1))
+    {
+        addrSpace = ADDR_FBMEM;
+    }
+    else if ((memdescGetAddressSpace(pMemDesc) == ADDR_SYSMEM) &&
+        (bDirectSysMappingAllowed || FLD_TEST_DRF(OS33, _FLAGS, _MAPPING, _DIRECT, mapFlags) ||
+        (IS_VIRTUAL_WITH_SRIOV(pGpu) && !IS_FMODEL(pGpu) && !IS_RTLSIM(pGpu))))
+    {
+        addrSpace = ADDR_SYSMEM;
+    }
+    else if ((memdescGetAddressSpace(pMemDesc) == ADDR_FBMEM) ||
+             ((memdescGetAddressSpace(pMemDesc) == ADDR_SYSMEM) && !bDirectSysMappingAllowed))
+    {
+        addrSpace = ADDR_FBMEM;
+    }
+    else
+    {
+        addrSpace = memdescGetAddressSpace(pMemDesc);
+    }
+
+    if (pAddrSpace)
+        *pAddrSpace = addrSpace;
+
+    return NV_OK;
+}
 
 //
 // Map memory entry points.
@@ -129,7 +168,8 @@ memMap_IMPL
     KernelBus *pKernelBus = NULL;
     MemoryManager *pMemoryManager = NULL;
     KernelMemorySystem *pKernelMemorySystem = NULL;
-    RmClient *pClient;
+    RsClient *pRsClient;
+    RmClient *pRmClient;
     RsResourceRef *pContextRef;
     RsResourceRef *pMemoryRef;
     Memory *pMemoryInfo; // TODO: rename this field. pMemoryInfo is the legacy name.
@@ -141,8 +181,6 @@ memMap_IMPL
     NvBool bBroadcast;
     NvU64 mapLimit;
     NvBool bIsSysmem = NV_FALSE;
-    NvBool bSkipSizeCheck = (DRF_VAL(OS33, _FLAGS, _SKIP_SIZE_CHECK, pMapParams->flags) ==
-                             NVOS33_FLAGS_SKIP_SIZE_CHECK_ENABLE);
 
     NV_ASSERT_OR_RETURN(RMCFG_FEATURE_KERNEL_RM, NV_ERR_NOT_SUPPORTED);
 
@@ -158,36 +196,18 @@ memMap_IMPL
         pKernelMemorySystem = GPU_GET_KERNEL_MEMORY_SYSTEM(pGpu);
     }
 
-    pClient = serverutilGetClientUnderLock(pMapParams->hClient);
-    NV_ASSERT_OR_ELSE(pClient != NULL, return NV_ERR_INVALID_CLIENT);
-    NV_ASSERT_OK_OR_RETURN(clientGetResourceRef(staticCast(pClient, RsClient),
-                pMapParams->hMemory, &pMemoryRef));
+    NV_ASSERT_OK_OR_RETURN(serverGetClientUnderLock(&g_resServ, pMapParams->hClient, &pRsClient));
+    NV_ASSERT_OK_OR_RETURN(clientGetResourceRef(pRsClient, pMapParams->hMemory, &pMemoryRef));
 
     pMemoryInfo = dynamicCast(pMemoryRef->pResource, Memory);
     NV_ASSERT_OR_RETURN(pMemoryInfo != NULL, NV_ERR_NOT_SUPPORTED);
     pMemDesc = pMemoryInfo->pMemDesc;
 
-    if (pMemoryInfo->categoryClassId == NV01_MEMORY_SYSTEM_OS_DESCRIPTOR)
+    if ((pMemoryInfo->categoryClassId == NV01_MEMORY_SYSTEM_OS_DESCRIPTOR) &&
+        !(memdescGetAddressSpace(pMemDesc) == ADDR_FBMEM &&
+          RMCFG_FEATURE_PLATFORM_MODS))
     {
-        NvBool isSupported = NV_FALSE;
-        NV_ADDRESS_SPACE addressSpace = memdescGetAddressSpace(pMemDesc);
-
-        if (memdescGetFlag(pMemDesc, MEMDESC_FLAGS_ALLOW_EXT_SYSMEM_USER_CPU_MAPPING))
-        {
-            isSupported = NV_TRUE;
-        }
-
-        if ((addressSpace == ADDR_FBMEM) && RMCFG_FEATURE_MODS_FEATURES)
-        {
-            isSupported = NV_TRUE;
-        }
-
-        if (!isSupported)
-        {
-            NV_PRINTF(LEVEL_ERROR,
-                "CPU mapping not supported for addressSpace: 0x%x\n", addressSpace);
-            return NV_ERR_NOT_SUPPORTED;
-        }
+        return NV_ERR_NOT_SUPPORTED;
     }
 
     //
@@ -198,41 +218,11 @@ memMap_IMPL
     //
     // CPU to directly access protected memory is allowed on MODS
     //
-    // The check below is for VPR and should be skipped for Hopper CC
-    if ((pGpu != NULL) && !gpuIsCCFeatureEnabled(pGpu))
+    if ((pMemoryInfo->Flags & NVOS32_ALLOC_FLAGS_PROTECTED) &&
+        (pMapParams->protect != NV_PROTECT_WRITEABLE) &&
+        ! RMCFG_FEATURE_PLATFORM_MODS)
     {
-        if ((pMemoryInfo->Flags & NVOS32_ALLOC_FLAGS_PROTECTED) &&
-            (pMapParams->protect != NV_PROTECT_WRITEABLE) &&
-            ! RMCFG_FEATURE_PLATFORM_MODS)
-        {
-            return NV_ERR_NOT_SUPPORTED;
-        }
-    }
-
-    if ((pGpu != NULL) && gpuIsCCFeatureEnabled(pGpu) &&
-        (pMemoryInfo->Flags & NVOS32_ALLOC_FLAGS_PROTECTED))
-    {
-        ConfidentialCompute *pCC = GPU_GET_CONF_COMPUTE(pGpu);
-        //
-        // If neither BAR1 nor PCIE as a whole is trusted, fail the mapping
-        // for allocations in CPR region. Mapping should still succeed for
-        // allocations in non-CPR region
-        // Deny BAR1 access to CPU-RM by default irrespective of prod or devtools
-        // mode. Some mappings made by CPU-RM may be allowed to go thorough in
-        // devtools mode.
-        // However, allow the mapping to go through on platforms where GSP-DMA
-        // is not present e.g. MODS. User may have also set a regkey to force
-        // BAR accesses.
-        //
-        if (((pCC != NULL) && !pCC->ccStaticInfo.bIsBar1Trusted &&
-            !pCC->ccStaticInfo.bIsPcieTrusted) ||
-            (IS_GSP_CLIENT(pGpu) && pMapParams->bKernel && !pKernelBus->bForceBarAccessOnHcc &&
-             FLD_TEST_DRF(OS33, _FLAGS, _ALLOW_MAPPING_ON_HCC, _NO, pMapParams->flags)))
-        {
-            NV_PRINTF(LEVEL_ERROR, "BAR1 mapping to CPR vidmem not supported\n");
-            NV_ASSERT(0);
-            return NV_ERR_NOT_SUPPORTED;
-        }
+        return NV_ERR_NOT_SUPPORTED;
     }
 
     if (!pMapParams->bKernel &&
@@ -252,18 +242,14 @@ memMap_IMPL
         return NV_ERR_INVALID_LIMIT;
     }
 
-    if (bSkipSizeCheck && (pCallContext->secInfo.privLevel < RS_PRIV_LEVEL_KERNEL))
-    {
-        return NV_ERR_INSUFFICIENT_PERMISSIONS;
-    }
-
     //
     // See bug #140807 and #150889 - we need to pad memory mappings to past their
     // actual allocation size (to PAGE_SIZE+1) because of a buggy ms function so
     // skip the allocation size sanity check so the map operation still succeeds.
     //
-    if (!portSafeAddU64(pMapParams->offset, pMapParams->length, &mapLimit) ||
-        (!bSkipSizeCheck && (mapLimit > pMemoryInfo->Length)))
+    if ((DRF_VAL(OS33, _FLAGS, _SKIP_SIZE_CHECK, pMapParams->flags) == NVOS33_FLAGS_SKIP_SIZE_CHECK_DISABLE) &&
+        (!portSafeAddU64(pMapParams->offset, pMapParams->length, &mapLimit) ||
+         (mapLimit > pMemoryInfo->Length)))
     {
         return NV_ERR_INVALID_LIMIT;
     }
@@ -277,23 +263,12 @@ memMap_IMPL
         effectiveAddrSpace = ADDR_SYSMEM;
     }
 
-    bIsSysmem = (effectiveAddrSpace == ADDR_SYSMEM) || (effectiveAddrSpace == ADDR_EGM);
+    bIsSysmem = (effectiveAddrSpace == ADDR_SYSMEM);
 
     if (dynamicCast(pMemoryInfo, FlaMemory) != NULL)
     {
         NV_PRINTF(LEVEL_WARNING, "CPU mapping to FLA memory not allowed\n");
         return NV_ERR_NOT_SUPPORTED;
-    }
-
-    //
-    // MEMDESC_FLAGS_MAP_SYSCOH_OVER_BAR1 indicates a special mapping type of HW registers,
-    // so map it as device memory (uncached).
-    //
-    NvU32 cachingType = NV_MEMORY_WRITECOMBINED;
-    if (pMemDesc != NULL && !memdescHasSubDeviceMemDescs(pMemDesc))
-    {
-        cachingType = memdescGetFlag(pMemDesc, MEMDESC_FLAGS_MAP_SYSCOH_OVER_BAR1) ?
-                      NV_MEMORY_UNCACHED : NV_MEMORY_WRITECOMBINED;
     }
 
     //
@@ -310,22 +285,39 @@ memMap_IMPL
         {
             if (pMapParams->bKernel)
             {
-                rmStatus = kbusMapCoherentCpuMapping_HAL(pGpu,
-                                                         pKernelBus,
-                                                         pMemDesc,
-                                                         pMapParams->offset,
-                                                         pMapParams->length,
-                                                         pMapParams->protect,
-                                                         pMapParams->ppCpuVirtAddr,
-                                                         &priv);
+                if (pMemDesc->_flags & MEMDESC_FLAGS_PHYSICALLY_CONTIGUOUS)
+                {
+                    NvP64 tempCpuPtr = kbusMapCoherentCpuMapping_HAL(pGpu, pKernelBus, pMemDesc);
+                    if (tempCpuPtr == NULL)
+                    {
+                        rmStatus = NV_ERR_GENERIC;
+                    }
+                    else
+                    {
+                        rmStatus = NV_OK;
+                        tempCpuPtr = NvP64_PLUS_OFFSET(tempCpuPtr, pMapParams->offset);
+                    }
+                    *pMapParams->ppCpuVirtAddr = tempCpuPtr;
 
-                // No memarea support for kernel yet
-
-                if (rmStatus != NV_OK)
-                    return rmStatus;
+                    if (rmStatus != NV_OK)
+                        return rmStatus;
+                }
+                else
+                {
+                    rmStatus = osMapSystemMemory(pMemDesc,
+                                                 pMapParams->offset,
+                                                 pMapParams->length,
+                                                 pMapParams->bKernel,
+                                                 pMapParams->protect,
+                                                 pMapParams->ppCpuVirtAddr,
+                                                 &priv);
+                    if (rmStatus != NV_OK)
+                        return rmStatus;
+                }
             }
             else
             {
+                NV_ASSERT(DRF_VAL(OS33, _FLAGS, _BUS, pMapParams->flags) == NVOS33_FLAGS_BUS_NVLINK_COHERENT);
 
                 //
                 // Allocating mapping for user mode client
@@ -335,76 +327,22 @@ memMap_IMPL
                 //       this function will transition to storing the mapping parameters onto
                 //       the FD.  Also note: All mapping parameters are ignored (!).
                 //
-                //   TODO: refactor this to either use the new osMapMemoryArea interface or unify with kernel in osMapSystemMemory
-
-                *((NvU64*) pMapParams->ppCpuVirtAddr) = ((NvU64) pKernelMemorySystem->coherentCpuFbBase) +
-                    ((NvU64) memdescGetPhysAddr(pMemDesc, AT_CPU, pMapParams->offset));
-
+                //   For now, we're going to return the first page of the nvlink aperture
+                //   mapping of this allocation.  See nvidia_mmap_helper for establishment
+                //   of direct mapping.
                 //
-                // If NUMA onlining is enabled, we will go through the NUMA APIs and don't need
-                // to store off more map info.
-                // If NUMA onlining is not enabled, fill in the os map information
-                // so we can map it later (inlcuding the memArea so we can map it disconig)
-                //
-                if (!osNumaOnliningEnabled(pGpu->pOsGpuInfo))
-                {
-                    MemoryArea memArea;
-                    NvU64    i;
-                    NvU64    pageSize;
-                    NvU64    mapGranularity;
-                    NvU64    offset;
-                    NvU64    mapRangeEndPlus1;
-                    NvU64    numRanges = 0;
-                    NvBool   bContigDesc;
-                    ADDRESS_TRANSLATION addressTranslation;
-                    MemoryRange mapRange = mrangeMake(pMapParams->offset, pMapParams->length);
 
-                    addressTranslation = AT_CPU;
-                    pageSize = memdescGetPageSize(pMemDesc, addressTranslation);
-                    bContigDesc = memdescGetContiguity(pMemDesc, addressTranslation);
-                    mapRangeEndPlus1 = mapRange.start + mapRange.size;
-                    // TODO: simplify for dynamic page granularity
-                    mapGranularity = bContigDesc ? mapRange.size : pageSize;
-
-                    NV_CHECK_OR_RETURN(LEVEL_INFO,
-                                        mapRangeEndPlus1 <= memdescGetSize(pMemDesc),
-                                        NV_ERR_OUT_OF_RANGE);
-
-                    for (offset = mapRange.start; offset < mapRangeEndPlus1; numRanges++)
-                    {
-                        offset = bContigDesc ? (offset + mapGranularity) : NV_ALIGN_DOWN(offset + mapGranularity, mapGranularity);
-                    }
-
-                    memArea.pRanges = portMemAllocNonPaged(sizeof(MemoryRange) * numRanges);
-                    NV_CHECK_OR_RETURN(LEVEL_INFO, memArea.pRanges != NULL, NV_ERR_NO_MEMORY);
-
-                    memArea.numRanges = numRanges;
-
-                    for (i = 0, offset = mapRange.start; offset < mapRangeEndPlus1; i++)
-                    {
-                        memArea.pRanges[i].start = memdescGetPhysAddr(pMemDesc, addressTranslation, offset) + pKernelMemorySystem->coherentCpuFbBase;
-                        memArea.pRanges[i].size  = bContigDesc ? mapGranularity : NV_MIN(mapRangeEndPlus1, NV_ALIGN_UP(offset + 1, mapGranularity)) - offset;
-
-                        offset = bContigDesc ? (offset + mapGranularity) : NV_ALIGN_DOWN(offset + mapGranularity, mapGranularity);
-                    }
-
-                    // memArea.pRanges[0].start is the same as what is stored in the pMapParams->ppCpuVirtAddr above
-
-                    rmStatus = osMapPciMemoryAreaUser(pGpu->pOsGpuInfo,
-                                                      memArea,
-                                                      pMapParams->protect,
-                                                      cachingType,
-                                                      pMapParams->ppCpuVirtAddr,
-                                                      &priv);
-
-                    // Coherent path doesn't need the memArea stored off for unmap
-                    portMemFree(memArea.pRanges);
-
-                    if (rmStatus != NV_OK)
-                        return rmStatus;
-                }
-
-                rmStatus = NV_OK;
+                rmStatus = osMapPciMemoryUser(pGpu->pOsGpuInfo,
+                                              ((NvUPtr)pKernelMemorySystem->coherentCpuFbBase +
+                                               (NvUPtr)memdescGetPhysAddr(pMemDesc,
+                                                AT_CPU, pMapParams->offset)),
+                                              pMapParams->length,
+                                              pMapParams->protect,
+                                              pMapParams->ppCpuVirtAddr,
+                                              &priv,
+                                              NV_MEMORY_UNCACHED);
+                if (rmStatus != NV_OK)
+                    return rmStatus;
             }
 
             NV_PRINTF(LEVEL_INFO,
@@ -419,8 +357,8 @@ memMap_IMPL
                                                     priv,
                                                     *(pMapParams->ppCpuVirtAddr),
                                                     pMapParams->length,
-                                                    0,
-                                                    0,
+                                                    -1,
+                                                    -1,
                                                     pMapParams->flags);
             pCpuMapping->pPrivate->pGpu = pGpu;
 
@@ -445,8 +383,17 @@ memMap_IMPL
         NvBool bcState = NV_FALSE;
         NvU64 gpuVirtAddr = 0;
         NvU64 gpuMapLength = 0;
-        MemoryArea memArea;
-        NvBool bUseMemArea = NV_FALSE;
+
+        //
+        // MEMDESC_FLAGS_MAP_SYSCOH_OVER_BAR1 indicates a special mapping type of HW registers,
+        // so map it as device memory (uncached).
+        //
+        NvU32 cachingType = NV_MEMORY_WRITECOMBINED;
+        if (pMemDesc != NULL && !memdescHasSubDeviceMemDescs(pMemDesc))
+        {
+            cachingType = memdescGetFlag(pMemDesc, MEMDESC_FLAGS_MAP_SYSCOH_OVER_BAR1) ?
+                          NV_MEMORY_UNCACHED : NV_MEMORY_WRITECOMBINED;
+        }
 
         if (!kbusIsBar1PhysicalModeEnabled(pKernelBus))
         {
@@ -476,18 +423,12 @@ memMap_IMPL
             NV_ASSERT(pGpu->busInfo.gpuPhysFbAddr);
 
             {
-                Device *pDevice = NULL;
-
                 // Below, we only map one GPU's address for CPU access, so we can use UNICAST here
                 NvU32 busMapFbFlags = BUS_MAP_FB_FLAGS_MAP_UNICAST;
-#if defined(NV_UNIX)
-                busMapFbFlags |= pMapParams->bKernel ? 0 : BUS_MAP_FB_FLAGS_ALLOW_DISCONTIG;
-#endif
                 if(DRF_VAL(OS33, _FLAGS, _MAPPING, pMapParams->flags) == NVOS33_FLAGS_MAPPING_DIRECT)
                 {
                     busMapFbFlags |= BUS_MAP_FB_FLAGS_DISABLE_ENCRYPTION;
                 }
-
                 switch (pMapParams->protect)
                 {
                     case NV_PROTECT_READABLE:
@@ -500,26 +441,10 @@ memMap_IMPL
 
                 pMemDesc = memdescGetMemDescFromGpu(pMemDesc, pGpu);
 
-                // WAR for Bug 3564398, need to allocate doorbell for windows differently
-                if (RMCFG_FEATURE_PLATFORM_WINDOWS &&
-                    memdescGetFlag(pMemDesc, MEMDESC_FLAGS_MAP_SYSCOH_OVER_BAR1))
-                {
-                    busMapFbFlags |= BUS_MAP_FB_FLAGS_MAP_DOWNWARDS;
-                }
-
-                (void) deviceGetByHandle(staticCast(pClient, RsClient),
-                                         pMapParams->hDevice, &pDevice);
-                bUseMemArea = NV_TRUE;
                 rmStatus = kbusMapFbAperture_HAL(pGpu, pKernelBus,
-                                                   pMemDesc, mrangeMake(pMapParams->offset, gpuMapLength),
-                                                   &memArea, busMapFbFlags, pDevice);
-
-                if (rmStatus == NV_OK)
-                {
-                    gpuVirtAddr = memArea.pRanges[0].start;
-                }
-
-
+                                                 pMemDesc, pMapParams->offset,
+                                                 &gpuVirtAddr, &gpuMapLength,
+                                                 busMapFbFlags, pMapParams->hClient);
             }
 
             if (rmStatus != NV_OK)
@@ -544,7 +469,7 @@ memMap_IMPL
                                               pMapParams->ppCpuVirtAddr,
                                               cachingType);
         }
-        else if(!bUseMemArea)
+        else
         {
             rmStatus = osMapPciMemoryUser(pGpu->pOsGpuInfo,
                                           (kbusIsBar1PhysicalModeEnabled(pKernelBus)?
@@ -555,29 +480,6 @@ memMap_IMPL
                                           &priv,
                                           cachingType);
         }
-        else
-        {
-            NvU64 idx;
-            NvU64 barAddr = gpumgrGetGpuPhysFbAddr(pGpu);
-
-            for (idx = 0; idx < memArea.numRanges; idx++)
-            {
-                memArea.pRanges[idx].start += barAddr;
-            }
-
-            rmStatus = osMapPciMemoryAreaUser(pGpu->pOsGpuInfo,
-                                          memArea,
-                                          pMapParams->protect,
-                                          cachingType,
-                                          pMapParams->ppCpuVirtAddr,
-                                          &priv);
-
-            for (idx = 0; idx < memArea.numRanges; idx++)
-            {
-                memArea.pRanges[idx].start -= barAddr;
-            }
-
-        }
 
         //
         // It's possible that NVOS33_FLAGS_MAPPING is set to NVOS33_FLAGS_MAPPING_DIRECT
@@ -585,7 +487,6 @@ memMap_IMPL
         // direct mapping.
         //
         pMapParams->flags = FLD_SET_DRF(OS33, _FLAGS, _MAPPING, _REFLECTED, pMapParams->flags);
-        pMapParams->flags = FLD_SET_DRF_NUM(OS33, _FLAGS, _CACHING_TYPE, cachingType, pMapParams->flags);
 
         if (rmStatus != NV_OK)
             goto _rmMapMemory_pciFail;
@@ -596,17 +497,12 @@ memMap_IMPL
                                                 *(pMapParams->ppCpuVirtAddr),
                                                 pMapParams->length,
                                                 kbusIsBar1PhysicalModeEnabled(pKernelBus)
-                                                    ? (NvU64)0
+                                                    ? (NvU64)-1
                                                     : gpuVirtAddr,
                                                 kbusIsBar1PhysicalModeEnabled(pKernelBus)
-                                                    ? (NvU64)0
+                                                    ? (NvU64)-1
                                                     : gpuMapLength,
                                                 pMapParams->flags);
-
-        if (bUseMemArea)
-        {
-            pCpuMapping->pPrivate->memArea = memArea;
-        }
         pCpuMapping->pPrivate->pGpu = pGpu;
 
         if (rmStatus != NV_OK)
@@ -620,10 +516,11 @@ memMap_IMPL
             if (!kbusIsBar1PhysicalModeEnabled(pKernelBus))
             {
                 kbusUnmapFbAperture_HAL(pGpu,
-                                          pKernelBus,
-                                          pMemDesc,
-                                          memArea,
-                                          BUS_MAP_FB_FLAGS_MAP_UNICAST);
+                                        pKernelBus,
+                                        pMemDesc,
+                                        gpuVirtAddr,
+                                        gpuMapLength,
+                                        BUS_MAP_FB_FLAGS_MAP_UNICAST);
     _rmMapMemory_busFail:
                 gpumgrSetBcEnabledStatus(pGpu, bcState);
             }
@@ -664,12 +561,13 @@ memMap_IMPL
     {
         RS_PRIV_LEVEL privLevel;
 
-        privLevel = rmclientGetCachedPrivilege(pClient);
-        if (!rmclientIsAdmin(pClient, privLevel) &&
-            !memdescGetFlag(pMemDesc, MEMDESC_FLAGS_SKIP_REGMEM_PRIV_CHECK))
-        {
+        pRmClient = dynamicCast(pRsClient, RmClient);
+        if (pRmClient == NULL)
+            return NV_ERR_OPERATING_SYSTEM;
+
+        privLevel = rmclientGetCachedPrivilege(pRmClient);
+        if (!rmclientIsAdmin(pRmClient, privLevel) && !memdescGetFlag(pMemDesc, MEMDESC_FLAGS_SKIP_REGMEM_PRIV_CHECK))
             return NV_ERR_PROTECTION_FAULT;
-        }
 
         if (DRF_VAL(OS33, _FLAGS, _MEM_SPACE, pMapParams->flags) == NVOS33_FLAGS_MEM_SPACE_USER)
         {
@@ -693,8 +591,8 @@ memMap_IMPL
                                                 priv,
                                                 *(pMapParams->ppCpuVirtAddr),
                                                 pMapParams->length,
-                                                0, // gpu virtual addr
-                                                0, // gpu map length
+                                                -1, // gpu virtual addr
+                                                -1, // gpu map length
                                                 pMapParams->flags);
         pCpuMapping->pPrivate->pGpu = pGpu;
 
@@ -759,19 +657,18 @@ memUnmap_IMPL
 
         if (pCpuMapping->pPrivate->bKernel)
         {
-            kbusUnmapCoherentCpuMapping_HAL(pGpu, pKernelBus, pMemDesc,
-                                            pCpuMapping->pLinearAddress,
-                                            pCpuMapping->pPrivate->pPriv);
-        }
-        else
-        {
-            if (!osNumaOnliningEnabled(pGpu->pOsGpuInfo))
+            if(pMemDesc->_flags & MEMDESC_FLAGS_PHYSICALLY_CONTIGUOUS)
             {
-                RmUnmapBusAperture(pGpu,
-                       pCpuMapping->pLinearAddress,
-                       pCpuMapping->length,
-                       pCpuMapping->pPrivate->bKernel,
-                       pCpuMapping->pPrivate->pPriv);
+                NV_ASSERT(pMemDesc->_flags & MEMDESC_FLAGS_PHYSICALLY_CONTIGUOUS);
+                kbusUnmapCoherentCpuMapping_HAL(pGpu, pKernelBus, pMemDesc);
+            }
+            else
+            {
+                osUnmapSystemMemory(pMemDesc,
+                                    pCpuMapping->pPrivate->bKernel,
+                                    pCpuMapping->processId,
+                                    pCpuMapping->pLinearAddress,
+                                    pCpuMapping->pPrivate->pPriv);
             }
         }
 
@@ -786,14 +683,14 @@ memUnmap_IMPL
         //
     }
     // System Memory case
-    else if ((pGpu == NULL) || (((memdescGetAddressSpace(pMemDesc) == ADDR_SYSMEM) ||
-                                  (memdescGetAddressSpace(pMemDesc) == ADDR_EGM)) &&
+    else if ((pGpu == NULL) || ((memdescGetAddressSpace(pMemDesc) == ADDR_SYSMEM) &&
                                  FLD_TEST_DRF(OS33, _FLAGS, _MAPPING, _DIRECT, pCpuMapping->flags)))
     {
         if (FLD_TEST_DRF(OS33, _FLAGS, _MAPPING, _DIRECT, pCpuMapping->flags))
         {
             memdescUnmap(pMemDesc,
                          pCpuMapping->pPrivate->bKernel,
+                         pCpuMapping->processId,
                          pCpuMapping->pLinearAddress,
                          pCpuMapping->pPrivate->pPriv);
         }
@@ -811,18 +708,36 @@ memUnmap_IMPL
         if (!kbusIsBar1PhysicalModeEnabled(pKernelBus))
         {
             {
-                MEMORY_DESCRIPTOR *pMemDesc = memdescGetMemDescFromGpu(pMemory->pMemDesc, pGpu);
-
                 kbusUnmapFbAperture_HAL(pGpu, pKernelBus,
-                                          pMemDesc,
-                                          pCpuMapping->pPrivate->memArea,
-                                          BUS_MAP_FB_FLAGS_MAP_UNICAST);
+                                        pMemory->pMemDesc,
+                                        pCpuMapping->pPrivate->gpuAddress,
+                                        pCpuMapping->pPrivate->gpuMapLength,
+                                        BUS_MAP_FB_FLAGS_MAP_UNICAST);
             }
         }
     }
     else if (memdescGetAddressSpace(pMemDesc) == ADDR_VIRTUAL)
     {
-        NV_ASSERT_OR_RETURN(0, NV_ERR_INVALID_STATE);
+        // If the memory is tiled, then it's being mapped through BAR1
+        if( DRF_VAL(OS32, _ATTR, _TILED, pMemory->Attr) )
+        {
+            // BAR1 mapping.  Unmap it.
+            if (pCpuMapping->pPrivate->bKernel)
+            {
+                osUnmapPciMemoryKernel64(pGpu, pCpuMapping->pLinearAddress);
+            }
+            else
+            {
+                osUnmapPciMemoryUser(pGpu->pOsGpuInfo,
+                                     pCpuMapping->pLinearAddress,
+                                     pCpuMapping->length,
+                                     pCpuMapping->pPrivate->pPriv);
+            }
+        }
+        else
+        {
+            NV_ASSERT_OR_RETURN(0, NV_ERR_INVALID_STATE);
+        }
     }
     else if (memdescGetAddressSpace(pMemDesc) == ADDR_REGMEM)
     {
@@ -878,7 +793,8 @@ serverMap_Prologue
 )
 {
     NV_STATUS           rmStatus;
-    RmClient           *pClient;
+    RsClient           *pRsClient;
+    RmClient           *pRmClient;
     RsResourceRef      *pMemoryRef;
     NvHandle            hClient = pMapParams->hClient;
     NvHandle            hParent = hClient;
@@ -892,15 +808,16 @@ serverMap_Prologue
         return NV_ERR_INVALID_FLAGS;
 
     // Populate Resource Server information
-    pClient = serverutilGetClientUnderLock(hClient);
-    NV_ASSERT_OR_ELSE(pClient != NULL, return NV_ERR_INVALID_CLIENT);
+    NV_ASSERT_OK_OR_RETURN(serverGetClientUnderLock(&g_resServ, hClient, &pRsClient));
 
     // Validate hClient
-    privLevel = rmclientGetCachedPrivilege(pClient);
+    pRmClient = dynamicCast(pRsClient, RmClient);
+    if (pRmClient == NULL)
+        return NV_ERR_OPERATING_SYSTEM;
+    privLevel = rmclientGetCachedPrivilege(pRmClient);
 
     // RS-TODO: Assert if this fails after all objects are converted
-    NV_ASSERT_OK_OR_RETURN(clientGetResourceRef(staticCast(pClient, RsClient),
-                pMapParams->hMemory, &pMemoryRef));
+    NV_ASSERT_OK_OR_RETURN(clientGetResourceRef(pRsClient, pMapParams->hMemory, &pMemoryRef));
 
     if (pMemoryRef->pParentRef != NULL)
         hParent = pMemoryRef->pParentRef->hResource;
@@ -920,9 +837,7 @@ serverMap_Prologue
         NV_ASSERT_OR_RETURN(hParent != hClient, NV_ERR_INVALID_OBJECT_PARENT);
 
         RsResourceRef *pContextRef;
-        rmStatus = clientGetResourceRef(staticCast(pClient, RsClient),
-                pMapParams->hDevice, &pContextRef);
-
+        rmStatus = clientGetResourceRef(pRsClient, pMapParams->hDevice, &pContextRef);
         if (rmStatus != NV_OK)
             return rmStatus;
 
@@ -980,7 +895,8 @@ serverUnmap_Prologue
 {
     OBJGPU *pGpu = NULL;
     NV_STATUS rmStatus;
-    RmClient *pClient;
+    RsClient *pRsClient;
+    RmClient *pRmClient;
     RsResourceRef *pMemoryRef;
     NvHandle hClient = pUnmapParams->hClient;
     NvHandle hParent = hClient;
@@ -993,15 +909,16 @@ serverUnmap_Prologue
     void *pProcessHandle = NULL;
 
     // Populate Resource Server information
-    pClient = serverutilGetClientUnderLock(hClient);
-    NV_ASSERT_OR_ELSE(pClient != NULL, return NV_ERR_INVALID_CLIENT);
+    NV_ASSERT_OK_OR_RETURN(serverGetClientUnderLock(&g_resServ, hClient, &pRsClient));
 
     // check if we have a user or kernel RM client
-    privLevel = rmclientGetCachedPrivilege(pClient);
+    pRmClient = dynamicCast(pRsClient, RmClient);
+    if (pRmClient == NULL)
+        return NV_ERR_OPERATING_SYSTEM;
+    privLevel = rmclientGetCachedPrivilege(pRmClient);
 
     // RS-TODO: Assert if this fails after all objects are converted
-    NV_ASSERT_OK_OR_RETURN(clientGetResourceRef(staticCast(pClient, RsClient),
-                hMemory, &pMemoryRef));
+    NV_ASSERT_OK_OR_RETURN(clientGetResourceRef(pRsClient, hMemory, &pMemoryRef));
 
     if (pMemoryRef->pParentRef != NULL)
         hParent = pMemoryRef->pParentRef->hResource;
@@ -1016,9 +933,7 @@ serverUnmap_Prologue
         NV_ASSERT_OR_RETURN(hParent != hClient, NV_ERR_INVALID_OBJECT_PARENT);
 
         RsResourceRef *pContextRef;
-        rmStatus = clientGetResourceRef(staticCast(pClient, RsClient),
-                pUnmapParams->hDevice, &pContextRef);
-
+        rmStatus = clientGetResourceRef(pRsClient, pUnmapParams->hDevice, &pContextRef);
         if (rmStatus != NV_OK)
             return rmStatus;
 
@@ -1059,23 +974,10 @@ serverUnmap_Prologue
     {
         rmStatus = osAttachToProcess(&pProcessHandle, ProcessId);
         if (rmStatus != NV_OK)
-        {
-            if (pUnmapParams->bTeardown)
-                pProcessHandle = NULL;
-            else
-                return rmStatus;
-        }
+            return rmStatus;
 
         pUnmapParams->pProcessHandle = pProcessHandle;
     }
-
-    // Don't do any filtering if this is a tear-down path
-    if (pUnmapParams->bTeardown)
-    {
-        pUnmapParams->fnFilter = NULL;
-        return NV_OK;
-    }
-
 
     pUnmapParams->fnFilter = bKernel
         ? serverutilMappingFilterKernel
@@ -1146,6 +1048,7 @@ rmapiMapToCpu
     return status;
 }
 
+
 /**
  * Call into Resource Server to register and execute a CPU mapping operation.
  *
@@ -1160,7 +1063,7 @@ rmapiMapToCpu
  *    6. Release any locks taken
  */
 NV_STATUS
-rmapiMapToCpuWithSecInfoV2
+rmapiMapToCpuWithSecInfo
 (
     RM_API            *pRmApi,
     NvHandle           hClient,
@@ -1169,7 +1072,7 @@ rmapiMapToCpuWithSecInfoV2
     NvU64              offset,
     NvU64              length,
     NvP64             *ppCpuVirtAddr,
-    NvU32             *flags,
+    NvU32              flags,
     API_SECURITY_INFO *pSecInfo
 )
 {
@@ -1183,32 +1086,16 @@ rmapiMapToCpuWithSecInfoV2
               hDevice, hMemory);
     NV_PRINTF(LEVEL_INFO,
               "Nv04MapMemory:  offset: %llx length: %llx flags:0x%x\n",
-              offset, length, *flags);
+              offset, length, flags);
 
     status = rmapiPrologue(pRmApi, &rmApiContext);
     if (status != NV_OK)
         return status;
 
-    NV_PRINTF(LEVEL_INFO, "MMU_PROFILER Nv04MapMemory 0x%x\n", *flags);
+    NV_PRINTF(LEVEL_INFO, "MMU_PROFILER Nv04MapMemory 0x%x\n", flags);
 
     portMemSet(&lockInfo, 0, sizeof(lockInfo));
-    status = rmapiInitLockInfo(pRmApi, hClient, NV01_NULL_OBJECT, &lockInfo);
-    if (status != NV_OK)
-    {
-        rmapiEpilogue(pRmApi, &rmApiContext);
-        return status;
-    }
-
-    //
-    // In the RTD3 case, the API lock isn't taken since it can be initiated
-    // from another thread that holds the API lock and because we now hold
-    // the GPU lock.
-    //
-    if (rmapiInRtd3PmPath())
-    {
-        lockInfo.flags |= RM_LOCK_FLAGS_NO_API_LOCK;
-        lockInfo.state &= ~RM_LOCK_STATES_API_LOCK_ACQUIRED;
-    }
+    rmapiInitLockInfo(pRmApi, hClient, &lockInfo);
 
     LOCK_METER_DATA(MAPMEM, flags, 0, 0);
 
@@ -1222,15 +1109,13 @@ rmapiMapToCpuWithSecInfoV2
     rmMapParams.offset = offset;
     rmMapParams.length = length;
     rmMapParams.ppCpuVirtAddr = ppCpuVirtAddr;
-    rmMapParams.flags = *flags;
+    rmMapParams.flags = flags;
     rmMapParams.pLockInfo = &lockInfo;
     rmMapParams.pSecInfo = pSecInfo;
 
     status = serverMap(&g_resServ, rmMapParams.hClient, rmMapParams.hMemory, &rmMapParams);
 
     rmapiEpilogue(pRmApi, &rmApiContext);
-
-    *flags = rmMapParams.flags;
 
     if (status == NV_OK)
     {
@@ -1247,25 +1132,6 @@ rmapiMapToCpuWithSecInfoV2
     }
 
     return status;
-}
-
-NV_STATUS
-rmapiMapToCpuWithSecInfo
-(
-    RM_API            *pRmApi,
-    NvHandle           hClient,
-    NvHandle           hDevice,
-    NvHandle           hMemory,
-    NvU64              offset,
-    NvU64              length,
-    NvP64             *ppCpuVirtAddr,
-    NvU32              flags,
-    API_SECURITY_INFO *pSecInfo
-)
-{
-    return rmapiMapToCpuWithSecInfoV2(pRmApi, hClient,
-        hDevice, hMemory, offset, length, ppCpuVirtAddr,
-        &flags, pSecInfo);
 }
 
 NV_STATUS
@@ -1287,32 +1153,7 @@ rmapiMapToCpuWithSecInfoTls
 
     threadStateInit(&threadState, THREAD_STATE_FLAGS_NONE);
 
-    status = rmapiMapToCpuWithSecInfoV2(pRmApi, hClient, hDevice, hMemory, offset, length, ppCpuVirtAddr, &flags, pSecInfo);
-
-    threadStateFree(&threadState, THREAD_STATE_FLAGS_NONE);
-
-    return status;
-}
-NV_STATUS
-rmapiMapToCpuWithSecInfoTlsV2
-(
-    RM_API            *pRmApi,
-    NvHandle           hClient,
-    NvHandle           hDevice,
-    NvHandle           hMemory,
-    NvU64              offset,
-    NvU64              length,
-    NvP64             *ppCpuVirtAddr,
-    NvU32             *flags,
-    API_SECURITY_INFO *pSecInfo
-)
-{
-    THREAD_STATE_NODE threadState;
-    NV_STATUS         status;
-
-    threadStateInit(&threadState, THREAD_STATE_FLAGS_NONE);
-
-    status = rmapiMapToCpuWithSecInfoV2(pRmApi, hClient, hDevice, hMemory, offset, length, ppCpuVirtAddr, flags, pSecInfo);
+    status = rmapiMapToCpuWithSecInfo(pRmApi, hClient, hDevice, hMemory, offset, length, ppCpuVirtAddr, flags, pSecInfo);
 
     threadStateFree(&threadState, THREAD_STATE_FLAGS_NONE);
 
@@ -1378,12 +1219,7 @@ rmapiUnmapFromCpuWithSecInfo
         return status;
 
     portMemSet(&lockInfo, 0, sizeof(lockInfo));
-    status = rmapiInitLockInfo(pRmApi, hClient, NV01_NULL_OBJECT, &lockInfo);
-    if (status != NV_OK)
-    {
-        rmapiEpilogue(pRmApi, &rmApiContext);
-        return NV_OK;
-    }
+    rmapiInitLockInfo(pRmApi, hClient, &lockInfo);
 
     LOCK_METER_DATA(UNMAPMEM, flags, 0, 0);
 

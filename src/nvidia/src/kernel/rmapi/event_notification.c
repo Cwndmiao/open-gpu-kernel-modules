@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1993-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -29,7 +29,6 @@
 ****************************************************************************/
 
 #include "core/core.h"
-#include "gpu_mgr/gpu_mgr.h"
 #include "gpu/gpu.h"
 #include "gpu/mem_mgr/mem_desc.h"
 #include "class/cl0000.h"
@@ -38,57 +37,8 @@
 #include "gpu/subdevice/subdevice.h"
 #include "rmapi/rs_utils.h"
 #include "mem_mgr/mem.h"
-#include "kernel/gpu/gpu_engine_type.h"
-#include "platform/sli/sli.h"
-#include "gpu/timer/objtmr.h"
 
 #include "kernel/gpu/mig_mgr/kernel_mig_manager.h"
-
-#include "virtualization/hypervisor/hypervisor.h"
-
-typedef struct
-{
-    EVENTNOTIFICATION *pEventNotify;
-    Memory *pMemory;
-    ListNode eventNotificationListNode;
-
-    // Protected by event list spinlock
-    ListNode pendingEventNotifyListNode;
-    NvBool bInPendingNotifyList;
-
-    //
-    // Incremented under event list spinlock when a notification is pending for
-    // this event, decremented for each notification sent (not under spinlock).
-    //
-    volatile NvS32 pendingNotifyCount;
-} ENGINE_EVENT_NOTIFICATION;
-
-//
-// These lists are intrusive to avoid memory allocation during insertion while
-// in a non-preemptible context (holding a spinlock/in an ISR).
-//
-MAKE_INTRUSIVE_LIST(EngineEventNotificationList, ENGINE_EVENT_NOTIFICATION,
-                    eventNotificationListNode);
-MAKE_INTRUSIVE_LIST(PendingEventNotifyList, ENGINE_EVENT_NOTIFICATION,
-                    pendingEventNotifyListNode);
-
-// Linked list of per engine non-stall event notifications
-struct GpuEngineEventNotificationList
-{
-    PORT_SPINLOCK *pSpinlock;
-
-    // List insertion and removal happens under pSpinlock
-    EngineEventNotificationList eventNotificationList;
-
-    // Filled while pSpinlock is held, drained outside of the lock in ISR
-    PendingEventNotifyList pendingEventNotifyList;
-
-    //
-    // Accessed under pSpinlock, incremented when a thread starts the notify
-    // Decremented when the thread finishes notification
-    //
-    volatile NvU32 activeNotifyThreads;
-};
 
 static NV_STATUS _insertEventNotification
 (
@@ -117,535 +67,275 @@ static NV_STATUS _removeEventNotification
 //
 //---------------------------------------------------------------------------
 
-NV_STATUS gpuEngineEventNotificationListCreate
+static NV_STATUS engineNonStallEventOp
 (
     OBJGPU *pGpu,
-    GpuEngineEventNotificationList **ppEventNotificationList
+    NvU32 engineId,
+    PEVENTNOTIFICATION pEventNotify,
+    Memory *pMemory,
+    NvBool bInsert
 )
 {
-    NV_STATUS status = NV_OK;
+    ENGINE_EVENT_NODE *pTempNode;
+    NvBool bFound = NV_FALSE;
 
-    PORT_MEM_ALLOCATOR *pAllocator = portMemAllocatorGetGlobalNonPaged();
-    GpuEngineEventNotificationList *pEventNotificationList =
-        portMemAllocNonPaged(sizeof(*pEventNotificationList));
-    NV_ASSERT_OR_RETURN(pEventNotificationList != NULL, NV_ERR_NO_MEMORY);
-
-    portMemSet(pEventNotificationList, 0, sizeof(*pEventNotificationList));
-
-    pEventNotificationList->pSpinlock = portSyncSpinlockCreate(pAllocator);
-    NV_ASSERT_OR_ELSE(pEventNotificationList->pSpinlock != NULL,
+    if (bInsert)
     {
-        status = NV_ERR_INSUFFICIENT_RESOURCES;
-        goto exit;
-    });
+        pTempNode = portMemAllocNonPaged(sizeof(ENGINE_EVENT_NODE));
 
-    listInitIntrusive(&pEventNotificationList->eventNotificationList);
-    listInitIntrusive(&pEventNotificationList->pendingEventNotifyList);
+        if (pTempNode == NULL)
+            return NV_ERR_NO_MEMORY;
 
-    pEventNotificationList->activeNotifyThreads = 0;
+        // Acquire engine list spinlock before adding to engine event list
+        portSyncSpinlockAcquire(pGpu->engineNonstallIntr[engineId].pSpinlock);
+        pTempNode->pNext = pGpu->engineNonstallIntr[engineId].pEventNode;
+        pTempNode->pEventNotify = pEventNotify;
+        pTempNode->pMemory = pMemory;
 
-    *ppEventNotificationList = pEventNotificationList;
+        pGpu->engineNonstallIntr[engineId].pEventNode = pTempNode;
 
-exit:
-    if (status != NV_OK)
-        gpuEngineEventNotificationListDestroy(pGpu, pEventNotificationList);
-    return status;
-}
-
-void gpuEngineEventNotificationListDestroy
-(
-    OBJGPU *pGpu,
-    GpuEngineEventNotificationList *pEventNotificationList
-)
-{
-    if (pEventNotificationList == NULL)
-        return;
-
-    NV_ASSERT(pEventNotificationList->activeNotifyThreads == 0);
-
-    NV_ASSERT(listCount(&pEventNotificationList->pendingEventNotifyList) == 0);
-    listDestroy(&pEventNotificationList->pendingEventNotifyList);
-
-    NV_ASSERT(listCount(&pEventNotificationList->eventNotificationList) == 0);
-    listDestroy(&pEventNotificationList->eventNotificationList);
-
-    if (pEventNotificationList->pSpinlock != NULL)
-        portSyncSpinlockDestroy(pEventNotificationList->pSpinlock);
-
-    portMemFree(pEventNotificationList);
-}
-
-static void _gpuEngineEventNotificationListLockPreemptible
-(
-    GpuEngineEventNotificationList *pEventNotificationList
-)
-{
-    do
-    {
-        portSyncSpinlockAcquire(pEventNotificationList->pSpinlock);
-
-        //
-        // Only return with the lock held once there are no pending
-        // notifications to process. No more pending notifications can be queued
-        // while the spinlock is held, and we drop the lock to re-enable
-        // preemption, to guarantee that _gpuEngineEventNotificationListNotify()
-        // can make forward progress to drain the pending notifications list.
-        //
-        if (pEventNotificationList->activeNotifyThreads == 0)
-            return;
-
-        portSyncSpinlockRelease(pEventNotificationList->pSpinlock);
-
-        //
-        // Spin waiting for the pending notifications to drain.
-        // This can only be done in a preemptible context (i.e., add
-        // or remove notification in a thread context).
-        //
-        while (pEventNotificationList->activeNotifyThreads > 0)
-            osSpinLoop();
-    } while (NV_TRUE);
-}
-
-static inline void _gpuEngineEventNotificationListUnlockPreemptible
-(
-    GpuEngineEventNotificationList *pEventNotificationList
-)
-{
-    portSyncSpinlockRelease(pEventNotificationList->pSpinlock);
-}
-
-static NV_STATUS _gpuEngineEventNotificationInsert
-(
-    GpuEngineEventNotificationList *pEventNotificationList,
-    EVENTNOTIFICATION *pEventNotify,
-    Memory *pMemory
-)
-{
-    NV_CHECK_OR_RETURN(LEVEL_ERROR, pEventNotify != NULL,
-                       NV_ERR_INVALID_ARGUMENT);
-
-    // Allocate the new node outside of the spinlock
-    ENGINE_EVENT_NOTIFICATION *pEngineEventNotification =
-        portMemAllocNonPaged(sizeof(*pEngineEventNotification));
-
-    NV_CHECK_OR_RETURN(LEVEL_ERROR, pEngineEventNotification != NULL,
-                       NV_ERR_NO_MEMORY);
-
-    portMemSet(pEngineEventNotification, 0, sizeof(*pEngineEventNotification));
-
-    pEngineEventNotification->pEventNotify = pEventNotify;
-    pEngineEventNotification->pMemory = pMemory;
-
-    // Take the lock to add the node to the list
-    _gpuEngineEventNotificationListLockPreemptible(pEventNotificationList);
-    {
-        listPrependExisting(&pEventNotificationList->eventNotificationList,
-                            pEngineEventNotification);
+        // Release engine list spinlock
+        portSyncSpinlockRelease(pGpu->engineNonstallIntr[engineId].pSpinlock);
     }
-    _gpuEngineEventNotificationListUnlockPreemptible(pEventNotificationList);
+    else
+    {
+        ENGINE_EVENT_NODE *pEngNode, *pPrevNode = NULL;
+
+        // Acquire engine list spinlock before traversing engine event list
+        portSyncSpinlockAcquire(pGpu->engineNonstallIntr[engineId].pSpinlock);
+
+        pEngNode = pGpu->engineNonstallIntr[engineId].pEventNode;
+        while (pEngNode)
+        {
+            if (pEngNode->pEventNotify == pEventNotify)
+            {
+                if (pPrevNode == NULL)
+                    pGpu->engineNonstallIntr[engineId].pEventNode = pEngNode->pNext;
+                else
+                    pPrevNode->pNext = pEngNode->pNext;
+
+                pTempNode = pEngNode;
+                bFound = NV_TRUE;
+                break;
+            }
+            else
+            {
+                pPrevNode = pEngNode;
+            }
+            pEngNode = pEngNode->pNext;
+        }
+
+        // Release engine list spinlock
+        portSyncSpinlockRelease(pGpu->engineNonstallIntr[engineId].pSpinlock);
+
+        if (bFound)
+        {
+            portMemFree(pTempNode);
+        }
+        else
+        {
+            NV_ASSERT_FAILED("failed to find non-stall event!");
+            return NV_ERR_INVALID_STATE;
+        }
+    }
 
     return NV_OK;
 }
 
-static void _gpuEngineEventNotificationRemove
-(
-    GpuEngineEventNotificationList *pEventNotificationList,
-    EVENTNOTIFICATION *pEventNotify
-)
+static NV_STATUS _engineNonStallIntrNotifyImpl(OBJGPU *pGpu, NvU32 engineId, NvHandle hEvent)
 {
-    ENGINE_EVENT_NOTIFICATION *pEngineEventNotification = NULL;
-
-    _gpuEngineEventNotificationListLockPreemptible(pEventNotificationList);
-    {
-        EngineEventNotificationListIter it =
-            listIterAll(&pEventNotificationList->eventNotificationList);
-        while (listIterNext(&it))
-        {
-            if (it.pValue->pEventNotify == pEventNotify)
-            {
-                pEngineEventNotification = it.pValue;
-                listRemove(&pEventNotificationList->eventNotificationList,
-                           pEngineEventNotification);
-                break;
-            }
-        }
-    }
-    _gpuEngineEventNotificationListUnlockPreemptible(pEventNotificationList);
-
-    NV_ASSERT(pEngineEventNotification != NULL);
-    portMemFree(pEngineEventNotification);
-}
-
-static NV_STATUS _gpuEngineEventNotificationListNotify
-(
-    OBJGPU *pGpu,
-    GpuEngineEventNotificationList *pEventNotificationList,
-    NvHandle hEvent
-)
-{
-    NV_STATUS status = NV_OK;
-    PendingEventNotifyList *pPending =
-        &pEventNotificationList->pendingEventNotifyList;
-    ENGINE_EVENT_NOTIFICATION *pIter, *pTail;
+    ENGINE_EVENT_NODE *pTempHead;
+    Memory *pSemMemory;
+    NvU32 semValue;
+    NvU32 *pTempKernelMapping = NULL;
+    NV_STATUS rmStatus = NV_OK;
 
     //
     // Acquire engine list spinlock before traversing the list. Note that this
     // is called without holding locks from ISR for Linux. This spinlock is used
-    // to protect the per GPU per engine event node list.
+    // to protect per GPU per engine event node list.
     //
-    portSyncSpinlockAcquire(pEventNotificationList->pSpinlock);
-    {
-        pEventNotificationList->activeNotifyThreads++;
+    portSyncSpinlockAcquire(pGpu->engineNonstallIntr[engineId].pSpinlock);
 
-        EngineEventNotificationListIter it =
-            listIterAll(&pEventNotificationList->eventNotificationList);
-        while (listIterNext(&it))
+    pTempHead = pGpu->engineNonstallIntr[engineId].pEventNode;
+    while (pTempHead)
+    {
+        if (!pTempHead->pEventNotify)
         {
-            ENGINE_EVENT_NOTIFICATION *pEngineEventNotification = it.pValue;
-            if (hEvent &&
-                pEngineEventNotification->pEventNotify->hEvent != hEvent)
-                continue;
-
-            Memory *pSemMemory = pEngineEventNotification->pMemory;
-            if (pSemMemory &&
-                pSemMemory->vgpuNsIntr.isSemaMemValidationEnabled &&
-                pSemMemory->pMemDesc && pSemMemory->pMemDesc->Allocated)
-            {
-                NvU32 *pTempKernelMapping =
-                    (NvU32 *)NvP64_VALUE(
-                        memdescGetKernelMapping(pSemMemory->pMemDesc));
-                if (pTempKernelMapping == NULL)
-                {
-                    NV_PRINTF(LEVEL_WARNING,
-                        "Per-vGPU semaphore location mapping is NULL."
-                        " Skipping the current node.\n");
-                    continue;
-                }
-
-                NvU32 semValue = MEM_RD32(pTempKernelMapping +
-                                          (pSemMemory->vgpuNsIntr.nsSemOffset /
-                                           sizeof(NvU32)));
-
-                if (pSemMemory->vgpuNsIntr.nsSemValue == semValue)
-                    continue;
-
-                pSemMemory->vgpuNsIntr.nsSemValue = semValue;
-
-                {
-                    OBJSYS *pSys = SYS_GET_INSTANCE();
-                    OBJHYPERVISOR *pHypervisor = SYS_GET_HYPERVISOR(pSys);
-
-                    if (pHypervisor != NULL)
-                    {
-                        NV_STATUS intrStatus =
-                            hypervisorInjectInterrupt(pHypervisor,
-                                                      &pSemMemory->vgpuNsIntr);
-
-                        //
-                        // If we have successfully injected MSI into guest,
-                        // then we can jump to the next semaphore location;
-                        // otherwise, we need to call osNotifyEvent below to
-                        // wake up the plugin.
-                        //
-                        if (intrStatus == NV_OK)
-                            continue;
-                    }
-                }
-            }
-
-            portAtomicIncrementS32(&pEngineEventNotification->pendingNotifyCount);
-
-            //
-            // Queue up this event notification to be completed outside of the
-            // critical section, as the osNotifyEvent implementation may need
-            // to be preemptible.
-            //
-            if (!pEngineEventNotification->bInPendingNotifyList)
-            {
-                pEngineEventNotification->bInPendingNotifyList = NV_TRUE;
-                listAppendExisting(pPending, pEngineEventNotification);
-            }
-        }
-
-        //
-        // We can't use the list iterator, because listIterNext() will assert
-        // if a node is appended to the list after the iterator has been
-        // initialized. For the loop below, it's safe to iterate over the list,
-        // (up to the point of the last node appended above), since nodes can't
-        // be removed from the list while the list's `activeNotifyThreads` is
-        // non-zero.
-        //
-        pIter = listHead(pPending);
-        pTail = listTail(pPending);
-    }
-    portSyncSpinlockRelease(pEventNotificationList->pSpinlock);
-
-    //
-    // Iterate through the pending notifications and call the OS to send them.
-    // pIter and pTail are initialized to the list head and tail respectively,
-    // under the spinlock above.
-    //
-    while (pIter != NULL)
-    {
-        //
-        // Don't miss firing events - latch the pending count.
-        // This can race with the `portAtomicIncrementS32()` above.
-        //  - If the increment wins, then the next thread to call the
-        //    portAtomicCompareAndSwap32 with the incremented value will send
-        //    all of the notifications. Example: thread A is preempted by ISR
-        //    here, ISR will run through and send all notifications. Thread A
-        //    will get pendingNotifyCount = 0 when it resumes and skip this
-        //    element.
-        //  - If this loop wins, thread A will proceed to send N notifications,
-        //    and thread B will increment the pendingNotifyCount from 0 to 1.
-        //    Thread B will service its own notification when it reaches this
-        //    loop.
-        //
-        NvS32 pendingNotifyCount;
-        do
-            pendingNotifyCount = pIter->pendingNotifyCount;
-        while ((pendingNotifyCount > 0) &&
-                !portAtomicCompareAndSwapS32(&pIter->pendingNotifyCount, 0, pendingNotifyCount));
-
-        while (pendingNotifyCount--)
-            NV_ASSERT_OK_OR_CAPTURE_FIRST_ERROR(status,
-                osNotifyEvent(pGpu, pIter->pEventNotify, 0, 0, NV_OK));
-
-        if (pIter == pTail)
+            rmStatus = NV_ERR_INVALID_STATE;
             break;
-
-        pIter = listNext(pPending, pIter);
-    }
-
-    portSyncSpinlockAcquire(pEventNotificationList->pSpinlock);
-    {
-        //
-        // The last active notify thread drains the pending notify list.
-        // Otherwise, we could be removing list nodes while it's being
-        // iterated over by another thread above, outside of the protection of
-        // the spinlock.
-        //
-        if (--pEventNotificationList->activeNotifyThreads == 0)
-        {
-            ENGINE_EVENT_NOTIFICATION *pNext;
-            for (pIter = listHead(pPending); pIter != NULL; pIter = pNext)
-            {
-                pNext = listNext(pPending, pIter);
-
-                //
-                // There should not be any unsent notifications at this point,
-                // since we are the last active thread.
-                //
-                NV_ASSERT(pIter->pendingNotifyCount == 0);
-
-                pIter->bInPendingNotifyList = NV_FALSE;
-                listRemove(pPending, pIter);
-            }
         }
+
+        if (hEvent && pTempHead->pEventNotify->hEvent != hEvent)
+            goto nextEvent;
+
+        pSemMemory = pTempHead->pMemory;
+
+        if (pSemMemory && pSemMemory->vgpuNsIntr.isSemaMemValidationEnabled &&
+            pSemMemory->pMemDesc && pSemMemory->pMemDesc->Allocated)
+        {
+            pTempKernelMapping = (NvU32 *)NvP64_VALUE(memdescGetKernelMapping(pSemMemory->pMemDesc));
+            if (pTempKernelMapping == NULL)
+            {
+                NV_PRINTF(LEVEL_WARNING, "Per-vGPU semaphore location mapping is NULL. Skipping the current node.\n");
+                pTempHead = pTempHead->pNext;
+                continue;
+            }
+            semValue = MEM_RD32(pTempKernelMapping + (pSemMemory->vgpuNsIntr.nsSemOffset / sizeof(NvU32)));
+
+            if (pSemMemory->vgpuNsIntr.nsSemValue == semValue)
+            {
+                pTempHead = pTempHead->pNext;
+                continue;
+            }
+
+            pSemMemory->vgpuNsIntr.nsSemValue = semValue;
+
+        }
+
+        if (osNotifyEvent(pGpu, pTempHead->pEventNotify, 0, 0, NV_OK) != NV_OK)
+        {
+            NV_PRINTF(LEVEL_ERROR, "failed to notify event for engine 0x%x\n",
+                      engineId);
+            NV_ASSERT(0);
+            rmStatus = NV_ERR_INVALID_STATE;
+            break;
+        }
+
+    nextEvent:
+        pTempHead = pTempHead->pNext;
     }
-    portSyncSpinlockRelease(pEventNotificationList->pSpinlock);
 
-    return status;
+    portSyncSpinlockRelease(pGpu->engineNonstallIntr[engineId].pSpinlock);
+    return rmStatus;
 }
 
 NV_STATUS
-engineNonStallIntrNotify(OBJGPU *pGpu, RM_ENGINE_TYPE rmEngineId)
+engineNonStallIntrNotify(OBJGPU *pGpu, NvU32 engineId)
 {
-    NV_ASSERT_OR_RETURN(rmEngineId < NV_ARRAY_ELEMENTS(pGpu->engineNonstallIntrEventNotifications),
-                        NV_ERR_INVALID_ARGUMENT);
-    return _gpuEngineEventNotificationListNotify(pGpu,
-        pGpu->engineNonstallIntrEventNotifications[rmEngineId], 0);
+    return _engineNonStallIntrNotifyImpl(pGpu, engineId, 0);
 }
 
 NV_STATUS
-engineNonStallIntrNotifyEvent(OBJGPU *pGpu, RM_ENGINE_TYPE rmEngineId, NvHandle hEvent)
+engineNonStallIntrNotifyEvent(OBJGPU *pGpu, NvU32 engineId, NvHandle hEvent)
 {
-    NV_ASSERT_OR_RETURN(rmEngineId < NV_ARRAY_ELEMENTS(pGpu->engineNonstallIntrEventNotifications),
-                        NV_ERR_INVALID_ARGUMENT);
-    return _gpuEngineEventNotificationListNotify(pGpu,
-        pGpu->engineNonstallIntrEventNotifications[rmEngineId], hEvent);
+    return _engineNonStallIntrNotifyImpl(pGpu, engineId, hEvent);
 }
 
 static NV_STATUS
 eventGetEngineTypeFromSubNotifyIndex
 (
     NvU32 notifyIndex,
-    RM_ENGINE_TYPE *pRmEngineId
+    NvU32 *engineIdx
 )
 {
-    NV_ASSERT_OR_RETURN(pRmEngineId, NV_ERR_INVALID_ARGUMENT);
+    NV_ASSERT_OR_RETURN(engineIdx, NV_ERR_INVALID_ARGUMENT);
 
-    *pRmEngineId = RM_ENGINE_TYPE_NULL;
+    *engineIdx = NV2080_ENGINE_TYPE_NULL;
 
     switch (notifyIndex)
     {
         case NV2080_NOTIFIERS_FIFO_EVENT_MTHD:
-            *pRmEngineId = RM_ENGINE_TYPE_HOST;
+            *engineIdx = NV2080_ENGINE_TYPE_HOST;
             break;
         case NV2080_NOTIFIERS_CE0:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY0;
+            *engineIdx = NV2080_ENGINE_TYPE_COPY0;
             break;
         case NV2080_NOTIFIERS_CE1:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY1;
+            *engineIdx = NV2080_ENGINE_TYPE_COPY1;
             break;
         case NV2080_NOTIFIERS_CE2:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY2;
+            *engineIdx = NV2080_ENGINE_TYPE_COPY2;
             break;
         case NV2080_NOTIFIERS_CE3:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY3;
+            *engineIdx = NV2080_ENGINE_TYPE_COPY3;
             break;
         case NV2080_NOTIFIERS_CE4:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY4;
+            *engineIdx = NV2080_ENGINE_TYPE_COPY4;
             break;
         case NV2080_NOTIFIERS_CE5:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY5;
+            *engineIdx = NV2080_ENGINE_TYPE_COPY5;
             break;
         case NV2080_NOTIFIERS_CE6:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY6;
+            *engineIdx = NV2080_ENGINE_TYPE_COPY6;
             break;
         case NV2080_NOTIFIERS_CE7:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY7;
+            *engineIdx = NV2080_ENGINE_TYPE_COPY7;
             break;
         case NV2080_NOTIFIERS_CE8:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY8;
+            *engineIdx = NV2080_ENGINE_TYPE_COPY8;
             break;
         case NV2080_NOTIFIERS_CE9:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY9;
-            break;
-        case NV2080_NOTIFIERS_CE10:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY10;
-            break;
-        case NV2080_NOTIFIERS_CE11:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY11;
-            break;
-        case NV2080_NOTIFIERS_CE12:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY12;
-            break;
-        case NV2080_NOTIFIERS_CE13:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY13;
-            break;
-        case NV2080_NOTIFIERS_CE14:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY14;
-            break;
-        case NV2080_NOTIFIERS_CE15:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY15;
-            break;
-        case NV2080_NOTIFIERS_CE16:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY16;
-            break;
-        case NV2080_NOTIFIERS_CE17:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY17;
-            break;
-        case NV2080_NOTIFIERS_CE18:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY18;
-            break;
-        case NV2080_NOTIFIERS_CE19:
-            *pRmEngineId = RM_ENGINE_TYPE_COPY19;
+            *engineIdx = NV2080_ENGINE_TYPE_COPY9;
             break;
         case NV2080_NOTIFIERS_GR0:
-            *pRmEngineId = RM_ENGINE_TYPE_GR0;
+            *engineIdx = NV2080_ENGINE_TYPE_GR0;
             break;
         case NV2080_NOTIFIERS_GR1:
-            *pRmEngineId = RM_ENGINE_TYPE_GR1;
+            *engineIdx = NV2080_ENGINE_TYPE_GR1;
             break;
         case NV2080_NOTIFIERS_GR2:
-            *pRmEngineId = RM_ENGINE_TYPE_GR2;
+            *engineIdx = NV2080_ENGINE_TYPE_GR2;
             break;
         case NV2080_NOTIFIERS_GR3:
-            *pRmEngineId = RM_ENGINE_TYPE_GR3;
+            *engineIdx = NV2080_ENGINE_TYPE_GR3;
             break;
         case NV2080_NOTIFIERS_GR4:
-            *pRmEngineId = RM_ENGINE_TYPE_GR4;
+            *engineIdx = NV2080_ENGINE_TYPE_GR4;
             break;
         case NV2080_NOTIFIERS_GR5:
-            *pRmEngineId = RM_ENGINE_TYPE_GR5;
+            *engineIdx = NV2080_ENGINE_TYPE_GR5;
             break;
         case NV2080_NOTIFIERS_GR6:
-            *pRmEngineId = RM_ENGINE_TYPE_GR6;
+            *engineIdx = NV2080_ENGINE_TYPE_GR6;
             break;
         case NV2080_NOTIFIERS_GR7:
-            *pRmEngineId = RM_ENGINE_TYPE_GR7;
+            *engineIdx = NV2080_ENGINE_TYPE_GR7;
             break;
         case NV2080_NOTIFIERS_PPP:
-            *pRmEngineId = RM_ENGINE_TYPE_PPP;
+            *engineIdx = NV2080_ENGINE_TYPE_PPP;
             break;
         case NV2080_NOTIFIERS_NVDEC0:
-            *pRmEngineId = RM_ENGINE_TYPE_NVDEC0;
+            *engineIdx = NV2080_ENGINE_TYPE_NVDEC0;
             break;
         case NV2080_NOTIFIERS_NVDEC1:
-            *pRmEngineId = RM_ENGINE_TYPE_NVDEC1;
+            *engineIdx = NV2080_ENGINE_TYPE_NVDEC1;
             break;
         case NV2080_NOTIFIERS_NVDEC2:
-            *pRmEngineId = RM_ENGINE_TYPE_NVDEC2;
+            *engineIdx = NV2080_ENGINE_TYPE_NVDEC2;
             break;
         case NV2080_NOTIFIERS_NVDEC3:
-            *pRmEngineId = RM_ENGINE_TYPE_NVDEC3;
+            *engineIdx = NV2080_ENGINE_TYPE_NVDEC3;
             break;
         case NV2080_NOTIFIERS_NVDEC4:
-            *pRmEngineId = RM_ENGINE_TYPE_NVDEC4;
-            break;
-        case NV2080_NOTIFIERS_NVDEC5:
-            *pRmEngineId = RM_ENGINE_TYPE_NVDEC5;
-            break;
-        case NV2080_NOTIFIERS_NVDEC6:
-            *pRmEngineId = RM_ENGINE_TYPE_NVDEC6;
-            break;
-        case NV2080_NOTIFIERS_NVDEC7:
-            *pRmEngineId = RM_ENGINE_TYPE_NVDEC7;
+            *engineIdx = NV2080_ENGINE_TYPE_NVDEC4;
             break;
         case NV2080_NOTIFIERS_PDEC:
-            *pRmEngineId = RM_ENGINE_TYPE_VP;
+            *engineIdx = NV2080_ENGINE_TYPE_VP;
             break;
         case NV2080_NOTIFIERS_MSENC:
             NV_ASSERT(NV2080_NOTIFIERS_MSENC   == NV2080_NOTIFIERS_NVENC0);
-            NV_ASSERT(RM_ENGINE_TYPE_MSENC == RM_ENGINE_TYPE_NVENC0);
-            *pRmEngineId = RM_ENGINE_TYPE_MSENC;
+            NV_ASSERT(NV2080_ENGINE_TYPE_MSENC == NV2080_ENGINE_TYPE_NVENC0);
+            *engineIdx = NV2080_ENGINE_TYPE_MSENC;
             break;
         case NV2080_NOTIFIERS_NVENC1:
-            *pRmEngineId = RM_ENGINE_TYPE_NVENC1;
+            *engineIdx = NV2080_ENGINE_TYPE_NVENC1;
             break;
         case NV2080_NOTIFIERS_NVENC2:
-            *pRmEngineId = RM_ENGINE_TYPE_NVENC2;
-            break;
-        case NV2080_NOTIFIERS_NVENC3:
-            *pRmEngineId = RM_ENGINE_TYPE_NVENC3;
+            *engineIdx = NV2080_ENGINE_TYPE_NVENC2;
             break;
         case NV2080_NOTIFIERS_SEC2:
-            *pRmEngineId = RM_ENGINE_TYPE_SEC2;
+            *engineIdx = NV2080_ENGINE_TYPE_SEC2;
             break;
         case NV2080_NOTIFIERS_NVJPEG0:
-            *pRmEngineId = RM_ENGINE_TYPE_NVJPEG0;
+            *engineIdx = NV2080_ENGINE_TYPE_NVJPEG0;
             break;
-        case NV2080_NOTIFIERS_NVJPEG1:
-            *pRmEngineId = RM_ENGINE_TYPE_NVJPEG1;
-            break;
-        case NV2080_NOTIFIERS_NVJPEG2:
-            *pRmEngineId = RM_ENGINE_TYPE_NVJPEG2;
-            break;
-        case NV2080_NOTIFIERS_NVJPEG3:
-            *pRmEngineId = RM_ENGINE_TYPE_NVJPEG3;
-            break;
-        case NV2080_NOTIFIERS_NVJPEG4:
-            *pRmEngineId = RM_ENGINE_TYPE_NVJPEG4;
-            break;
-        case NV2080_NOTIFIERS_NVJPEG5:
-            *pRmEngineId = RM_ENGINE_TYPE_NVJPEG5;
-            break;
-        case NV2080_NOTIFIERS_NVJPEG6:
-            *pRmEngineId = RM_ENGINE_TYPE_NVJPEG6;
-            break;
-        case NV2080_NOTIFIERS_NVJPEG7:
-            *pRmEngineId = RM_ENGINE_TYPE_NVJPEG7;
-            break;
-        case NV2080_NOTIFIERS_OFA0:
-            *pRmEngineId = RM_ENGINE_TYPE_OFA0;
-            break;
-        case NV2080_NOTIFIERS_OFA1:
-            *pRmEngineId = RM_ENGINE_TYPE_OFA1;
+        case NV2080_NOTIFIERS_OFA:
+            *engineIdx = NV2080_ENGINE_TYPE_OFA;
             break;
         default:
             NV_PRINTF(LEVEL_WARNING,
-                      "notifier 0x%x doesn't use the fast non-stall interrupt path!\n",
+                      "engine 0x%x doesn't use the fast non-stall interrupt path!\n",
                       notifyIndex);
             NV_ASSERT(0);
             return NV_ERR_NOT_SUPPORTED;
@@ -657,7 +347,7 @@ eventGetEngineTypeFromSubNotifyIndex
 NV_STATUS registerEventNotification
 (
     PEVENTNOTIFICATION *ppEventNotification,
-    RsClient           *pEventClient,
+    NvHandle            hEventClient,
     NvHandle            hNotifier,
     NvHandle            hEvent,
     NvU32               NotifyIndex,
@@ -666,13 +356,13 @@ NV_STATUS registerEventNotification
     NvBool              bUserOsEventHandle
 )
 {
-    NvHandle hEventClient = pEventClient->hClient;
     Subdevice *pSubDevice;
     PEVENTNOTIFICATION pTargetEvent = NULL;
     NV_STATUS rmStatus = NV_OK, rmTmpStatus = NV_OK;
     OBJGPU *pGpu;
     NvBool bNonStallIntrEvent = NV_FALSE;
-    RM_ENGINE_TYPE rmEngineId;
+    NvU32 engineId;
+    NvHandle hDevice;
     RsResourceRef *pResourceRef;
     Memory *pSemMemory = NULL;
 
@@ -690,7 +380,7 @@ NV_STATUS registerEventNotification
         // For non-stall interrupt, the event parent type is NV20_SUBDEVICE, so we can locate
         // the correct OBJGPU and attach to its per-engine non-stall event list.
         //
-        if ((clientGetResourceRef(pEventClient, hNotifier, &pResourceRef) != NV_OK) ||
+        if ((serverutilGetResourceRef(hEventClient, hNotifier, &pResourceRef) != NV_OK) ||
             (!dynamicCast(pResourceRef->pResource, Subdevice)))
         {
             rmStatus = NV_ERR_INVALID_ARGUMENT;
@@ -698,13 +388,16 @@ NV_STATUS registerEventNotification
         }
 
         pSubDevice = dynamicCast(pResourceRef->pResource, Subdevice);
+        hDevice = RES_GET_PARENT_HANDLE(pSubDevice);
 
-        pGpu = GPU_RES_GET_GPU(pSubDevice);
-
-        GPU_RES_SET_THREAD_BC_STATE(pSubDevice);
+        if (CliSetSubDeviceContext(hEventClient, RES_GET_HANDLE(pSubDevice), &hDevice, &pGpu) != NV_OK)
+        {
+            rmStatus = NV_ERR_INVALID_ARGUMENT;
+            goto free_entry;
+        }
 
         rmStatus = eventGetEngineTypeFromSubNotifyIndex(
-                        DRF_VAL(0005, _NOTIFY_INDEX, _INDEX, NotifyIndex), &rmEngineId);
+                        DRF_VAL(0005, _NOTIFY_INDEX, _INDEX, NotifyIndex), &engineId);
 
         if (rmStatus != NV_OK)
             goto free_entry;
@@ -712,19 +405,18 @@ NV_STATUS registerEventNotification
         if (IS_MIG_IN_USE(pGpu))
         {
             KernelMIGManager *pKernelMIGManager = GPU_GET_KERNEL_MIG_MANAGER(pGpu);
-            RM_ENGINE_TYPE globalRmEngineId = rmEngineId;
+            NvU32 globalEngineId = engineId;
             MIG_INSTANCE_REF ref;
 
             NV_CHECK_OK_OR_GOTO(rmStatus, LEVEL_ERROR,
-                kmigmgrGetInstanceRefFromDevice(pGpu, pKernelMIGManager,
-                                                GPU_RES_GET_DEVICE(pSubDevice), &ref),
+                kmigmgrGetInstanceRefFromClient(pGpu, pKernelMIGManager, hEventClient, &ref),
                 free_entry);
 
             NV_CHECK_OK_OR_GOTO(rmStatus, LEVEL_ERROR,
-                kmigmgrGetLocalToGlobalEngineType(pGpu, pKernelMIGManager, ref, rmEngineId, &globalRmEngineId),
+                kmigmgrGetLocalToGlobalEngineType(pGpu, pKernelMIGManager, ref, engineId, &globalEngineId),
                 free_entry);
 
-            rmEngineId = globalRmEngineId;
+            engineId = globalEngineId;
         }
 
         if (pSubDevice->hSemMemory != NV01_NULL_OBJECT)
@@ -736,9 +428,8 @@ NV_STATUS registerEventNotification
                 free_entry);
         }
 
-        rmStatus = _gpuEngineEventNotificationInsert(
-                        pGpu->engineNonstallIntrEventNotifications[rmEngineId],
-                        *ppEventNotification, pSemMemory);
+        rmStatus = engineNonStallEventOp(pGpu, engineId,
+                        *ppEventNotification, pSemMemory, NV_TRUE);
 
         if (rmStatus != NV_OK)
             goto free_entry;
@@ -839,10 +530,6 @@ static NV_STATUS _insertEventNotification
     EventNotify->NotifyTriggerCount = 0;
     EventNotify->bUserOsEventHandle = bUserOsEventHandle;
 
-    // These fields are set by NV0004_CTRL_CMD_TMR_SET_ALARM_NOTIFY for graceful TMR_EVENT teardown
-    EventNotify->pGpu = NULL;
-    EventNotify->pTmrEvent = NULL;
-
     //
     // Now insert the event into the event chain of this object.
     // Order doesn't really matter.
@@ -889,7 +576,8 @@ NV_STATUS unregisterEventNotificationWithData
     PEVENTNOTIFICATION      pTargetEvent    = NULL;
     Subdevice              *pSubDevice;
     RsResourceRef          *pResourceRef;
-    RM_ENGINE_TYPE          rmEngineId;
+    NvHandle                hDevice;
+    NvU32                   engineId;
     OBJGPU                 *pGpu;
 
     rmStatus = _removeEventNotification(ppEventNotification, hEventClient,
@@ -912,13 +600,15 @@ NV_STATUS unregisterEventNotificationWithData
         }
 
         pSubDevice = dynamicCast(pResourceRef->pResource, Subdevice);
+        hDevice = RES_GET_PARENT_HANDLE(pSubDevice);
 
-        // Fetch pGpu and hDevice, set the threadstate to the pGpu
-        pGpu = GPU_RES_GET_GPU(pSubDevice);
+        if (CliSetSubDeviceContext(hEventClient, RES_GET_HANDLE(pSubDevice), &hDevice, &pGpu) != NV_OK)
+        {
+            rmStatus = NV_ERR_INVALID_ARGUMENT;
+            goto free_entry;
+        }
 
-        GPU_RES_SET_THREAD_BC_STATE(pSubDevice);
-
-        rmStatus = eventGetEngineTypeFromSubNotifyIndex(pTargetEvent->NotifyIndex, &rmEngineId);
+        rmStatus = eventGetEngineTypeFromSubNotifyIndex(pTargetEvent->NotifyIndex, &engineId);
 
         if (rmStatus != NV_OK)
             goto free_entry;
@@ -926,24 +616,22 @@ NV_STATUS unregisterEventNotificationWithData
         if (IS_MIG_IN_USE(pGpu))
         {
             KernelMIGManager *pKernelMIGManager = GPU_GET_KERNEL_MIG_MANAGER(pGpu);
-            RM_ENGINE_TYPE globalRmEngineId = rmEngineId;
+            NvU32 globalEngineId = engineId;
             MIG_INSTANCE_REF ref;
 
             NV_CHECK_OK_OR_GOTO(rmStatus, LEVEL_ERROR,
-                kmigmgrGetInstanceRefFromDevice(pGpu, pKernelMIGManager,
-                                                GPU_RES_GET_DEVICE(pSubDevice), &ref),
+                kmigmgrGetInstanceRefFromClient(pGpu, pKernelMIGManager, hEventClient, &ref),
                 free_entry);
 
             NV_CHECK_OK_OR_GOTO(rmStatus, LEVEL_ERROR,
-                kmigmgrGetLocalToGlobalEngineType(pGpu, pKernelMIGManager, ref, rmEngineId, &globalRmEngineId),
+                kmigmgrGetLocalToGlobalEngineType(pGpu, pKernelMIGManager, ref, engineId, &globalEngineId),
                 free_entry);
 
-            rmEngineId = globalRmEngineId;
+            engineId = globalEngineId;
         }
 
-        _gpuEngineEventNotificationRemove(
-            pGpu->engineNonstallIntrEventNotifications[rmEngineId],
-            pTargetEvent);
+        rmStatus = engineNonStallEventOp(pGpu, engineId,
+                        pTargetEvent, NULL, NV_FALSE);
     }
 
 free_entry:
@@ -1004,15 +692,6 @@ static NV_STATUS _removeEventNotification
     // delete the event if it was found
     if (found)
     {
-        if (nextEvent->pTmrEvent != NULL)
-        {
-            NV_ASSERT_OR_RETURN((nextEvent->pGpu != NULL), NV_ERR_INVALID_STATE);
-
-            tmrEventDestroy(GPU_GET_TIMER(nextEvent->pGpu), nextEvent->pTmrEvent);
-            nextEvent->pGpu = NULL;
-            nextEvent->pTmrEvent = NULL;
-        }
-
         if (nextEvent->bUserOsEventHandle)
             osDereferenceObjectCount(NvP64_VALUE(nextEvent->Data));
 

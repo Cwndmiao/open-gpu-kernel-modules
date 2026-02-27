@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2012-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2012-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -24,9 +24,7 @@
 #include "core/core.h"
 #include "gpu/gpu.h"
 #include "gpu/uvm/uvm.h"
-#include "gpu/uvm/access_cntr_buffer.h"
-#include "gpu/mem_sys/kern_mem_sys.h"
-#include "nvrm_registry.h"
+#include "nvRmReg.h"
 #include "rmapi/control.h"
 #include "rmapi/rmapi_utils.h"
 #include "kernel/gpu/intr/engine_idx.h"
@@ -36,14 +34,12 @@
 
 /**
  * @brief Send the request to set up the buffer to physical RM.
+ *
+ * @param pGpu
+ * @param pUvm
  */
 static NV_STATUS
-_uvmSetupAccessCntrBuffer
-(
-    OBJGPU              *pGpu,
-    OBJUVM              *pUvm,
-    AccessCounterBuffer *pAccessCounterBuffer
-)
+_uvmSetupAccessCntrBuffer(OBJGPU *pGpu, OBJUVM *pUvm)
 {
     NvU32 bufferSize;
     NvU32 numBufferPages;
@@ -51,12 +47,12 @@ _uvmSetupAccessCntrBuffer
     NV_STATUS status = NV_OK;
 
     // Buffer was not allocated, nothing to do
-    if (pAccessCounterBuffer->pUvmAccessCntrAllocMemDesc == NULL)
+    if (pUvm->accessCntrBuffer.pUvmAccessCntrAllocMemDesc == NULL)
     {
         return NV_OK;
     }
 
-    bufferSize = pAccessCounterBuffer->pUvmAccessCntrAllocMemDesc->Size;
+    bufferSize = pUvm->accessCntrBuffer.pUvmAccessCntrAllocMemDesc->Size;
     numBufferPages = NV_ROUNDUP(bufferSize, RM_PAGE_SIZE) / RM_PAGE_SIZE;
 
     if (numBufferPages > NV_ARRAY_ELEMENTS(params.bufferPteArray))
@@ -64,12 +60,11 @@ _uvmSetupAccessCntrBuffer
         return NV_ERR_BUFFER_TOO_SMALL;
     }
 
-    memdescGetPtePhysAddrs(pAccessCounterBuffer->pUvmAccessCntrAllocMemDesc,
-                           AT_GPU, 0, RM_PAGE_SIZE,
-                           numBufferPages, params.bufferPteArray);
+    memdescGetPhysAddrs(pUvm->accessCntrBuffer.pUvmAccessCntrAllocMemDesc,
+                        AT_GPU, 0, RM_PAGE_SIZE,
+                        numBufferPages, params.bufferPteArray);
 
     params.bufferSize = bufferSize;
-    params.accessCounterIndex = pAccessCounterBuffer->accessCounterIndex;
 
     status = pUvm->pRmApi->Control(pUvm->pRmApi,
                                    pUvm->hClient,
@@ -87,29 +82,21 @@ _uvmSetupAccessCntrBuffer
  * @param pUvm
  */
 static NV_STATUS
-_uvmUnloadAccessCntrBuffer
-(
-    OBJGPU              *pGpu,
-    OBJUVM              *pUvm,
-    AccessCounterBuffer *pAccessCounterBuffer
-)
+_uvmUnloadAccessCntrBuffer(OBJGPU *pGpu, OBJUVM *pUvm)
 {
-    NV2080_CTRL_INTERNAL_UVM_UNREGISTER_ACCESS_CNTR_BUFFER_PARAMS params = {0};
     NV_STATUS status;
 
     // Buffer was not allocated, nothing to do
-    if (pAccessCounterBuffer->pUvmAccessCntrAllocMemDesc == NULL)
+    if (pUvm->accessCntrBuffer.pUvmAccessCntrAllocMemDesc == NULL)
     {
         return NV_OK;
     }
-
-    params.accessCounterIndex = pAccessCounterBuffer->accessCounterIndex;
 
     status = pUvm->pRmApi->Control(pUvm->pRmApi,
                                    pUvm->hClient,
                                    pUvm->hSubdevice,
                                    NV2080_CTRL_CMD_INTERNAL_UVM_UNREGISTER_ACCESS_CNTR_BUFFER,
-                                   &params, sizeof(params));
+                                   NULL, 0);
 
     return status;
 }
@@ -129,17 +116,6 @@ uvmStateInitUnlocked_IMPL(OBJGPU *pGpu, OBJUVM *pUvm)
     status = rmapiutilAllocClientAndDeviceHandles(pUvm->pRmApi, pGpu, &pUvm->hClient,
                                                   NULL, &pUvm->hSubdevice);
 
-    if (pUvm->accessCounterBufferCount > 0)
-    {
-        pUvm->pAccessCounterBuffers = portMemAllocNonPaged(sizeof (*pUvm->pAccessCounterBuffers) * pUvm->accessCounterBufferCount);
-        NV_ASSERT_OR_RETURN(pUvm->pAccessCounterBuffers != NULL, NV_ERR_NO_MEMORY);
-        portMemSet(pUvm->pAccessCounterBuffers, 0, sizeof (*pUvm->pAccessCounterBuffers) * pUvm->accessCounterBufferCount);
-    }
-    else
-    {
-        pUvm->pAccessCounterBuffers = NULL;
-    }
-
     return status;
 }
 
@@ -152,7 +128,6 @@ uvmStateInitUnlocked_IMPL(OBJGPU *pGpu, OBJUVM *pUvm)
 void
 uvmStateDestroy_IMPL(OBJGPU *pGpu, OBJUVM *pUvm)
 {
-    portMemFree(pUvm->pAccessCounterBuffers);
     rmapiutilFreeClientAndDeviceHandles(pUvm->pRmApi, &pUvm->hClient, NULL, &pUvm->hSubdevice);
 }
 
@@ -164,25 +139,20 @@ uvmStateDestroy_IMPL(OBJGPU *pGpu, OBJUVM *pUvm)
  * @param pUvm
  */
 NV_STATUS
-uvmInitializeAccessCntrBuffer_IMPL
-(
-    OBJGPU *pGpu,
-    OBJUVM *pUvm,
-    AccessCounterBuffer *pAccessCounterBuffer
-)
+uvmInitializeAccessCntrBuffer_IMPL(OBJGPU *pGpu, OBJUVM *pUvm)
 {
     NV_STATUS status;
 
-    status = uvmInitAccessCntrBuffer_HAL(pGpu, pUvm, pAccessCounterBuffer);
+    status = uvmInitAccessCntrBuffer_HAL(pGpu, pUvm);
     if (status != NV_OK)
     {
         return status;
     }
 
-    status = _uvmSetupAccessCntrBuffer(pGpu, pUvm, pAccessCounterBuffer);
+    status = _uvmSetupAccessCntrBuffer(pGpu, pUvm);
     if (status != NV_OK)
     {
-        (void) uvmDestroyAccessCntrBuffer_HAL(pGpu, pUvm, pAccessCounterBuffer);
+        (void) uvmDestroyAccessCntrBuffer_HAL(pGpu, pUvm);
     }
 
     return status;
@@ -195,16 +165,11 @@ uvmInitializeAccessCntrBuffer_IMPL
  * @param pUvm
  */
 NV_STATUS
-uvmTerminateAccessCntrBuffer_IMPL
-(
-    OBJGPU              *pGpu,
-    OBJUVM              *pUvm,
-    AccessCounterBuffer *pAccessCounterBuffer
-)
+uvmTerminateAccessCntrBuffer_IMPL(OBJGPU *pGpu, OBJUVM *pUvm)
 {
     NV_STATUS status;
 
-    status = _uvmUnloadAccessCntrBuffer(pGpu, pUvm, pAccessCounterBuffer);
+    status = _uvmUnloadAccessCntrBuffer(pGpu, pUvm);
     if (status != NV_OK)
     {
         NV_PRINTF(LEVEL_ERROR,
@@ -212,7 +177,7 @@ uvmTerminateAccessCntrBuffer_IMPL
                   status);
     }
 
-    status = uvmDestroyAccessCntrBuffer_HAL(pGpu, pUvm, pAccessCounterBuffer);
+    status = uvmDestroyAccessCntrBuffer_HAL(pGpu, pUvm);
     if (status != NV_OK)
     {
         NV_PRINTF(LEVEL_ERROR,
@@ -230,24 +195,13 @@ uvmTerminateAccessCntrBuffer_IMPL
  * @param pUvm
  */
 NV_STATUS
-uvmAccessCntrBufferRegister_IMPL
-(
-    OBJGPU *pGpu,
-    OBJUVM *pUvm,
-    NvU32   accessCounterIndex,
-    NvU32   bufferSize,
-    NvU64  *pBufferPages
-)
+uvmAccessCntrBufferRegister_IMPL(OBJGPU *pGpu, OBJUVM *pUvm,
+                                 NvU32 bufferSize, NvU64 *pBufferPages)
 {
     NV_STATUS status;
     MEMORY_DESCRIPTOR *pMemDesc;
     NvU32 addrSpace = ADDR_SYSMEM;
     NvU32 attr      = NV_MEMORY_CACHED;
-
-    if (pUvm->pAccessCounterBuffers == NULL)
-    {
-        return NV_ERR_INVALID_STATE;
-    }
 
     memdescOverrideInstLoc(DRF_VAL(_REG_STR_RM, _INST_LOC_4, _UVM_FAULT_BUFFER_REPLAYABLE, pGpu->instLocOverrides4),
                            "UVM access counter", &addrSpace, &attr);
@@ -267,9 +221,9 @@ uvmAccessCntrBufferRegister_IMPL
                      NV_ROUNDUP(bufferSize, RM_PAGE_SIZE) / RM_PAGE_SIZE,
                      RM_PAGE_SIZE);
 
-    pUvm->pAccessCounterBuffers[accessCounterIndex].pUvmAccessCntrMemDesc = pMemDesc;
+    pUvm->accessCntrBuffer.pUvmAccessCntrMemDesc = pMemDesc;
 
-    status = uvmSetupAccessCntrBuffer_HAL(pGpu, pUvm, accessCounterIndex);
+    status = uvmSetupAccessCntrBuffer_HAL(pGpu, pUvm);
     if (status != NV_OK)
     {
         NV_PRINTF(LEVEL_ERROR,
@@ -278,7 +232,7 @@ uvmAccessCntrBufferRegister_IMPL
 
         memdescDestroy(pMemDesc);
 
-        pUvm->pAccessCounterBuffers[accessCounterIndex].pUvmAccessCntrMemDesc = NULL;
+        pUvm->accessCntrBuffer.pUvmAccessCntrMemDesc = NULL;
     }
 
     return status;
@@ -292,21 +246,11 @@ uvmAccessCntrBufferRegister_IMPL
  * @param pUvm
  */
 NV_STATUS
-uvmAccessCntrBufferUnregister_IMPL
-(
-    OBJGPU *pGpu,
-    OBJUVM *pUvm,
-    NvU32   accessCounterIndex
-)
+uvmAccessCntrBufferUnregister_IMPL(OBJGPU *pGpu, OBJUVM *pUvm)
 {
     NV_STATUS status;
 
-    if (pUvm->pAccessCounterBuffers == NULL)
-    {
-        return NV_ERR_INVALID_STATE;
-    }
-
-    status = uvmUnloadAccessCntrBuffer_HAL(pGpu, pUvm, accessCounterIndex);
+    status = uvmUnloadAccessCntrBuffer_HAL(pGpu, pUvm);
     if (status != NV_OK)
     {
         NV_PRINTF(LEVEL_ERROR,
@@ -314,9 +258,9 @@ uvmAccessCntrBufferUnregister_IMPL
                   status);
     }
 
-    memdescDestroy(pUvm->pAccessCounterBuffers[accessCounterIndex].pUvmAccessCntrMemDesc);
+    memdescDestroy(pUvm->accessCntrBuffer.pUvmAccessCntrMemDesc);
 
-    pUvm->pAccessCounterBuffers[accessCounterIndex].pUvmAccessCntrMemDesc = NULL;
+    pUvm->accessCntrBuffer.pUvmAccessCntrMemDesc = NULL;
 
     return NV_OK;
 }
@@ -354,7 +298,11 @@ uvmServiceInterrupt_IMPL
     NV_ASSERT_OR_RETURN(pParams != NULL, 0);
     NV_ASSERT_OR_RETURN(pParams->engineIdx == MC_ENGINE_IDX_ACCESS_CNTR, 0);
 
-    NV_ASSERT_OK(uvmAccessCntrService_HAL(pGpu, pUvm));
+    NV_ASSERT_OK(pUvm->pRmApi->Control(pUvm->pRmApi,
+                                       pUvm->hClient,
+                                       pUvm->hSubdevice,
+                                       NV2080_CTRL_CMD_INTERNAL_UVM_SERVICE_ACCESS_CNTR_BUFFER,
+                                       NULL, 0));
 
     return 0;
 }

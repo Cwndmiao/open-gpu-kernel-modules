@@ -102,9 +102,9 @@ FrameLockHandleSyncEvent(void *dataPtr, NvU32 dataU32)
  * This function is registered as a kernel callback function from
  * resman.
  *
- * However, it is called with resman's context (resman locks held, etc).
- * Schedule deferred work, so that we can process the event without resman's
- * encumbrances.
+ * However, it is called with resman's context (alternate stack,
+ * resman locks held, etc).  Schedule deferred work, so that we can
+ * process the event without resman's encumbrances.
  */
 static void FrameLockEvent(void *arg, void *pEventDataVoid,
                            NvU32 hEvent,
@@ -368,7 +368,8 @@ static NvBool GpuIdInDevEvo(NVDevEvoPtr pDevEvo, NvU32 gpuId)
 /*!
  * Free the pFrameLock object.
  */
-static void FreeFrameLockEvo(NVFrameLockEvoPtr pFrameLockEvo)
+static void FreeFrameLockEvo(NVDevEvoPtr pDevEvo,
+                             NVFrameLockEvoPtr pFrameLockEvo)
 {
     if (pFrameLockEvo == NULL) {
         return;
@@ -379,14 +380,12 @@ static void FreeFrameLockEvo(NVFrameLockEvoPtr pFrameLockEvo)
                     nvEvoGlobal.clientHandle,
                     pFrameLockEvo->device);
 
-        nvFreeUnixRmHandle(&pFrameLockEvo->handleAllocator,
+        nvFreeUnixRmHandle(&pDevEvo->handleAllocator,
                            pFrameLockEvo->device);
         pFrameLockEvo->device = 0;
     }
 
     nvAssert(pFrameLockEvo->nGpuIds == 0);
-
-    nvTearDownUnixRmHandleAllocator(&pFrameLockEvo->handleAllocator);
 
     nvListDel(&pFrameLockEvo->frameLockListEntry);
 
@@ -396,16 +395,14 @@ static void FreeFrameLockEvo(NVFrameLockEvoPtr pFrameLockEvo)
 /*!
  * Allocate and initialize a new pFrameLock object.
  */
-static NVFrameLockEvoPtr AllocFrameLockEvo(int instance, NvU32 gsyncId,
-                                           NvBool *pBadFirmware)
+static NVFrameLockEvoPtr AllocFrameLockEvo(NVDevEvoPtr pDevEvo,
+                                           int instance, NvU32 gsyncId)
 {
     NV30F1_ALLOC_PARAMETERS gsyncAllocParams = { 0 };
     NV30F1_CTRL_GSYNC_GET_CAPS_PARAMS gsyncGetCapsParams = { 0 };
     NVFrameLockEvoPtr pFrameLockEvo;
 
     nvAssert(FindFrameLock(gsyncId) == NULL);
-
-    *pBadFirmware = FALSE;
 
     pFrameLockEvo = nvCalloc(1, sizeof(NVFrameLockEvoRec));
 
@@ -415,16 +412,7 @@ static NVFrameLockEvoPtr AllocFrameLockEvo(int instance, NvU32 gsyncId,
 
     nvListInit(&pFrameLockEvo->frameLockListEntry);
 
-    if (!nvInitUnixRmHandleAllocator(
-            &pFrameLockEvo->handleAllocator,
-            nvEvoGlobal.clientHandle,
-            NVKMS_RM_HANDLE_SPACE_FRAMELOCK(instance))) {
-        nvEvoLog(EVO_LOG_ERROR, "Failed to initialize framelock handles");
-        goto fail;
-    }
-
-    pFrameLockEvo->device =
-        nvGenerateUnixRmHandle(&pFrameLockEvo->handleAllocator);
+    pFrameLockEvo->device = nvGenerateUnixRmHandle(&pDevEvo->handleAllocator);
 
     gsyncAllocParams.gsyncInstance = instance;
 
@@ -452,8 +440,6 @@ static NVFrameLockEvoPtr AllocFrameLockEvo(int instance, NvU32 gsyncId,
     pFrameLockEvo->testMode = FALSE;
     pFrameLockEvo->houseSyncMode =
         NV_KMS_FRAMELOCK_ATTRIBUTE_HOUSE_SYNC_MODE_DISABLED;
-    pFrameLockEvo->mulDivValue = 1;
-    pFrameLockEvo->mulDivMode = NV_KMS_FRAMELOCK_ATTRIBUTE_MULTIPLY_DIVIDE_MODE_MULTIPLY;
 
     /* Query the framelock revision information */
     if (nvRmApiControl(nvEvoGlobal.clientHandle,
@@ -468,8 +454,13 @@ static NVFrameLockEvoPtr AllocFrameLockEvo(int instance, NvU32 gsyncId,
     /* Check if the Quadro Sync card has a firmware
      * version compatible with the GPUs connected to it.
      */
+    pDevEvo->badFramelockFirmware = gsyncGetCapsParams.isFirmwareRevMismatch;
     if (gsyncGetCapsParams.isFirmwareRevMismatch) {
-        *pBadFirmware = TRUE;
+        nvEvoLogDev(pDevEvo, EVO_LOG_ERROR, "The firmware on this Quadro Sync "
+                    "card is not compatible with the GPUs connected to it."
+                    "  Please visit "
+                    "<https://www.nvidia.com/object/quadro-sync.html> "
+                    "for instructions on installing the correct firmware.");
         goto fail;
     }
 
@@ -491,9 +482,6 @@ static NVFrameLockEvoPtr AllocFrameLockEvo(int instance, NvU32 gsyncId,
     pFrameLockEvo->maxSyncInterval = gsyncGetCapsParams.maxSyncInterval;
     pFrameLockEvo->videoModeReadOnly = !!(gsyncGetCapsParams.capFlags &
         NV30F1_CTRL_GSYNC_GET_CAPS_CAP_FLAGS_ONLY_GET_VIDEO_MODE);
-    pFrameLockEvo->mulDivSupported = !!(gsyncGetCapsParams.capFlags &
-        NV30F1_CTRL_GSYNC_GET_CAPS_CAP_FLAGS_MULTIPLY_DIVIDE_SYNC);
-    pFrameLockEvo->maxMulDivValue = gsyncGetCapsParams.maxMulDivValue;
 
     /* Determine if house sync is selectable on this frame lock device */
     if (!FrameLockUseHouseSyncGetSupport(pFrameLockEvo,
@@ -521,7 +509,7 @@ static NVFrameLockEvoPtr AllocFrameLockEvo(int instance, NvU32 gsyncId,
 
 fail:
 
-    FreeFrameLockEvo(pFrameLockEvo);
+    FreeFrameLockEvo(pDevEvo, pFrameLockEvo);
     return NULL;
 }
 
@@ -624,8 +612,8 @@ void nvAllocFrameLocksEvo(NVDevEvoPtr pDevEvo)
     }
 
     for (i = 0; i < ARRAY_LEN(attachedGsyncParams.gsyncIds); i++) {
+
         NVFrameLockEvoPtr pFrameLockEvo;
-        NvBool badFirmware = FALSE;
 
         if (attachedGsyncParams.gsyncIds[i] == NV0000_CTRL_GSYNC_INVALID_ID) {
             continue;
@@ -634,20 +622,11 @@ void nvAllocFrameLocksEvo(NVDevEvoPtr pDevEvo)
         pFrameLockEvo = FindFrameLock(attachedGsyncParams.gsyncIds[i]);
 
         if (pFrameLockEvo == NULL) {
-            pFrameLockEvo = AllocFrameLockEvo(i,
-                                              attachedGsyncParams.gsyncIds[i],
-                                              &badFirmware);
+            pFrameLockEvo = AllocFrameLockEvo(pDevEvo, i,
+                                              attachedGsyncParams.gsyncIds[i]);
         }
 
         if (pFrameLockEvo == NULL) {
-            if (badFirmware) {
-                nvEvoLogDev(pDevEvo, EVO_LOG_ERROR,
-                    "The firmware on this Quadro Sync card is not compatible "
-                    "with the GPUs connected to it.  Please visit "
-                    "<https://www.nvidia.com/object/quadro-sync.html> "
-                    "for instructions on installing the correct firmware.");
-                pDevEvo->badFramelockFirmware = TRUE;
-            }
             continue;
         }
 
@@ -670,7 +649,7 @@ void nvFreeFrameLocksEvo(NVDevEvoPtr pDevEvo)
         UnBindFrameLockFromDevEvo(pFrameLockEvo, pDevEvo);
 
         if (pFrameLockEvo->nGpuIds == 0) {
-            FreeFrameLockEvo(pFrameLockEvo);
+            FreeFrameLockEvo(pDevEvo, pFrameLockEvo);
         }
     }
 }
@@ -886,74 +865,6 @@ static NvBool FrameLockSetSyncDelay(NVFrameLockEvoPtr pFrameLockEvo, NvS64 val)
     return TRUE;
 }
 
-/*!
- * Set the sync multiply/divide value given in val.  Returns FALSE if the
- * assignment failed.  Assigns pFrameLockEvo->mulDivValue upon success.
- */
-static NvBool SetFrameLockMulDivVal(NVFrameLockEvoPtr pFrameLockEvo, NvS64 val)
-{
-    NV30F1_CTRL_GSYNC_SET_CONTROL_PARAMS_PARAMS
-        gsyncSetControlParamsParams = { 0 };
-    NvU32 ret;
-
-    if (!pFrameLockEvo->mulDivSupported ||
-        (val > pFrameLockEvo->maxMulDivValue)) {
-        return FALSE;
-    }
-
-    gsyncSetControlParamsParams.which =
-        NV30F1_CTRL_GSYNC_SET_CONTROL_SYNC_MULTIPLY_DIVIDE;
-
-    gsyncSetControlParamsParams.syncMulDiv.multiplyDivideValue = val;
-    gsyncSetControlParamsParams.syncMulDiv.multiplyDivideMode = pFrameLockEvo->mulDivMode;
-
-    ret = nvRmApiControl(nvEvoGlobal.clientHandle,
-                         pFrameLockEvo->device,
-                         NV30F1_CTRL_CMD_GSYNC_SET_CONTROL_PARAMS,
-                         &gsyncSetControlParamsParams,
-                         sizeof(gsyncSetControlParamsParams));
-
-    if (ret != NVOS_STATUS_SUCCESS) return FALSE;
-
-    pFrameLockEvo->mulDivValue = val;
-
-    return TRUE;
-}
-
-/*!
- * Set the sync multiply/divide mode given in val.  Returns FALSE if the
- * assignment failed.  Assigns pFrameLockEvo->mulDivMode upon success.
- */
-static NvBool SetFrameLockMulDivMode(NVFrameLockEvoPtr pFrameLockEvo, NvS64 val)
-{
-    NV30F1_CTRL_GSYNC_SET_CONTROL_PARAMS_PARAMS
-        gsyncSetControlParamsParams = { 0 };
-    NvU32 ret;
-
-    if (!pFrameLockEvo->mulDivSupported ||
-        ((val != NV_KMS_FRAMELOCK_ATTRIBUTE_MULTIPLY_DIVIDE_MODE_MULTIPLY) &&
-         (val != NV_KMS_FRAMELOCK_ATTRIBUTE_MULTIPLY_DIVIDE_MODE_DIVIDE))) {
-        return FALSE;
-    }
-
-    gsyncSetControlParamsParams.which =
-        NV30F1_CTRL_GSYNC_SET_CONTROL_SYNC_MULTIPLY_DIVIDE;
-
-    gsyncSetControlParamsParams.syncMulDiv.multiplyDivideValue = pFrameLockEvo->mulDivValue;
-    gsyncSetControlParamsParams.syncMulDiv.multiplyDivideMode = val;
-
-    ret = nvRmApiControl(nvEvoGlobal.clientHandle,
-                         pFrameLockEvo->device,
-                         NV30F1_CTRL_CMD_GSYNC_SET_CONTROL_PARAMS,
-                         &gsyncSetControlParamsParams,
-                         sizeof(gsyncSetControlParamsParams));
-
-    if (ret != NVOS_STATUS_SUCCESS) return FALSE;
-
-    pFrameLockEvo->mulDivMode = val;
-
-    return TRUE;
-}
 /*!
  * Set the sync interval to the value given in val.  Returns FALSE if
  * the assignment failed.  Assigns pFrameLockEvo->syncInterval upon
@@ -1218,7 +1129,7 @@ static NvBool FrameLockDpyCanBeServer(const NVDpyEvoRec *pDpyEvo)
     NV30F1_CTRL_GSYNC_GET_CONTROL_SYNC_PARAMS gsyncGetControlSyncParams = { 0 };
     NVDispEvoPtr pDispEvo = pDpyEvo->pDispEvo;
     NVFrameLockEvoPtr pFrameLockEvo = pDispEvo->pFrameLockEvo;
-    const NvU32 head = nvGetPrimaryHwHead(pDispEvo, pDpyEvo->apiHead);
+    const NvU32 head = pDpyEvo->head;
     const NVDispHeadStateEvoRec *pHeadState;
     NvU32 ret;
 
@@ -1431,12 +1342,6 @@ static NvBool ResetHardwareOneDisp(NVDispEvoPtr pDispEvo, NvS64 value)
     if (!FrameLockSetTestMode(pFrameLockEvo, pFrameLockEvo->testMode)) {
         ret = FALSE;
     }
-    if (!SetFrameLockMulDivVal(pFrameLockEvo, pFrameLockEvo->mulDivValue)) {
-        ret = FALSE;
-    }
-    if (!SetFrameLockMulDivMode(pFrameLockEvo, pFrameLockEvo->mulDivMode)) {
-        ret = FALSE;
-    }
 
     /* Since (we think) sync is disabled, these should always be disabled */
     if (!FrameLockSetWatchdog(pFrameLockEvo, FALSE)) {
@@ -1543,61 +1448,6 @@ static NvBool GetFrameLockSyncDelayValidValues(
 
     pValidValues->u.range.min = 0;
     pValidValues->u.range.max = pFrameLockEvo->maxSyncSkew;
-
-    return TRUE;
-}
-
-static NvBool GetFrameLockMulDivVal(const NVFrameLockEvoRec *pFrameLockEvo,
-                                    enum NvKmsFrameLockAttribute attribute,
-                                    NvS64 *val)
-{
-    if (!pFrameLockEvo->mulDivSupported) {
-        return FALSE;
-    }
-
-    *val = pFrameLockEvo->mulDivValue;
-
-    return TRUE;
-}
-
-static NvBool GetFrameLockMulDivValValidValues(
-    const NVFrameLockEvoRec *pFrameLockEvo,
-    struct NvKmsAttributeValidValuesCommonReply *pValidValues)
-{
-    nvAssert(pValidValues->type == NV_KMS_ATTRIBUTE_TYPE_RANGE);
-
-    if (!pFrameLockEvo->mulDivSupported) {
-        return FALSE;
-    }
-
-    pValidValues->u.range.min = 1;
-    pValidValues->u.range.max = pFrameLockEvo->maxMulDivValue;
-
-    return TRUE;
-}
-
-static NvBool GetFrameLockMulDivModeValidValues(
-    const NVFrameLockEvoRec *pFrameLockEvo,
-    struct NvKmsAttributeValidValuesCommonReply *pValidValues)
-{
-    if (!pFrameLockEvo->mulDivSupported) {
-        return FALSE;
-    }
-
-    nvAssert(pValidValues->type == NV_KMS_ATTRIBUTE_TYPE_INTEGER);
-
-    return TRUE;
-}
-
-static NvBool GetFrameLockMulDivMode(const NVFrameLockEvoRec *pFrameLockEvo,
-                                     enum NvKmsFrameLockAttribute attribute,
-                                     NvS64 *val)
-{
-    if (!pFrameLockEvo->mulDivSupported) {
-        return FALSE;
-    }
-
-    *val = pFrameLockEvo->mulDivMode;
 
     return TRUE;
 }
@@ -2025,6 +1875,11 @@ static const struct {
         .get  = NULL,
         .type = NV_KMS_ATTRIBUTE_TYPE_BOOLEAN,
     },
+    [NV_KMS_DISP_ATTRIBUTE_ALLOW_FLIPLOCK] = {
+        .set  = nvAllowFlipLockEvo,
+        .get  = NULL,
+        .type = NV_KMS_ATTRIBUTE_TYPE_BOOLEAN,
+    },
     [NV_KMS_DISP_ATTRIBUTE_QUERY_DP_AUX_LOG] = {
         .set  = NULL,
         .get  = nvRmQueryDpAuxLog,
@@ -2230,18 +2085,6 @@ static const struct {
         .getValidValues = NULL,
         .type           = NV_KMS_ATTRIBUTE_TYPE_INTEGER,
     },
-    [NV_KMS_FRAMELOCK_ATTRIBUTE_MULTIPLY_DIVIDE_VALUE] = {
-        .set            = SetFrameLockMulDivVal,
-        .get            = GetFrameLockMulDivVal,
-        .getValidValues = GetFrameLockMulDivValValidValues,
-        .type           = NV_KMS_ATTRIBUTE_TYPE_RANGE,
-    },
-    [NV_KMS_FRAMELOCK_ATTRIBUTE_MULTIPLY_DIVIDE_MODE] = {
-        .set            = SetFrameLockMulDivMode,
-        .get            = GetFrameLockMulDivMode,
-        .getValidValues = GetFrameLockMulDivModeValidValues,
-        .type           = NV_KMS_ATTRIBUTE_TYPE_INTEGER,
-    },
 };
 
 NvBool nvSetFrameLockAttributeEvo(
@@ -2328,43 +2171,20 @@ NvU32 nvGetFramelockServerHead(const NVDispEvoRec *pDispEvo)
 {
     const NVDpyEvoRec *pDpyEvo =
         nvGetDpyEvoFromDispEvo(pDispEvo, pDispEvo->framelock.server);
-    return (pDpyEvo != NULL) ? nvGetPrimaryHwHead(pDispEvo, pDpyEvo->apiHead) :
-                NV_INVALID_HEAD;
+    return (pDpyEvo != NULL) ? pDpyEvo->head : NV_INVALID_HEAD;
 }
 
 NvU32 nvGetFramelockClientHeadsMask(const NVDispEvoRec *pDispEvo)
 {
     NvU32 headsMask = 0x0;
-    const NVDpyEvoRec *pServerDpyEvo, *pClientDpyEvo;
+    const NVDpyEvoRec *pDpyEvo;
 
-    pServerDpyEvo = nvGetDpyEvoFromDispEvo(pDispEvo,
-                                           pDispEvo->framelock.server);
-    if ((pServerDpyEvo != NULL) &&
-            (pServerDpyEvo->apiHead != NV_INVALID_HEAD)) {
-        const NVDispApiHeadStateEvoRec *pApiHeadState =
-            &pDispEvo->apiHeadState[pServerDpyEvo->apiHead];
-        NvU32 primaryHead = nvGetPrimaryHwHead(pDispEvo,
-                                               pServerDpyEvo->apiHead);
-
-        nvAssert(primaryHead != NV_INVALID_HEAD);
-
-        /*
-         * The secondary hardware-head of the server dpy are client of the
-         * primary head.
-         */
-        headsMask |= pApiHeadState->hwHeadsMask;
-        headsMask &= ~NVBIT(primaryHead);
-    }
-
-    FOR_ALL_EVO_DPYS(pClientDpyEvo, pDispEvo->framelock.clients, pDispEvo) {
-        if (pClientDpyEvo->apiHead == NV_INVALID_HEAD) {
+    FOR_ALL_EVO_DPYS(pDpyEvo, pDispEvo->framelock.clients, pDispEvo) {
+        if (pDpyEvo->head == NV_INVALID_HEAD) {
             continue;
         }
-        const NVDispApiHeadStateEvoRec *pApiHeadState =
-            &pDispEvo->apiHeadState[pClientDpyEvo->apiHead];
-        headsMask |= pApiHeadState->hwHeadsMask;
+        headsMask |= NVBIT(pDpyEvo->head);
     }
-
     return headsMask;
 }
 
@@ -2379,13 +2199,7 @@ void nvUpdateGLSFramelock(const NVDispEvoRec *pDispEvo, const NvU32 head,
      * apiHead -> pDpyEvo mapping will get implemented.
      */
     FOR_ALL_EVO_DPYS(pDpyEvo, pDispEvo->validDisplays, pDispEvo) {
-        /*
-         * XXX[2Heads1OR] Framelock is currently not supported with
-         * 2Heads1OR, the api head is expected to be mapped onto a single
-         * hardware head which is the primary hardware head.
-         */
-        if ((pDpyEvo->apiHead == NV_INVALID_HEAD) ||
-                (nvGetPrimaryHwHead(pDispEvo, pDpyEvo->apiHead) != head)) {
+        if (pDpyEvo->head != head) {
             continue;
         }
 

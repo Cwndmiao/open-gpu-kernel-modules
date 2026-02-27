@@ -157,26 +157,6 @@ static NvU32 EvoReadGetOffset(NVDmaBufferEvoPtr push_buffer, NvBool minimum)
     return bestGet;
 }
 
-NvBool nvEvoPollForEmptyChannel(NVEvoChannelPtr pChannel, NvU32 sd,
-                                NvU64 *pStartTime, const NvU32 timeout)
-{
-    NVDmaBufferEvoPtr push_buffer = &pChannel->pb;
-
-    do {
-        if (EvoCoreReadGet(push_buffer, sd) == push_buffer->put_offset) {
-            break;
-        }
-
-        if (nvExceedsTimeoutUSec(push_buffer->pDevEvo, pStartTime, timeout)) {
-            return FALSE;
-        }
-
-        nvkms_yield();
-   } while (TRUE);
-
-    return TRUE;
-}
-
 void nvEvoMakeRoom(NVEvoChannelPtr pChannel, NvU32 count)
 {
     NVDmaBufferEvoPtr push_buffer = &pChannel->pb;
@@ -235,7 +215,7 @@ void nvEvoMakeRoom(NVEvoChannelPtr pChannel, NvU32 count)
          * isn't much we can do as currently structured, so just reset
          * startTime.
          */
-        if (nvExceedsTimeoutUSec(push_buffer->pDevEvo, &startTime, timeout)) {
+        if (nvExceedsTimeoutUSec(&startTime, timeout)) {
             nvEvoLogDev(push_buffer->pDevEvo, EVO_LOG_ERROR,
                 "Error while waiting for GPU progress: "
                 "0x%08x:%d %d:%d:%d:%d",
@@ -306,8 +286,8 @@ static NvBool EvoCheckNotifier(const NVDispEvoRec *pDispEvo,
             return FALSE;
         }
 
-        if (nvExceedsTimeoutUSec(
-                pDevEvo,
+        if (!nvIsEmulationEvo(pDevEvo) &&
+            nvExceedsTimeoutUSec(
                 &startTime,
                 NV_EVO_NOTIFIER_SHORT_TIMEOUT_USEC) &&
             (p->put_offset == EvoCoreReadGet(p, sd)))
@@ -470,8 +450,7 @@ void nvEvoResetCRC32Notifier(volatile NvU32 *pCRC32Notifier,
     EvoWriteNotifier(pCRC32Notifier, reset_val);
 }
 
-NvBool nvEvoWaitForCRC32Notifier(const NVDevEvoPtr pDevEvo,
-                                 volatile NvU32 *pCRC32Notifier,
+NvBool nvEvoWaitForCRC32Notifier(volatile NvU32 *pCRC32Notifier,
                                  NvU32 offset,
                                  NvU32 done_base_bit,
                                  NvU32 done_extent_bit,
@@ -492,7 +471,6 @@ NvBool nvEvoWaitForCRC32Notifier(const NVDevEvoPtr pDevEvo,
         }
 
         if (nvExceedsTimeoutUSec(
-                pDevEvo,
                 &startTime,
                 NV_EVO_NOTIFIER_SHORT_TIMEOUT_USEC)) {
             return FALSE;

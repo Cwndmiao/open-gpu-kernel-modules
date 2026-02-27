@@ -34,7 +34,6 @@ void nvDPLibSetAdaptiveSync(const NVDispEvoRec *pDispEvo, NvU32 head,
                             NvBool enable);
 void nvDPLibUpdateDpyLinkConfiguration(NVDpyEvoPtr pDpyEvo);
 NvBool nvDPLibDpyIsConnected(NVDpyEvoPtr pDpyEvo);
-NvBool nvDPLibDpyIsYuv420ModeSupported(const NVDpyEvoRec *pDpyEvo);
 
 #ifdef __cplusplus
 };

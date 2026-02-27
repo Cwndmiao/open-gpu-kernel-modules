@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -27,8 +27,7 @@
 #include "os/os.h"
 #include "lib/base_utils.h"
 #include "lib/zlib/inflate.h"
-#include "nvrm_registry.h"
-#include "virtualization/hypervisor/hypervisor.h"
+#include "nvRmReg.h"
 
 /**
  * @brief Changes the user-space permissions for a given register address range
@@ -174,15 +173,6 @@ gpuGetUserRegisterAccessPermissions_IMPL(OBJGPU *pGpu, NvU32 offset)
 
 static NvBool _getIsProfilingPrivileged(OBJGPU *pGpu)
 {
-    // On a vGPU Host, RmProfilingAdminOnly is always set to 1
-    if (hypervisorIsVgxHyper())
-    {
-        //
-        // Setting the value at this point to make the behavior same for
-        // debug/develop/release drivers on vGPU host.
-        //
-        return NV_TRUE;
-    }
 #if defined(DEBUG) || defined(DEVELOP)
     return NV_FALSE;
 #else
@@ -213,25 +203,6 @@ gpuConstructUserRegisterAccessMap_IMPL(OBJGPU *pGpu)
     NvU32        profilingRangesSize = 0;
     const NvU8  *compressedData      = NULL;
     const NvU32 *profilingRangesArr  = NULL;
-
-    if (pGpu->getProperty(pGpu, PDB_PROP_GPU_TEGRA_SOC_NVDISPLAY))
-    {
-        //
-        // This function constructs the User Register Access Map for entire
-        // GPU BAR 0 space, SOC Display register range is different and
-        // UDISP space needs to be accessed by Usermode MODS and Kernel mode nvkms clients.
-        // TODO vijkumar construction of user access map for Display needs to be revisited.
-        // for now skip this function for SOC NVDISPLAY.
-        //
-        return NV_OK;
-    }
-
-    if (IS_VIRTUAL(pGpu))
-    {
-        // Usermode access maps unused in Guest RM. Initialize this boolean and leave.
-        pGpu->bRmProfilingPrivileged = _getIsProfilingPrivileged(pGpu);
-        return NV_OK;
-    }
 
     NV_ASSERT(pGpu->userRegisterAccessMapSize == 0);
 

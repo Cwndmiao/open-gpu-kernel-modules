@@ -27,8 +27,11 @@
 
 //
 // This file was generated with FINN, an NVIDIA coding tool.
-// Source file:      ctrl/ctrl5070/ctrl5070chnc.finn
+// Source file: ctrl/ctrl5070/ctrl5070chnc.finn
 //
+
+
+
 
 #include "ctrl/ctrl5070/ctrl5070base.h"
 #include "ctrl5070common.h"
@@ -643,6 +646,8 @@ typedef struct NV5070_CTRL_CMD_IS_MODE_POSSIBLE_PARAMS {
 
     NvBool bUseCachedPerfState;
 } NV5070_CTRL_CMD_IS_MODE_POSSIBLE_PARAMS;
+
+
 
 /*
  * NV5070_CTRL_CMD_GET_CHANNEL_INFO

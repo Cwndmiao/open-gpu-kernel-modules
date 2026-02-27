@@ -36,14 +36,14 @@ NvBool nvSetCursorImage(
     NVDispEvoPtr pDispEvo,
     const struct NvKmsPerOpenDev *pOpenDevice,
     const NVEvoApiHandlesRec *pOpenDevSurfaceHandles,
-    NvU32 apiHead,
+    NvU32 head,
     const struct NvKmsSetCursorImageCommonParams *pParams);
 
 void nvEvoMoveCursorInternal(NVDispEvoPtr pDispEvo,
                              NvU32 head, NvS16 x, NvS16 y);
 
-void nvMoveCursor(NVDispEvoPtr pDispEvo, const NvU32 apiHead,
-                  const struct NvKmsMoveCursorCommonParams *pParams);
+void nvEvoMoveCursor(NVDispEvoPtr pDispEvo, NvU32 head,
+                     const struct NvKmsMoveCursorCommonParams *pParams);
 
 NvBool nvAllocCursorEvo(NVDevEvoPtr pDevEvo);
 void nvFreeCursorEvo(NVDevEvoPtr pDevEvo);

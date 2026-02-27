@@ -40,7 +40,7 @@ accesscntrCtrlCmdAccessCntrBufferReadGet_IMPL
     OBJGPU *pGpu = GPU_RES_GET_GPU(pAccessCounterBuffer);
     OBJUVM *pUvm = GPU_GET_UVM(pGpu);
 
-    return uvmReadAccessCntrBufferGetPtr_HAL(pGpu, pUvm, pAccessCounterBuffer->accessCounterIndex, &pGetParams->accessCntrBufferGetOffset);
+    return uvmReadAccessCntrBufferGetPtr_HAL(pGpu, pUvm, &pGetParams->accessCntrBufferGetOffset);
 }
 
 NV_STATUS
@@ -53,7 +53,7 @@ accesscntrCtrlCmdAccessCntrBufferWriteGet_IMPL
     OBJGPU *pGpu = GPU_RES_GET_GPU(pAccessCounterBuffer);
     OBJUVM *pUvm = GPU_GET_UVM(pGpu);
 
-    return uvmWriteAccessCntrBufferGetPtr_HAL(pGpu, pUvm, pAccessCounterBuffer->accessCounterIndex, pGetParams->accessCntrBufferGetValue);
+    return uvmWriteAccessCntrBufferGetPtr_HAL(pGpu, pUvm, pGetParams->accessCntrBufferGetValue);
 }
 
 NV_STATUS
@@ -66,7 +66,7 @@ accesscntrCtrlCmdAccessCntrBufferReadPut_IMPL
     OBJGPU *pGpu = GPU_RES_GET_GPU(pAccessCounterBuffer);
     OBJUVM *pUvm = GPU_GET_UVM(pGpu);
 
-    return uvmReadAccessCntrBufferPutPtr_HAL(pGpu, pUvm, pAccessCounterBuffer->accessCounterIndex, &pGetParams->accessCntrBufferPutOffset);
+    return uvmReadAccessCntrBufferPutPtr_HAL(pGpu, pUvm, &pGetParams->accessCntrBufferPutOffset);
 }
 
 NV_STATUS
@@ -76,7 +76,10 @@ accesscntrCtrlCmdAccessCntrBufferGetSize_IMPL
     NVC365_CTRL_ACCESS_CNTR_BUFFER_GET_SIZE_PARAMS *pGetParams
 )
 {
-    pGetParams->accessCntrBufferSize = pAccessCounterBuffer->pUvmAccessCntrAllocMemDesc->Size;
+    OBJGPU *pGpu = GPU_RES_GET_GPU(pAccessCounterBuffer);
+    OBJUVM *pUvm = GPU_GET_UVM(pGpu);
+
+    pGetParams->accessCntrBufferSize = pUvm->accessCntrBuffer.accessCntrBufferSize;
 
     return NV_OK;
 }
@@ -111,11 +114,11 @@ accesscntrCtrlCmdAccessCntrBufferEnable_IMPL
 
     if (pGetParams->enable)
     {
-        return uvmEnableAccessCntr_HAL(pGpu, pUvm, pAccessCounterBuffer->accessCounterIndex, NV_FALSE);
+        return uvmEnableAccessCntr_HAL(pGpu, pUvm, NV_FALSE);
     }
     else
     {
-        return uvmDisableAccessCntr_HAL(pGpu, pUvm, pAccessCounterBuffer->accessCounterIndex, NV_FALSE);
+        return uvmDisableAccessCntr_HAL(pGpu, pUvm, NV_FALSE);
     }
 }
 
@@ -152,14 +155,13 @@ accesscntrCtrlCmdAccessCntrBufferGetRegisterMappings_IMPL
     OBJUVM *pUvm = GPU_GET_UVM(pGpu);
 
     return uvmGetAccessCntrRegisterMappings_HAL(pGpu, pUvm,
-                                                pAccessCounterBuffer->accessCounterIndex,
-                                               &pParams->pAccessCntrBufferGet,
-                                               &pParams->pAccessCntrBufferPut,
-                                               &pParams->pAccessCntrBufferFull,
-                                               &pParams->pHubIntr,
-                                               &pParams->pHubIntrEnSet,
-                                               &pParams->pHubIntrEnClear,
-                                               &pParams->accessCntrMask);
+                                           &pParams->pAccessCntrBufferGet,
+                                           &pParams->pAccessCntrBufferPut,
+                                           &pParams->pAccessCntrBufferFull,
+                                           &pParams->pHubIntr,
+                                           &pParams->pHubIntrEnSet,
+                                           &pParams->pHubIntrEnClear,
+                                           &pParams->accessCntrMask);
 }
 
 NV_STATUS
@@ -172,7 +174,7 @@ accesscntrCtrlCmdAccessCntrBufferGetFullInfo_IMPL
     OBJGPU *pGpu = GPU_RES_GET_GPU(pAccessCounterBuffer);
     OBJUVM *pUvm = GPU_GET_UVM(pGpu);
 
-    return uvmReadAccessCntrBufferFullPtr_HAL(pGpu, pUvm, pAccessCounterBuffer->accessCounterIndex, &pParams->fullFlag);
+    return uvmReadAccessCntrBufferFullPtr_HAL(pGpu, pUvm, &pParams->fullFlag);
 }
 
 NV_STATUS
@@ -185,7 +187,7 @@ accesscntrCtrlCmdAccessCntrBufferResetCounters_IMPL
     OBJGPU *pGpu = GPU_RES_GET_GPU(pAccessCounterBuffer);
     OBJUVM *pUvm = GPU_GET_UVM(pGpu);
 
-    NV_STATUS status = uvmResetAccessCntrBuffer_HAL(pGpu, pUvm, pAccessCounterBuffer->accessCounterIndex, pParams->counterType);
+    NV_STATUS status = uvmResetAccessCntrBuffer_HAL(pGpu, pUvm, pParams->counterType);
     if (status == NV_OK)
     {
         pParams->resetFlag = NV_TRUE;
@@ -210,20 +212,17 @@ accesscntrCtrlCmdAccessCntrSetConfig_IMPL
     NvU32 cmd = pParams->cmd;
 
     if (cmd & NVC365_CTRL_ACCESS_COUNTER_SET_MIMC_GRANULARITY)
-        uvmAccessCntrSetGranularity_HAL(pGpu, pUvm, pAccessCounterBuffer->accessCounterIndex,
-            MIMC, pParams->mimcGranularity);
+        uvmAccessCntrSetGranularity_HAL(pGpu, pUvm, MIMC, pParams->mimcGranularity);
     if (cmd & NVC365_CTRL_ACCESS_COUNTER_SET_MOMC_GRANULARITY)
-        uvmAccessCntrSetGranularity_HAL(pGpu, pUvm, pAccessCounterBuffer->accessCounterIndex,
-            MOMC, pParams->momcGranularity);
+        uvmAccessCntrSetGranularity_HAL(pGpu, pUvm, MOMC, pParams->momcGranularity);
     if (cmd & NVC365_CTRL_ACCESS_COUNTER_SET_MIMC_LIMIT)
-        uvmAccessCntrSetCounterLimit_HAL(pGpu, pUvm, pAccessCounterBuffer->accessCounterIndex,
+        uvmAccessCntrSetCounterLimit_HAL(pGpu, pUvm,
             NVC365_CTRL_ACCESS_COUNTER_MIMC_LIMIT, pParams->mimcLimit);
     if (cmd & NVC365_CTRL_ACCESS_COUNTER_SET_MOMC_LIMIT)
-        uvmAccessCntrSetCounterLimit_HAL(pGpu, pUvm, pAccessCounterBuffer->accessCounterIndex,
+        uvmAccessCntrSetCounterLimit_HAL(pGpu, pUvm,
             NVC365_CTRL_ACCESS_COUNTER_MOMC_LIMIT, pParams->momcLimit);
     if (cmd & NVC365_CTRL_ACCESS_COUNTER_SET_THRESHOLD)
-        uvmAccessCntrSetThreshold_HAL(pGpu, pUvm, pAccessCounterBuffer->accessCounterIndex,
-            pParams->threshold);
+        uvmAccessCntrSetThreshold_HAL(pGpu, pUvm, pParams->threshold);
 
     return NV_OK;
 }
@@ -247,7 +246,6 @@ subdeviceCtrlCmdInternalUvmRegisterAccessCntrBuffer_IMPL
     }
 
     status = uvmAccessCntrBufferRegister(pGpu, pUvm,
-                                         pParams->accessCounterIndex,
                                          pParams->bufferSize,
                                          pParams->bufferPteArray);
     return status;
@@ -256,15 +254,41 @@ subdeviceCtrlCmdInternalUvmRegisterAccessCntrBuffer_IMPL
 NV_STATUS
 subdeviceCtrlCmdInternalUvmUnregisterAccessCntrBuffer_IMPL
 (
-    Subdevice                                                     *pSubdevice,
-    NV2080_CTRL_INTERNAL_UVM_UNREGISTER_ACCESS_CNTR_BUFFER_PARAMS *pParams
+    Subdevice *pSubdevice
 )
 {
     NV_STATUS status;
     OBJGPU *pGpu = GPU_RES_GET_GPU(pSubdevice);
     OBJUVM *pUvm = GPU_GET_UVM(pGpu);
 
-    status = uvmAccessCntrBufferUnregister(pGpu, pUvm, pParams->accessCounterIndex);
+    status = uvmAccessCntrBufferUnregister(pGpu, pUvm);
 
     return status;
+}
+
+NV_STATUS
+subdeviceCtrlCmdInternalUvmServiceAccessCntrBuffer_IMPL
+(
+    Subdevice *pSubdevice
+)
+{
+    OBJGPU *pGpu = GPU_RES_GET_GPU(pSubdevice);
+    OBJUVM *pUvm = GPU_GET_UVM(pGpu);
+
+    return uvmAccessCntrService_HAL(pGpu, pUvm);
+}
+
+NV_STATUS
+subdeviceCtrlCmdInternalUvmGetAccessCntrBufferSize_IMPL
+(
+    Subdevice *pSubdevice,
+    NV2080_CTRL_INTERNAL_UVM_GET_ACCESS_CNTR_BUFFER_SIZE_PARAMS *pParams
+)
+{
+    OBJGPU *pGpu = GPU_RES_GET_GPU(pSubdevice);
+    OBJUVM *pUvm = GPU_GET_UVM(pGpu);
+
+    pParams->bufferSize = uvmGetAccessCounterBufferSize_HAL(pGpu, pUvm);
+
+    return NV_OK;
 }

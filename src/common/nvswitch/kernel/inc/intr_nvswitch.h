@@ -42,8 +42,7 @@
                         __FUNCTION__, __LINE__, _unhandled);               \
             NVSWITCH_PRINT_SXID(_device,                                   \
                   NVSWITCH_ERR_HW_HOST_UNHANDLED_INTERRUPT,                \
-                  "Fatal, unhandled interrupt in %s(%d)\n",                \
-                  __FUNCTION__, __LINE__);                                 \
+                  "Fatal, unhandled interrupt\n");                         \
             NVSWITCH_LOG_FATAL_DATA(_device, _HW,                          \
                 _HW_HOST_UNHANDLED_INTERRUPT, 0, 0, NV_FALSE, &_unhandled);\
         }                                                                  \
@@ -91,7 +90,7 @@
         NVSWITCH_PRINT_SXID(device, NVSWITCH_ERR ## _logenum,                \
             "Non-fatal, Link %02d %s%s\n", link, _str, NVSWITCH_FIRST());    \
         NVSWITCH_LOG_NONFATAL_DATA(device, _HW, _logenum,                    \
-            link, 0, NV_FALSE, &report, _str);                                     \
+            link, 0, NV_FALSE, &report);                                     \
         if (nvswitch_lib_notify_client_events(device,                        \
             NVSWITCH_DEVICE_EVENT_NONFATAL) != NVL_SUCCESS)                  \
         {                                                                    \
@@ -107,7 +106,7 @@
         NVSWITCH_PRINT_SXID(device, NVSWITCH_ERR ## _logenum,            \
             "Fatal, Link %02d %s%s\n", link, _str, NVSWITCH_FIRST());    \
         NVSWITCH_LOG_FATAL_DATA(device, _HW, _logenum,                   \
-            link, 0, NV_FALSE, &report, _str);                           \
+            link, 0, NV_FALSE, &report);                                 \
         nvswitch_set_fatal_error(device, device_fatal, link);            \
         if (nvswitch_lib_notify_client_events(device,                    \
             NVSWITCH_DEVICE_EVENT_FATAL) != NVL_SUCCESS)                 \
@@ -123,7 +122,7 @@
         NVSWITCH_PRINT_SXID(device, NVSWITCH_ERR ## _logenum,                                  \
             "Non-fatal, %s, instance=%d, chiplet=%d\n", _str, instance, chiplet);              \
         NVSWITCH_LOG_NONFATAL_DATA(device, _HW, _logenum,                                      \
-            instance, chiplet, NV_FALSE, &err_data, _str);                                     \
+            instance, chiplet, NV_FALSE, &err_data);                                            \
         if (nvswitch_lib_notify_client_events(device,                                          \
             NVSWITCH_DEVICE_EVENT_NONFATAL) != NVL_SUCCESS)                                    \
         {                                                                                      \
@@ -138,7 +137,7 @@
         NVSWITCH_PRINT_SXID(device, NVSWITCH_ERR ## _logenum,                               \
             "Fatal, %s, instance=%d, chiplet=%d\n", _str, instance, chiplet);               \
         NVSWITCH_LOG_FATAL_DATA(device, _HW, _logenum,                                      \
-            instance, chiplet, NV_FALSE, &err_data, _str);                                  \
+            instance, chiplet, NV_FALSE, &err_data);                                         \
         nvswitch_set_fatal_error(device, device_fatal, 0);                                  \
         if (nvswitch_lib_notify_client_events(device,                                       \
             NVSWITCH_DEVICE_EVENT_FATAL) != NVL_SUCCESS)                                    \
@@ -196,7 +195,7 @@
         else                                                        \
         {                                                           \
             NVSWITCH_LOG_NONFATAL_DATA(device, _HW, _logenum, link, \
-                                       0, NV_FALSE, &_data);        \
+                                       0, NV_FALSE, &data);         \
         }                                                           \
     } while(0)
 

@@ -21,26 +21,25 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#pragma once
+#ifndef _cl000f_h_
+#define _cl000f_h_
 
-#include <nvtypes.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-//
-// This file was generated with FINN, an NVIDIA coding tool.
-// Source file:      class/cl000f.finn
-//
+#include "nvtypes.h"
 
-#define FABRIC_MANAGER_SESSION                 (0xfU) /* finn: Evaluated from "NV000F_ALLOCATION_PARAMETERS_MESSAGE_ID" */
+#define FABRIC_MANAGER_SESSION  (0x0000000F)
 
-#define NV000F_NOTIFIERS_FABRIC_EVENT          (0)
+#define NV000F_NOTIFIERS_FABRIC_EVENT (0)
 
-#define NV000F_FLAGS_CHANNEL_RECOVERY          0:0
-#define NV000F_FLAGS_CHANNEL_RECOVERY_ENABLED  0x0
-#define NV000F_FLAGS_CHANNEL_RECOVERY_DISABLED 0x1
+#define NV000F_FLAGS_CHANNEL_RECOVERY              0:0
+#define NV000F_FLAGS_CHANNEL_RECOVERY_ENABLED      0x0
+#define NV000F_FLAGS_CHANNEL_RECOVERY_DISABLED     0x1
 
-#define NV000F_ALLOCATION_PARAMETERS_MESSAGE_ID (0x000fU)
-
-typedef struct NV000F_ALLOCATION_PARAMETERS {
+typedef struct
+{
     //
     // capDescriptor is a file descriptor for unix RM clients, but a void
     // pointer for windows RM clients.
@@ -52,4 +51,10 @@ typedef struct NV000F_ALLOCATION_PARAMETERS {
 
     NvU32 flags;
 } NV000F_ALLOCATION_PARAMETERS;
+
+#ifdef __cplusplus
+};     /* extern "C" */
+#endif
+
+#endif /* _cl000f_h_ */
 

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2018-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2018-2020 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -67,7 +67,7 @@ extern "C" {
  *            .-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-.
  *          0 |1                                                              |
  *          1 |                                                              1|
- *            `-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-'
+ *            `-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-' 
  *
  *          Thus, in order to conceptually model an NV_BITVECTOR horizontally as
  *          a continual ordered list of bits, one would have to write the
@@ -226,25 +226,6 @@ struct NV_BITVECTOR
                           pRawMask,                                         \
                           rawMaskSize)
 
-#define bitVectorGetSlice(pBitVector, range, slice)                         \
-    bitVectorGetSlice_IMPL(&((pBitVector)->real),                           \
-                          sizeof(((pBitVector)->last->_)),                  \
-                          range,                                            \
-                          slice)
-
-#define bitVectorGetSliceAtOffset(pBitVector, offset, size, slice)          \
-    bitVectorGetSlice_IMPL(&((pBitVector)->real),                           \
-                          sizeof(((pBitVector)->last->_)),                  \
-                          rangeMake(offset, offset + size - 1),             \
-                          slice)
-
-#define bitVectorLowestNBits(pBitVectorDst, pBitVectorSrc,  N)              \
-    bitVectorLowestNBits_IMPL(&((pBitVectorDst)->real),                     \
-                          sizeof(((pBitVectorDst)->last->_)),               \
-                          &((pBitVectorSrc)->real),                         \
-                          sizeof(((pBitVectorSrc)->last->_)),               \
-                          N)
-
 #define FOR_EACH_IN_BITVECTOR(pBitVector, index)                            \
     {                                                                       \
         MAKE_ANON_BITVECTOR(sizeof(((pBitVector)->last->_))) localMask;     \
@@ -259,20 +240,20 @@ struct NV_BITVECTOR
         }                                                                   \
     }
 
-#define FOR_EACH_IN_BITVECTOR_PAIR(pBitVectorA, indexA, pBitVectorB, indexB) \
-    {                                                                        \
-        MAKE_ANON_BITVECTOR(sizeof(((pBitVectorA)->last->_))) localMaskA;    \
-        bitVectorCopy(&localMaskA, (pBitVectorA));                           \
-        MAKE_ANON_BITVECTOR(sizeof(((pBitVectorB)->last->_))) localMaskB;    \
-        bitVectorCopy(&localMaskB, (pBitVectorB));                           \
-        for ((indexA) = bitVectorCountTrailingZeros(&localMaskA),            \
-             (indexB) = bitVectorCountTrailingZeros(&localMaskB);            \
-             !bitVectorTestAllCleared(&localMaskA) &&                        \
-             !bitVectorTestAllCleared(&localMaskB);                          \
-             bitVectorClr(&localMaskA, (indexA)),                            \
-             bitVectorClr(&localMaskB, (indexB)),                            \
-             (indexA) = bitVectorCountTrailingZeros(&localMaskA),            \
-             (indexB) = bitVectorCountTrailingZeros(&localMaskB))            \
+#define FOR_EACH_IN_BITVECTOR_PAIR(pBitVectorA, indexA, pBitVectorB, indexB)\
+    {                                                                       \
+        MAKE_ANON_BITVECTOR(sizeof(((pBitVectorA)->last->_))) localMaskA;   \
+        bitVectorCopy(&localMaskA, (pBitVectorA));                          \
+        MAKE_ANON_BITVECTOR(sizeof(((pBitVectorB)->last->_))) localMaskB;   \
+        bitVectorCopy(&localMaskB, (pBitVectorB));                          \
+        for ((indexA) = bitVectorCountTrailingZeros(&localMaskA),           \
+             (indexB) = bitVectorCountTrailingZeros(&localMaskB);           \
+             !bitVectorTestAllCleared(&localMaskA) &&                       \
+             !bitVectorTestAllCleared(&localMaskB);                         \
+             bitVectorClr(&localMaskA, (indexA)),                           \
+             bitVectorClr(&localMaskB, (indexB)),                           \
+             (indexA) = bitVectorCountTrailingZeros(&localMaskA),           \
+             (indexB) = bitVectorCountTrailingZeros(&localMaskB))           \
         {
 
 #define FOR_EACH_IN_BITVECTOR_PAIR_END()                                    \
@@ -297,8 +278,8 @@ NV_STATUS
 bitVectorClr_IMPL
 (
     NV_BITVECTOR *pBitVector,
-    NvU32 bitVectorLast,
-    NvU32 idx
+    NvU16 bitVectorLast,
+    NvU16 idx
 );
 
 NV_STATUS
@@ -320,8 +301,8 @@ NV_STATUS
 bitVectorSet_IMPL
 (
     NV_BITVECTOR *pBitVector,
-    NvU32 bitVectorLast,
-    NvU32 idx
+    NvU16 bitVectorLast,
+    NvU16 idx
 );
 
 NV_STATUS
@@ -336,8 +317,8 @@ NV_STATUS
 bitVectorInv_IMPL
 (
     NV_BITVECTOR *pBitVector,
-    NvU32 bitVectorLast,
-    NvU32 idx
+    NvU16 bitVectorLast,
+    NvU16 idx
 );
 
 NV_STATUS
@@ -393,8 +374,8 @@ NvBool
 bitVectorTest_IMPL
 (
     const NV_BITVECTOR *pBitVector,
-    NvU32 bitVectorLast,
-    NvU32 idx
+    NvU16 bitVectorLast,
+    NvU16 idx
 );
 
 NV_STATUS
@@ -485,25 +466,6 @@ bitVectorFromRaw_IMPL
     NvU16 bitVectorLast,
     const void *pRawMask,
     NvU32 rawMaskSize
-);
-
-NV_STATUS
-bitVectorGetSlice_IMPL
-(
-    NV_BITVECTOR *pBitVector,
-    NvU16 bitVectorLast,
-    NV_RANGE range,
-    NvU64 *slice
-);
-
-NV_STATUS
-bitVectorLowestNBits_IMPL
-(
-    NV_BITVECTOR *pBitVectorDst,
-    NvU16 bitVectorDstLast,
-    const NV_BITVECTOR *pBitVectorSrc,
-    NvU16 bitVectorSrcLast,
-    NvU16 n
 );
 
 #ifdef __cplusplus

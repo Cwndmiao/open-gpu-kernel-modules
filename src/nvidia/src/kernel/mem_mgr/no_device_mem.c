@@ -80,9 +80,6 @@ nodevicememConstruct_IMPL
     if (protection == NVOS32_ATTR2_PROTECTION_USER_READ_ONLY)
         memdescSetFlag(pMemDesc, MEMDESC_FLAGS_USER_READ_ONLY, NV_TRUE);
 
-    NV_CHECK_OK_OR_GOTO(status, LEVEL_INFO,
-        memSetGpuCacheSnoop(NULL, attr, pMemDesc), cleanup);
-
     // initialize the memory description
     pMemory->categoryClassId = pCallContext->pResourceRef->externalClassId;
     pMemory->pMemDesc   = pMemDesc;
@@ -111,7 +108,7 @@ void nodevicememDestruct_IMPL(NoDeviceMemory *pNoDeviceMemory)
 
     if (pMemory->KernelVAddr != NvP64_NULL)
     {
-        memdescUnmap(pMemory->pMemDesc, NV_TRUE,
+        memdescUnmap(pMemory->pMemDesc, NV_TRUE, osGetCurrentProcess(),
                      pMemory->KernelVAddr, pMemory->KernelMapPriv);
         pMemory->KernelVAddr = NvP64_NULL;
         pMemory->KernelMapPriv = NvP64_NULL;

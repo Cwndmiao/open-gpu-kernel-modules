@@ -64,7 +64,6 @@ typedef struct _API_SECURITY_INFO
     API_PARAM_LOCATION paramLocation;
     PSECURITY_TOKEN pProcessToken;
     void *clientOSInfo;
-    void *gpuOsInfo;
 } API_SECURITY_INFO;
 
 

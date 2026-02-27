@@ -25,8 +25,7 @@
 #include "os/os.h"
 #include "gpu/subdevice/subdevice.h"
 #include "rmapi/rmapi.h"
-#include "rmapi/rs_utils.h"
-#include "gpu_mgr/gpu_mgr.h"
+#include "rmapi/rs_utils.h" 
 #include "gpu/gpu.h"
 #include "gpu/perf/kern_perf_pm.h"
 
@@ -67,8 +66,7 @@ kPerfPerfmonClientDeviceSet
     RS_ITERATOR         it;
     NV_STATUS           status = NV_OK;
 
-    pClient = serverutilGetClientUnderLock(hClient);
-    if (pClient == NULL)
+    if (NV_OK != serverutilGetClientUnderLock(hClient, &pClient))
     {
         return NV_ERR_INVALID_CLIENT;
     }
@@ -99,7 +97,7 @@ kPerfPerfmonClientDeviceSet
             NV2080_CTRL_INTERNAL_PERF_PERFMON_CLIENT_RESERVATION_CHECK_PARAMS params = {0};
             params.bReservation  = bReservation;
 
-            status = pRmApi->Control(pRmApi,
+            status = pRmApi->Control(pRmApi, 
                                      hClient,
                                      it.pResourceRef->hResource,
                                      NV2080_CTRL_CMD_INTERNAL_PERF_PERFMON_CLIENT_RESERVATION_CHECK,
@@ -222,7 +220,7 @@ kPerfPerfmonClientDeviceSet
 
             NV_CHECK_OK_OR_CAPTURE_FIRST_ERROR(status,
                                                LEVEL_ERROR,
-                                               pRmApi->Control(pRmApi,
+                                               pRmApi->Control(pRmApi, 
                                                                hClient,
                                                                it.pResourceRef->hResource,
                                                                NV2080_CTRL_CMD_INTERNAL_PERF_PERFMON_CLIENT_RESERVATION_SET,

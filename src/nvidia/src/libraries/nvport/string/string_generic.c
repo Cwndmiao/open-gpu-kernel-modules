@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2016-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2020 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -28,7 +28,6 @@
 
 #include "nvport/nvport.h"
 #include "nvmisc.h"
-
 
 #ifndef NVPORT_STRING_DONT_DEFINE_portStringLength
 NvLength
@@ -76,34 +75,18 @@ portStringCompare
     NvLength maxLength
 )
 {
-    NvLength i;
+    NvLength length;
 
     PORT_ASSERT_CHECKED(str1 != NULL);
     PORT_ASSERT_CHECKED(str2 != NULL);
 
-    for (i = 0; i < maxLength; i++)
-    {
-        if (str1[i] != str2[i])
-        {
-            //
-            // Cast to unsigned before assigning to NvS32, to avoid sign
-            // extension.  E.g., if str1[i] is 0xff, we want s1 to contain
-            // 0xff, not -1.  In practice, this shouldn't matter for printable
-            // characters, but still...
-            //
-            NvS32 s1 = (unsigned char)str1[i];
-            NvS32 s2 = (unsigned char)str2[i];
-            return s1 - s2;
-        }
+    length = portStringLengthSafe(str1, maxLength);
 
-        if ((str1[i] == '\0') &&
-            (str2[i] == '\0'))
-        {
-            break;
-        }
-    }
+    // Add 1 for the null terminator.
+    if (length < maxLength)
+        length++;
 
-    return 0;
+    return  portMemCmp(str1, str2, length);
 }
 #endif
 
@@ -287,93 +270,5 @@ portStringBufferToHexGroups
 
     str[written] = 0;
     return written;
-}
-#endif
-
-#ifndef NVPORT_STRING_DONT_DEFINE_portStringTok
-static const char *portStringChr(const char *s, int c)
-{
-    while (s && *s != 0 && *s != c)
-    {
-        s++;
-    }
-
-    if (*s == 0)
-    {
-        return NULL;
-    }
-
-    return s;
-}
-
-char *portStringTok(char *str, const char *delim, char **saveptr)
-{
-    char *cp, *start;
-    start = cp = str ? str : *saveptr;
-
-    if (cp == NULL)
-    {
-        return NULL;
-    }
-
-    while (*cp && !portStringChr(delim, *cp))
-    {
-        ++cp;
-    }
-
-    if (!*cp)
-    {
-        if (cp == start)
-        {
-            return NULL;
-        }
-        *saveptr = NULL;
-        return start;
-    }
-    else
-    {
-        *cp++ = '\0';
-        *saveptr = cp;
-        return start;
-    }
-
-}
-#endif
-
-#ifndef NVPORT_STRING_DONT_DEFINE_portStringStrStr
-char *portStringStrStr(char *str, char *substr)
-{
-    char* ptr;
-
-    ptr = str;
-
-    while (*ptr)
-    {
-        if (portStringCompare(ptr, substr, portStringLength(substr)) == 0)
-        {
-            return ptr;
-        }
-        ptr++;
-    }
-    return NULL;
-}
-#endif
-
-#ifndef NVPORT_STRING_DONT_DEFINE_portStringStrChar
-const char *portStringStrChar(const char *str, int c)
-{
-    const char* ptr;
-
-    ptr = str;
-
-    while (*ptr)
-    {
-        if (*ptr == (char)c)
-        {
-            return ptr;
-        }
-        ptr++;
-    }
-    return NULL;
 }
 #endif

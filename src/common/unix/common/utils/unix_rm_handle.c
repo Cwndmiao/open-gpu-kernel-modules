@@ -195,8 +195,8 @@ NvU32 nvGenerateUnixRmHandleInternal(NVUnixRmHandleAllocatorPtr pAllocator)
 
     /* Find free handle */
     handleId = 1;
-    while ((handleId <= pAllocator->maxHandles) &&
-           USED(pAllocator->bitmap, handleId)) {
+    while (USED(pAllocator->bitmap, handleId) &&
+           (handleId <= pAllocator->maxHandles)) {
         handleId++;
     }
 

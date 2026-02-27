@@ -30,6 +30,7 @@
  */
 
 #include <os-interface.h>
+#include <osfuncs.h>
 
 // File modes, added for NVIDIA capabilities.
 #define OS_RUSR 00400                         // read permission, owner
@@ -49,7 +50,7 @@
 #define OS_XUGO (OS_XUSR | OS_XGRP | OS_XOTH)
 
 // Trigger for collecting GPU state for later extraction.
-void RmLogGpuCrash(OBJGPU *);
+NV_STATUS   RmLogGpuCrash(OBJGPU *);
 
 // This is callback function in the miniport.
 // The argument is a device extension, and must be cast as such to be useful.

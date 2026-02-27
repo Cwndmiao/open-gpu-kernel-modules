@@ -24,7 +24,7 @@
 #include "nvkms-types.h"
 #include "nvkms-3dvision.h"
 
-void nv3DVisionAuthenticationEvo(NVDispEvoRec *pDispEvo, const NvU32 apiHead)
+void nv3DVisionAuthenticationEvo(NVDispEvoRec *pDispEvo, const NvU32 head)
 {
     return;
 }
@@ -47,7 +47,7 @@ void nvDisable3DVisionAegis(const NVDpyEvoRec *pDpyEvo)
 }
 
 void nvSendHwModeTimingsToAegisEvo(const NVDispEvoRec *pDispEvo,
-                                   const NvU32 apiHead)
+                                   const NvU32 head)
 {
     return;
 }

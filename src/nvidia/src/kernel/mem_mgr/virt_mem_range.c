@@ -25,6 +25,7 @@
 #include "mem_mgr/virt_mem_range.h"
 #include "os/os.h"
 #include "vgpu/rpc.h"
+#include "gpu/device/device.h"
 #include "gpu/mem_mgr/vaspace_api.h"
 #include "gpu/mmu/kern_gmmu.h"
 #include "class/cl0070.h"
@@ -70,12 +71,12 @@ vmrangeConstruct_IMPL
     //
     if (pAllocData->hVASpace == 0)
     {
-        NV_ASSERT_OR_RETURN(kgmmuGetMaxVASize(pKernelGmmu), NV_ERR_INVALID_STATE);
-        maxVA = kgmmuGetMaxVASize(pKernelGmmu);
+        NV_ASSERT_OR_RETURN(pKernelGmmu->maxVASize, NV_ERR_INVALID_STATE);
+        maxVA = pKernelGmmu->maxVASize;
     }
     else if (pAllocData->hVASpace == NV_MEMORY_VIRTUAL_SYSMEM_DYNAMIC_HVASPACE)
     {
-        NV_ASSERT_OR_RETURN(kgmmuGetMaxVASize(pKernelGmmu), NV_ERR_INVALID_STATE);
+        NV_ASSERT_OR_RETURN(pKernelGmmu->maxVASize, NV_ERR_INVALID_STATE);
         maxVA = 1ULL << 40;
     }
     else
@@ -125,7 +126,7 @@ vmrangeConstruct_IMPL
     if (IS_VIRTUAL(pGpu) || IS_GSP_CLIENT(pGpu))
     {
         NV_RM_RPC_ALLOC_OBJECT(pGpu, hClient, hParent, hMemory, class,
-            pAllocData, sizeof(*pAllocData), status);
+            pAllocData, status);
         if (status != NV_OK)
         {
             memdescDestroy(pMemDesc);

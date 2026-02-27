@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001-2022, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2001-2019, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -20,17 +20,17 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#pragma once
+#ifndef _cl0070_h_
+#define _cl0070_h_
 
-#include <nvtypes.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-//
-// This file was generated with FINN, an NVIDIA coding tool.
-// Source file:      class/cl0070.finn
-//
+#include "nvtypes.h"
 
-#define NV01_MEMORY_VIRTUAL        (0x70U) /* finn: Evaluated from "NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_MESSAGE_ID" */
-#define NV01_MEMORY_SYSTEM_DYNAMIC (0x70U) /* finn: Evaluated from "NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_MESSAGE_ID" */
+#define   NV01_MEMORY_VIRTUAL                                      (0x00000070)
+#define   NV01_MEMORY_SYSTEM_DYNAMIC                               (0x00000070)
 
 /*
  * NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS
@@ -61,13 +61,17 @@
  * limit - When limit is zero the maximum limit used.  If a non-zero limit
  *      is specified then it will be used.  The final limit is returned.
  */
-#define NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_MESSAGE_ID (0x0070U)
-
-typedef struct NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS {
-    NV_DECLARE_ALIGNED(NvU64 offset, 8);   // [IN] - offset into address space
-    NV_DECLARE_ALIGNED(NvU64 limit, 8);    // [IN/OUT] - limit of address space
-    NvHandle hVASpace;                     // [IN] - Address space handle
+typedef struct
+{
+    NvU64     offset     NV_ALIGN_BYTES(8); // [IN] - offset into address space
+    NvU64     limit      NV_ALIGN_BYTES(8); // [IN/OUT] - limit of address space
+    NvHandle  hVASpace;                     // [IN] - Address space handle
 } NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS;
 
-#define NV_MEMORY_VIRTUAL_SYSMEM_DYNAMIC_HVASPACE 0xffffffffU
+#define NV_MEMORY_VIRTUAL_SYSMEM_DYNAMIC_HVASPACE       (0xffffffffu)
 
+#ifdef __cplusplus
+};     /* extern "C" */
+#endif
+
+#endif /* _cl0070_h_ */

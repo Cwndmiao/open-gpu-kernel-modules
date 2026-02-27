@@ -24,10 +24,6 @@
 #ifndef __NVKMS_PREALLOC_H__
 #define __NVKMS_PREALLOC_H__
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "nvkms-types.h"
 #include "nvkms-prealloc-types.h"
 
@@ -36,9 +32,5 @@ void nvPreallocRelease(NVDevEvoPtr pDevEvo, enum NVPreallocType type);
 
 NvBool nvPreallocAlloc(NVDevEvoPtr pDevEvo);
 void nvPreallocFree(NVDevEvoPtr pDevEvo);
-
-#ifdef __cplusplus
-};
-#endif
 
 #endif /* __NVKMS_PREALLOC_H__ */

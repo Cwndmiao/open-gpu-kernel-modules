@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2018-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2018-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -25,20 +25,18 @@
 #include "gpu/gpu.h"
 #include "gpu/mem_mgr/mem_mgr.h"
 #include "gpu/mem_sys/kern_mem_sys.h"
+#include "gpu/mem_mgr/heap.h"
 #include "gpu/mem_mgr/mem_desc.h"
-#include "platform/sli/sli.h"
 
 #include "nvRmReg.h"
 
 #include "kernel/gpu/intr/intr.h"
 #include "kernel/gpu/mig_mgr/kernel_mig_manager.h"
+#include "gpu/subdevice/subdevice.h"
 #include "vgpu/vgpu_events.h"
-#include "nvdevid.h"
 
 #include "published/ampere/ga100/dev_mmu.h"
 #include "published/ampere/ga100/dev_fb.h"
-
-#include "kernel/virtualization/common_vgpu_mgr.h"
 
 #define NV_CBC_MAX_SIZE_BUG_2509894_WAR   ((3 * NVBIT64(30)) / 2) // 1.5GBs
 
@@ -83,15 +81,6 @@ memmgrAllocDetermineAlignment_GA100
     NvU64          hwAlignment
 )
 {
-    const MEMORY_SYSTEM_STATIC_CONFIG    *pMemorySystemConfig =
-        kmemsysGetStaticConfig(pGpu, GPU_GET_KERNEL_MEMORY_SYSTEM(pGpu));
-
-    // set the alignment to 256K if property is enabled and its a compressed surface
-    if (pMemorySystemConfig->bUseOneToFourComptagLineAllocation &&
-        !FLD_TEST_DRF(OS32, _ATTR, _COMPR, _NONE, retAttr))
-    {
-        hwAlignment = pMemorySystemConfig->comprPageSize - 1;
-    }
 
     return memmgrAllocDetermineAlignment_GM107(pGpu, pMemoryManager, pMemSize, pAlign, alignPad,
                                                allocFlags, retAttr, retAttr2, hwAlignment);
@@ -120,13 +109,18 @@ memmgrScrubRegistryOverrides_GA100
     // Disabling for GSP-RM ucode, since scrubbing is done from CPU-side kernel RM.
     // Enabling virtual scrubbing mode for SRIOV-HEAVY mode.
     //
+    // Temporary: Disabling scrub on free if CC is enabled. Once the
+    // support for secure work launch is in, this temporary change can be
+    // reverted. Bug: 3334708
+    //
 
     if ((RMCFG_FEATURE_PLATFORM_WINDOWS && !pGpu->getProperty(pGpu, PDB_PROP_GPU_IN_TCC_MODE)) ||
          IS_SIMULATION(pGpu) || IsDFPGA(pGpu) ||
          pGpu->getProperty(pGpu, PDB_PROP_GPU_IS_VIRTUALIZATION_MODE_HOST_VGPU) ||
          IS_VIRTUAL_WITHOUT_SRIOV(pGpu) ||
          RMCFG_FEATURE_PLATFORM_GSP ||
-         (pGpu->getProperty(pGpu, PDB_PROP_GPU_BROKEN_FB) && !pMemoryManager->bSysmemCompressionSupportDef) ||
+         (pGpu->getProperty(pGpu, PDB_PROP_GPU_BROKEN_FB) && !gpuIsCacheOnlyModeEnabled(pGpu)) ||
+         gpuIsCCFeatureEnabled(pGpu) ||
          IsSLIEnabled(pGpu))
     {
         pMemoryManager->bScrubOnFreeEnabled = NV_FALSE;
@@ -285,7 +279,7 @@ memmgrGetMaxContextSize_GA100
     // of GR buffers. Since GR buffers are not allocated inside guest RM
     // we are skipping reservation there
     //
-    if (RMCFG_FEATURE_PLATFORM_WINDOWS &&
+    if (RMCFG_FEATURE_PLATFORM_WINDOWS_LDDM &&
         pGpu->getProperty(pGpu, PDB_PROP_GPU_IN_TCC_MODE))
     {
         size += 32 * 1024 * 1024;
@@ -369,27 +363,20 @@ memmgrGetBlackListPages_GA100
         return NV_ERR_NOT_SUPPORTED;
     }
 
-    NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS *pBlParams =
-        portMemAllocNonPaged(sizeof(*pBlParams));
-    if (pBlParams == NULL)
-    {
-        return NV_ERR_NO_MEMORY;
-    }
-
     while (baseIndex < NV2080_CTRL_FB_DYNAMIC_BLACKLIST_MAX_PAGES)
     {
-        RM_API *pRmApi = GPU_GET_PHYSICAL_RMAPI(pGpu);
+        RM_API *pRmApi = IS_GSP_CLIENT(pGpu) ? GPU_GET_PHYSICAL_RMAPI(pGpu)
+                                             : rmapiGetInterface(RMAPI_GPU_LOCK_INTERNAL);
+        NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS blParams = {0};
 
-        portMemSet(pBlParams, 0, sizeof(*pBlParams));
-
-        pBlParams->baseIndex = baseIndex;
+        blParams.baseIndex = baseIndex;
 
         status = pRmApi->Control(pRmApi,
                                  pGpu->hInternalClient,
                                  pGpu->hInternalSubdevice,
                                  NV2080_CTRL_CMD_FB_GET_DYNAMIC_OFFLINED_PAGES,
-                                 pBlParams,
-                                 sizeof(*pBlParams));
+                                 &blParams,
+                                 sizeof(blParams));
         if(NV_OK != status)
         {
             if (NV_ERR_NOT_SUPPORTED == status ||
@@ -407,7 +394,7 @@ memmgrGetBlackListPages_GA100
             break;
         }
 
-        for (idx = 0; idx < pBlParams->validEntries; idx++)
+        for (idx = 0; idx < blParams.validEntries; idx++)
         {
 
             if (entryIdx >= *pCount)
@@ -415,12 +402,12 @@ memmgrGetBlackListPages_GA100
                 status = NV_ERR_BUFFER_TOO_SMALL;
                 goto done;
             }
-            pBlAddrs[entryIdx].address = pBlParams->offlined[idx].pageNumber << RM_PAGE_SHIFT;
-            pBlAddrs[entryIdx].type = pBlParams->offlined[idx].source;
+            pBlAddrs[entryIdx].address = blParams.offlined[idx].pageNumber << RM_PAGE_SHIFT;
+            pBlAddrs[entryIdx].type = blParams.offlined[idx].source;
             entryIdx++;
          }
 
-        if (!pBlParams->bMore) {
+        if (!blParams.bMore) {
             break;
         }
 
@@ -428,7 +415,6 @@ memmgrGetBlackListPages_GA100
     }
 
 done:
-    portMemFree(pBlParams);
     *pCount = entryIdx;
 
     return status;
@@ -500,19 +486,4 @@ memmgrInsertUnprotectedRegionAtBottomOfFb_GA100
     *pSize = size;
 
     return NV_OK;
-}
-
-NvBool
-memmgrIsMemDescSupportedByFla_GA100
-(
-    OBJGPU *pGpu,
-    MemoryManager *pMemoryManager,
-    MEMORY_DESCRIPTOR *pMemDesc
-)
-{
-    if ((memdescGetAddressSpace(pMemDesc) == ADDR_FBMEM) || memdescIsEgm(pMemDesc))
-    {
-        return NV_TRUE;
-    }
-    return NV_FALSE;
 }

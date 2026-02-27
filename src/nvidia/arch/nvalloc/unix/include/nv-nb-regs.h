@@ -24,8 +24,6 @@
 #ifndef _NV_NB_REGS_H_
 #define _NV_NB_REGS_H_
 
-#include "nvdevid.h"
-
 typedef struct
 {
     NvU32 subsystem_vendor_id;

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1993-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -22,14 +22,10 @@
  */
 
 #include "kernel/gpu/gpu.h"
-#include "gpu_mgr/gpu_mgr.h"
 #include "kernel/diagnostics/journal.h"
 
 #include "core/thread_state.h"
-#include "platform/sli/sli.h"
 #include "nv_ref.h"
-
-#include "gpu/hfrp/kernel_hfrp.h"
 
 // Following enums are duplicated in 'apps/nvbucket/oca/ocarm.h'.
 typedef enum {
@@ -41,15 +37,25 @@ typedef enum {
     BAD_READ_UNKNOWN,
 } RMCD_BAD_READ_REASON;
 
+static NV_STATUS _allocGpuIODevice(GPU_IO_DEVICE **ppIODevice);
 static void   _gpuCleanRegisterFilterList(DEVICE_REGFILTER_INFO *);
 static NvU32  _gpuHandleReadRegisterFilter(OBJGPU *, DEVICE_INDEX devIndex, NvU32 devInstance, NvU32 addr, NvU32 accessSize, NvU32 *pFlags, THREAD_STATE_NODE *pThreadState);
 static void   _gpuHandleWriteRegisterFilter(OBJGPU *, DEVICE_INDEX devIndex, NvU32 devInstance, NvU32 addr, NvU32 val, NvU32 accessSize, NvU32 *pFlags, THREAD_STATE_NODE *pThreadState);
 
-static void   ioaprtWriteRegUnicast(OBJGPU *, IoAperture *pAperture, NvU32 addr, NvV32 val, NvU32 size);
-static NvU32  ioaprtReadReg(IoAperture *pAperture, NvU32 addr, NvU32 size);
+static void   _gpuApertureWriteRegUnicast(OBJGPU *, IO_APERTURE *pAperture, NvU32 addr, NvV32 val, NvU32 size);
+static NvU32  _gpuApertureReadReg(IO_APERTURE *pAperture, NvU32 addr, NvU32 size);
+
+static NvU8   _gpuApertureReadReg008(IO_APERTURE *a, NvU32 addr);
+static NvU16  _gpuApertureReadReg016(IO_APERTURE *a, NvU32 addr);
+static NvU32  _gpuApertureReadReg032(IO_APERTURE *a, NvU32 addr);
+static void   _gpuApertureWriteReg008(IO_APERTURE *a, NvU32 addr, NvV8  value);
+static void   _gpuApertureWriteReg016(IO_APERTURE *a, NvU32 addr, NvV16 value);
+static void   _gpuApertureWriteReg032(IO_APERTURE *a, NvU32 addr, NvV32 value);
+static void   _gpuApertureWriteReg032Unicast(IO_APERTURE *a, NvU32 addr, NvV32 value);
+static NvBool _gpuApertureValidReg(IO_APERTURE *a, NvU32 addr);
 
 static REGISTER_FILTER * _findGpuRegisterFilter(DEVICE_INDEX devIndex, NvU32 devInstance, NvU32 addr, REGISTER_FILTER *);
-static NV_STATUS _gpuInitIOAperture(OBJGPU *pGpu, NvU32 deviceIndex, DEVICE_MAPPING *pMapping);
+static NV_STATUS            _gpuInitIODeviceAndAperture(OBJGPU *, NvU32, NvU32, RmPhysAddr, NvU32);
 
 NV_STATUS
 regAccessConstruct
@@ -83,7 +89,10 @@ regAccessConstruct
         DEVICE_MAPPING *pMapping = gpuGetDeviceMapping(pGpu, deviceIndex, 0);
         if (pMapping != NULL)
         {
-            rmStatus = _gpuInitIOAperture(pGpu, deviceIndex, pMapping);
+            rmStatus = _gpuInitIODeviceAndAperture(pGpu, deviceIndex,
+                                                   pMapping->gpuDeviceEnum,
+                                                   pMapping->gpuNvPAddr,
+                                                   pMapping->gpuNvLength);
             if (rmStatus != NV_OK)
             {
                 NV_PRINTF(LEVEL_ERROR,
@@ -105,7 +114,7 @@ regAccessDestruct
     OBJGPU         *pGpu = pRegisterAccess->pGpu;
     DEVICE_INDEX    deviceIndex;
     NvU32           mappingNum;
-    IoAperture     *pIOAperture;
+    IO_APERTURE    *pIOAperture;
     REGISTER_FILTER *pNode;
 
     // Ignore attempt to destruct a not-fully-constructed RegisterAccess
@@ -119,7 +128,8 @@ regAccessDestruct
         pIOAperture = pGpu->pIOApertures[deviceIndex];
         if (pIOAperture != NULL)
         {
-            objDelete(pIOAperture);
+            portMemFree(pIOAperture->pDevice);
+            ioaccessDestroyIOAperture(pIOAperture);
         }
     }
 
@@ -142,6 +152,36 @@ regAccessDestruct
         }
     }
 }
+
+/*!
+ * @brief Allocates GPU_IO_DEVICE object
+ *
+ * @param[in] ppIODevice       Pointer to uninitialized GPU_IO_DEVICE
+ */
+static NV_STATUS
+_allocGpuIODevice
+(
+    GPU_IO_DEVICE **ppIODevice
+)
+{
+    GPU_IO_DEVICE *pDevice;
+
+    pDevice = portMemAllocNonPaged(sizeof(GPU_IO_DEVICE));
+    if (pDevice == NULL)
+    {
+        NV_PRINTF(LEVEL_ERROR,
+                  "memory allocation failed for GPU IO Device\n");
+        DBG_BREAKPOINT();
+        return NV_ERR_NO_MEMORY;
+    }
+
+    portMemSet(pDevice, 0, sizeof(GPU_IO_DEVICE));
+
+    *ppIODevice = pDevice;
+
+    return NV_OK;
+}
+
 
 //
 // The following register I/O functions are organized into two groups;
@@ -214,197 +254,145 @@ _regWriteUnicast
     }
 }
 
-/*!
- * @brief: Initialize an IoAperture instance in-place.
- *
- * @param[out] pAperture        pointer to the IoAperture.
- * @param[in]  pParentAperture  pointer to the parent of the new IoAperture.
- * @param[in]  offset           offset from the parent APERTURE's baseAddress.
- * @param[in]  length           length of the APERTURE.
- *
- * @return NV_OK upon success
- *         NV_ERR* otherwise.
- */
-NV_STATUS
-ioaprtInit
-(
-    IoAperture     *pAperture,
-    IoAperture     *pParentAperture,
-    NvU32           offset,
-    NvU32           length
-)
-{
-    return objCreateWithFlags(&pAperture, NVOC_NULL_OBJECT, IoAperture, NVOC_OBJ_CREATE_FLAGS_IN_PLACE_CONSTRUCT, pParentAperture, NULL, 0, 0, NULL, 0, offset, length);
-}
-
-/*!
- * Initialize an IoAperture instance.
- *
- * @param[in,out] pAperture        pointer to IoAperture instance to be initialized.
- * @param[in]     pParentAperture  pointer to parent of the new IoAperture.
- * @param[in]     deviceIndex      device index
- * @param[in]     deviceInstance   device instance
- * @param[in]     pMapping         device register mapping
- * @param[in]     mappingStartAddr register address corresponding to the start of the mapping
- * @param[in]     offset           offset from the parent APERTURE's baseAddress.
- * @param[in]     length           length of the APERTURE.
- *
- * @return NV_OK when inputs are valid.
- */
-NV_STATUS
-ioaprtConstruct_IMPL
-(
-    IoAperture      *pAperture,
-    IoAperture      *pParentAperture,
-    OBJGPU          *pGpu,
-    NvU32            deviceIndex,
-    NvU32            deviceInstance,
-    DEVICE_MAPPING  *pMapping,
-    NvU32            mappingStartAddr,
-    NvU32            offset,
-    NvU32            length
-)
-{
-    NV_ASSERT_OR_RETURN(length > 0, NV_ERR_INVALID_ARGUMENT);
-
-    if (pParentAperture != NULL)
-    {
-        NV_ASSERT_OR_RETURN(pMapping == NULL, NV_ERR_INVALID_ARGUMENT);
-        NV_ASSERT_OR_RETURN(pGpu == NULL || pGpu == pParentAperture->pGpu, NV_ERR_INVALID_ARGUMENT);
-
-        pAperture->pGpu = pParentAperture->pGpu;
-        pAperture->deviceIndex = pParentAperture->deviceIndex;
-        pAperture->deviceInstance = pParentAperture->deviceInstance;
-        pAperture->pMapping    = pParentAperture->pMapping;
-        pAperture->baseAddress = pParentAperture->baseAddress;
-        pAperture->mappingStartAddr = pParentAperture->mappingStartAddr;
-
-        // Check if the child Aperture strides beyond the parent's boundary.
-        if ((length + offset) > pParentAperture->length)
-        {
-            NV_PRINTF(LEVEL_WARNING,
-                "Child aperture crosses parent's boundary, length %u offset %u, Parent's length %u\n",
-                length, offset, pParentAperture->length);
-        }
-
-    }
-    else
-    {
-        NV_ASSERT_OR_RETURN(pMapping != NULL, NV_ERR_INVALID_ARGUMENT);
-        NV_ASSERT_OR_RETURN(pGpu != NULL, NV_ERR_INVALID_ARGUMENT);
-
-        pAperture->pGpu = pGpu;
-        pAperture->deviceIndex = deviceIndex;
-        pAperture->deviceInstance = deviceInstance;
-        pAperture->pMapping = pMapping;
-        pAperture->baseAddress = 0;
-        pAperture->mappingStartAddr = mappingStartAddr;
-    }
-
-    pAperture->baseAddress += offset;
-    pAperture->length       = length;
-
-    return NV_OK;
-}
-
 static void
-ioaprtWriteRegUnicast
+_gpuApertureWriteRegUnicast
 (
     OBJGPU         *pGpu,
-    IoAperture     *pAperture,
+    IO_APERTURE    *pAperture,
     NvU32           addr,
     NvV32           val,
     NvU32           size
 )
 {
-    NvU32              deviceIndex = pAperture->deviceIndex;
-    NvU32              instance    = pAperture->deviceInstance;
+    NV_ASSERT_OR_RETURN_VOID(pAperture);
+    NV_ASSERT_OR_RETURN_VOID(pAperture->pDevice);
+
+    GPU_IO_DEVICE     *pDevice     = (GPU_IO_DEVICE*) pAperture->pDevice;
+    NvU32              deviceIndex = pDevice->deviceIndex;
+    NvU32              instance    = pDevice->instance;
     NvU32              regAddr     = pAperture->baseAddress + addr;
-    NvU32              mappingRegAddr = regAddr - pAperture->mappingStartAddr;
-    DEVICE_MAPPING    *pMapping    = pAperture->pMapping;
     NvU32              flags       = 0;
     NV_STATUS          status;
     THREAD_STATE_NODE *pThreadState;
+    DEVICE_MAPPING    *pMapping;
 
-    if (!pGpu->getProperty(pGpu, PDB_PROP_GPU_TEGRA_SOC_NVDISPLAY))
+    pMapping = gpuGetDeviceMapping(pGpu, deviceIndex, instance);
+
+    if (pMapping == NULL)
     {
-        status = gpuSanityCheckRegisterAccess(pGpu, regAddr, NULL);
-        if (status != NV_OK)
-        {
-            return;
-        }
-
-        threadStateGetCurrentUnchecked(&pThreadState, pGpu);
-
-        _gpuHandleWriteRegisterFilter(pGpu, deviceIndex, instance, regAddr,
-                                      val, size, &flags, pThreadState);
+        NV_PRINTF(LEVEL_ERROR,
+                  "Could not find mapping for reg %x, deviceIndex=0x%x instance=%d\n",
+                  regAddr, deviceIndex, instance);
+        NV_ASSERT(0);
+        return;
     }
+
+    status = gpuSanityCheckRegisterAccess(pGpu, regAddr, NULL);
+    if (status != NV_OK)
+    {
+        return;
+    }
+
+    threadStateGetCurrentUnchecked(&pThreadState, pGpu);
+
+    _gpuHandleWriteRegisterFilter(pGpu, deviceIndex, instance, regAddr,
+                                  val, size, &flags, pThreadState);
 
     if (!(flags & REGISTER_FILTER_FLAGS_WRITE))
     {
         switch (size)
         {
             case 8:
-                osDevWriteReg008(pGpu, pMapping, mappingRegAddr, 0xFFU & (val));
+                osDevWriteReg008(pGpu, pMapping, regAddr, 0xFFU & (val));
                 break;
             case 16:
-                osDevWriteReg016(pGpu, pMapping, mappingRegAddr, 0xFFFFU & (val));
+                osDevWriteReg016(pGpu, pMapping, regAddr, 0xFFFFU & (val));
                 break;
             case 32:
-                osDevWriteReg032(pGpu, pMapping, mappingRegAddr, val);
+                osDevWriteReg032(pGpu, pMapping, regAddr, val);
                 break;
         }
     }
 }
 
 void
-ioaprtWriteReg08_IMPL
+_gpuApertureWriteReg008
 (
-    IoAperture     *pAperture,
+    IO_APERTURE    *pAperture,
     NvU32           addr,
     NvV8            val
 )
 {
-    NV_ASSERT(!gpumgrGetBcEnabledStatus(pAperture->pGpu));
+    GPU_IO_DEVICE *pDevice = (GPU_IO_DEVICE*)pAperture->pDevice;
+    OBJGPU        *pGpu    = pDevice->pGpu;
 
-    ioaprtWriteRegUnicast(pAperture->pGpu, pAperture, addr, val, 8 /* size */);
+    //
+    // NOTE: The SLI loop below reuses pAperture's values across all iterations
+    // OBJGPU's apertures are initialized to have the same baseAddress and length
+    // on all GPU device instances, so reusing the aperture here is fine.
+    // Device-specific instances are obtained via gpuGetDeviceMapping in the SLI loop.
+    //
+    SLI_LOOP_START(SLI_LOOP_FLAGS_BC_ONLY);
+        _gpuApertureWriteRegUnicast(pGpu, pAperture, addr, val, 8 /* size */);
+    SLI_LOOP_END;
 }
 
 void
-ioaprtWriteReg16_IMPL
+_gpuApertureWriteReg016
 (
-    IoAperture        *pAperture,
+    IO_APERTURE       *pAperture,
     NvU32              addr,
     NvV16              val
 )
 {
-    NV_ASSERT(!gpumgrGetBcEnabledStatus(pAperture->pGpu));
+    GPU_IO_DEVICE *pDevice = (GPU_IO_DEVICE*)pAperture->pDevice;
+    OBJGPU        *pGpu    = pDevice->pGpu;
 
-    ioaprtWriteRegUnicast(pAperture->pGpu, pAperture, addr, val, 16 /* size */);
+    //
+    // NOTE: The SLI loop below reuses pAperture's values across all iterations
+    // OBJGPU's apertures are initialized to have the same baseAddress and length
+    // on all GPU device instances, so reusing the aperture here is fine.
+    // Device-specific instances are obtained via gpuGetDeviceMapping in the SLI loop.
+    //
+    SLI_LOOP_START(SLI_LOOP_FLAGS_BC_ONLY);
+        _gpuApertureWriteRegUnicast(pGpu, pAperture, addr, val, 16 /* size */);
+    SLI_LOOP_END;
 }
 
 void
-ioaprtWriteReg32_IMPL
+_gpuApertureWriteReg032
 (
-    IoAperture        *pAperture,
+    IO_APERTURE       *pAperture,
     NvU32              addr,
     NvV32              val
 )
 {
-    NV_ASSERT(!gpumgrGetBcEnabledStatus(pAperture->pGpu));
+    GPU_IO_DEVICE *pDevice = (GPU_IO_DEVICE*)pAperture->pDevice;
+    OBJGPU        *pGpu    = pDevice->pGpu;
 
-    ioaprtWriteRegUnicast(pAperture->pGpu, pAperture, addr, val, 32 /* size */);
+    //
+    // NOTE: The SLI loop below reuses pAperture's values across all iterations
+    // OBJGPU's apertures are initialized to have the same baseAddress and length
+    // on all GPU device instances, so reusing the aperture here is fine.
+    // Device-specific instances are obtained via gpuGetDeviceMapping in the SLI loop.
+    //
+    SLI_LOOP_START(SLI_LOOP_FLAGS_BC_ONLY);
+        _gpuApertureWriteRegUnicast(pGpu, pAperture, addr, val, 32 /* size */);
+    SLI_LOOP_END;
 }
 
 void
-ioaprtWriteReg32Uc_IMPL
+_gpuApertureWriteReg032Unicast
 (
-    IoAperture        *pAperture,
+    IO_APERTURE       *pAperture,
     NvU32              addr,
     NvV32              val
 )
 {
-    ioaprtWriteRegUnicast(pAperture->pGpu, pAperture, addr, val, 32 /* size */);
+    GPU_IO_DEVICE *pDevice = (GPU_IO_DEVICE*)pAperture->pDevice;
+    OBJGPU        *pGpu    = pDevice->pGpu;
+
+    _gpuApertureWriteRegUnicast(pGpu, pAperture, addr, val, 32 /* size */);
 }
 
 void
@@ -474,108 +462,114 @@ regWrite032Unicast
 }
 
 static NvU32
-ioaprtReadReg
+_gpuApertureReadReg
 (
-    IoAperture     *pAperture,
+    IO_APERTURE    *pAperture,
     NvU32           addr,
     NvU32           size
 )
 {
+    NV_ASSERT_OR_RETURN(pAperture,          NV_ERR_INVALID_ARGUMENT);
+    NV_ASSERT_OR_RETURN(pAperture->pDevice, NV_ERR_INVALID_ARGUMENT);
+
     NvU32              flags       = 0;
     NvU32              returnValue = 0;
-    OBJGPU            *pGpu        = pAperture->pGpu;
+    GPU_IO_DEVICE     *pDevice     = (GPU_IO_DEVICE*) pAperture->pDevice;
+    OBJGPU            *pGpu        = pDevice->pGpu;
     NV_STATUS          status      = NV_OK;
     NvU32              regAddr     = pAperture->baseAddress + addr;
-    NvU32              mappingRegAddr = regAddr - pAperture->mappingStartAddr;
-    NvU32              deviceIndex = pAperture->deviceIndex;
-    NvU32              instance    = pAperture->deviceInstance;
-    DEVICE_MAPPING    *pMapping    = pAperture->pMapping;
+    NvU32              deviceIndex = pDevice->deviceIndex;
+    NvU32              instance    = pDevice->instance;
     THREAD_STATE_NODE *pThreadState;
 
     pGpu->registerAccess.regReadCount++;
 
-    if (!pGpu->getProperty(pGpu, PDB_PROP_GPU_TEGRA_SOC_NVDISPLAY))
+    DEVICE_MAPPING *pMapping = gpuGetDeviceMapping(pGpu, deviceIndex, instance);
+    if (!pMapping)
     {
-        status = gpuSanityCheckRegisterAccess(pGpu, regAddr, NULL);
-        if (status != NV_OK)
-        {
-            return (~0);
-        }
-
-        threadStateGetCurrentUnchecked(&pThreadState, pGpu);
-
-        returnValue = _gpuHandleReadRegisterFilter(pGpu, deviceIndex, instance,
-                                                   regAddr, size, &flags, pThreadState);
+        NV_PRINTF(LEVEL_ERROR,
+                  "Could not find mapping for reg %x, deviceIndex=0x%x instance=%d\n",
+                  regAddr, deviceIndex, instance);
+        NV_ASSERT(0);
+        return 0xd0d0d0d0U;
     }
+
+    status = gpuSanityCheckRegisterAccess(pGpu, regAddr, NULL);
+    if (status != NV_OK)
+    {
+        return (~0);
+    }
+
+    threadStateGetCurrentUnchecked(&pThreadState, pGpu);
+
+    returnValue = _gpuHandleReadRegisterFilter(pGpu, deviceIndex, instance,
+                                               regAddr, size, &flags, pThreadState);
 
     if (!(flags & REGISTER_FILTER_FLAGS_READ))
     {
         switch (size)
         {
             case 8:
-                returnValue = osDevReadReg008(pGpu, pMapping, mappingRegAddr);
+                returnValue = osDevReadReg008(pGpu, pMapping, regAddr);
                 break;
             case 16:
-                returnValue = osDevReadReg016(pGpu, pMapping, mappingRegAddr);
+                returnValue = osDevReadReg016(pGpu, pMapping, regAddr);
                 break;
             case 32:
-                returnValue = osDevReadReg032(pGpu, pMapping, mappingRegAddr);
+                returnValue = osDevReadReg032(pGpu, pMapping, regAddr);
                 break;
         }
     }
 
-    if (!pGpu->getProperty(pGpu, PDB_PROP_GPU_TEGRA_SOC_NVDISPLAY))
-    {
-        // Make sure the value read is sane before we party on it.
-        gpuSanityCheckRegRead(pGpu, regAddr, size, &returnValue);
-    }
+    // Make sure the value read is sane before we party on it.
+    gpuSanityCheckRegRead(pGpu, regAddr, size, &returnValue);
 
     return returnValue;
 }
 
 NvU8
-ioaprtReadReg08_IMPL
+_gpuApertureReadReg008
 (
-    IoAperture     *pAperture,
+    IO_APERTURE    *pAperture,
     NvU32           addr
 )
 {
-    return (NvU8) ioaprtReadReg(pAperture, addr, 8 /* size */);
+    return (NvU8) _gpuApertureReadReg(pAperture, addr, 8 /* size */);
 }
 
-NvU16
-ioaprtReadReg16_IMPL
+static NvU16
+_gpuApertureReadReg016
 (
-    IoAperture     *pAperture,
+    IO_APERTURE    *pAperture,
     NvU32           addr
 )
 {
-    return (NvU16) ioaprtReadReg(pAperture, addr, 16 /* size */);
+    return (NvU16) _gpuApertureReadReg(pAperture, addr, 16 /* size */);
 }
 
-NvU32
-ioaprtReadReg32_IMPL
+static NvU32
+_gpuApertureReadReg032
 (
-    IoAperture        *pAperture,
+    IO_APERTURE       *pAperture,
     NvU32              addr
 
 )
 {
-    return ioaprtReadReg(pAperture, addr, 32 /* size */);
+    return _gpuApertureReadReg(pAperture, addr, 32 /* size */);
 }
 
 /*!
  * Checks if the register address is valid for a particular aperture
  *
- * @param[in]       pAperture       IoAperture pointer
+ * @param[in]       pAperture       IO_APERTURE pointer
  * @param[in]       addr            register address
  *
  * @returns         NV_TRUE         Register offset is valid
  */
-NvBool
-ioaprtIsRegValid_IMPL
+static NvBool
+_gpuApertureValidReg
 (
-    IoAperture     *pAperture,
+    IO_APERTURE    *pAperture,
     NvU32           addr
 )
 {
@@ -754,24 +748,57 @@ regRead032
  * @return NV_OK if IO Aperture is successfully initialized, error otherwise.
  */
 static NV_STATUS
-_gpuInitIOAperture
+_gpuInitIODeviceAndAperture
 (
-    OBJGPU         *pGpu,
-    NvU32           deviceIndex,
-    DEVICE_MAPPING *pMapping
+    OBJGPU    *pGpu,
+    NvU32      deviceIndex,
+    NvU32      gpuDeviceEnum,
+    RmPhysAddr gpuNvPAddr,
+    NvU32      gpuNvLength
 )
 {
     NV_STATUS rmStatus;
+    GPU_IO_DEVICE *pIODevice = NULL;
 
-    rmStatus = objCreate(&pGpu->pIOApertures[deviceIndex], NVOC_NULL_OBJECT, IoAperture,
-                         NULL, // no parent aperture
-                         pGpu,
-                         deviceIndex,
-                         0, // GPU register operations are always on instance 0
-                         pMapping, 0, // mapping, mappingStartAddr
-                         0, pMapping->gpuNvLength); // offset, length
+    // Initialize GPU IO Device
+    rmStatus = _allocGpuIODevice(&pIODevice);
     if (rmStatus != NV_OK)
     {
+        NV_PRINTF(LEVEL_ERROR,
+                  "Failed to initialize pGpu IO device for devIdx %d.\n",
+                  deviceIndex);
+
+        return rmStatus;
+    }
+
+    pIODevice->pGpu          = pGpu;
+    pIODevice->deviceIndex   = deviceIndex;
+    pIODevice->gpuDeviceEnum = gpuDeviceEnum;
+    pIODevice->gpuNvPAddr    = gpuNvPAddr;
+    pIODevice->gpuNvLength   = gpuNvLength;
+    pIODevice->refCount      = 0;
+
+    // GPU register operations are always on instance 0
+    pIODevice->instance      = 0;
+
+    // Initialize register functions in IO_DEVICE
+    pIODevice->parent.pReadReg008Fn    = (ReadReg008Fn*) &_gpuApertureReadReg008;
+    pIODevice->parent.pReadReg016Fn    = (ReadReg016Fn*) &_gpuApertureReadReg016;
+    pIODevice->parent.pReadReg032Fn    = (ReadReg032Fn*) &_gpuApertureReadReg032;
+    pIODevice->parent.pWriteReg008Fn   = (WriteReg008Fn*) &_gpuApertureWriteReg008;
+    pIODevice->parent.pWriteReg016Fn   = (WriteReg016Fn*) &_gpuApertureWriteReg016;
+    pIODevice->parent.pWriteReg032Fn   = (WriteReg032Fn*) &_gpuApertureWriteReg032;
+    pIODevice->parent.pWriteReg032UcFn = (WriteReg032Fn*) &_gpuApertureWriteReg032Unicast;
+    pIODevice->parent.pValidRegFn      = (ValidRegFn*)    &_gpuApertureValidReg;
+
+    rmStatus = ioaccessCreateIOAperture(&pGpu->pIOApertures[deviceIndex],
+                                        NULL,            // no parent aperture
+                                        (IO_DEVICE*) pIODevice,
+                                        0, gpuNvLength); // offset, length
+    if (rmStatus != NV_OK)
+    {
+        portMemFree(pIODevice);
+
         NV_PRINTF(LEVEL_ERROR,
                   "Failed to initialize pGpu IO aperture for devIdx %d.\n",
                   deviceIndex);
@@ -1389,7 +1416,7 @@ gpuRegRd08_dumpinfo(const char *func, const char *addrStr, const char *vreg, OBJ
     static NvU8  prev_val  = 0;
     if (addr != prev_addr || val != prev_val)
     {
-        // filter out bar0 windows registers (NV_PRAMIN -- range 0x007FFFFF:0x00700000 )
+        // filter out bar0 windows registers (NV_PRAMIN – range 0x007FFFFF:0x00700000 )
         if ((addr & 0xFFF00000) != 0x00700000)
         {
             NV_PRINTF(LEVEL_NOTICE,
@@ -1411,7 +1438,7 @@ gpuRegRd16_dumpinfo(const char *func, const char *addrStr, const char *vreg, OBJ
     static NvU16 prev_val  = 0;
     if (addr != prev_addr || val != prev_val)
     {
-        // filter out bar0 windows registers (NV_PRAMIN -- range 0x007FFFFF:0x00700000 )
+        // filter out bar0 windows registers (NV_PRAMIN – range 0x007FFFFF:0x00700000 )
         if ((addr & 0xFFF00000) != 0x00700000)
         {
             NV_PRINTF(LEVEL_NOTICE,
@@ -1433,7 +1460,7 @@ gpuRegRd32_dumpinfo(const char *func, const char *addrStr, const char *vreg, OBJ
     static NvU32 prev_val  = 0;
     if (addr != prev_addr || val != prev_val)
     {
-        // filter out bar0 windows registers (NV_PRAMIN -- range 0x007FFFFF:0x00700000 )
+        // filter out bar0 windows registers (NV_PRAMIN – range 0x007FFFFF:0x00700000 )
         if ((addr & 0xFFF00000) != 0x00700000)
         {
             NV_PRINTF(LEVEL_NOTICE,
@@ -1449,7 +1476,7 @@ gpuRegRd32_dumpinfo(const char *func, const char *addrStr, const char *vreg, OBJ
 void
 gpuRegWr08_dumpinfo(const char *func, const char *addrStr, const char *vreg, OBJGPU *pGpu, NvU32 addr, NvV8 val)
 {
-    // filter out bar0 windows registers (NV_PRAMIN -- range 0x007FFFFF:0x00700000 )
+    // filter out bar0 windows registers (NV_PRAMIN – range 0x007FFFFF:0x00700000 )
     if ((addr & 0xFFF00000) != 0x00700000)
     {
         NV_PRINTF(LEVEL_NOTICE,
@@ -1462,7 +1489,7 @@ gpuRegWr08_dumpinfo(const char *func, const char *addrStr, const char *vreg, OBJ
 void
 gpuRegWr16_dumpinfo(const char *func, const char *addrStr, const char *vreg, OBJGPU *pGpu, NvU32 addr, NvV16 val)
 {
-    // filter out bar0 windows registers (NV_PRAMIN -- range 0x007FFFFF:0x00700000 )
+    // filter out bar0 windows registers (NV_PRAMIN – range 0x007FFFFF:0x00700000 )
     if ((addr & 0xFFF00000) != 0x00700000)
     {
         NV_PRINTF(LEVEL_NOTICE,
@@ -1475,7 +1502,7 @@ gpuRegWr16_dumpinfo(const char *func, const char *addrStr, const char *vreg, OBJ
 void
 gpuRegWr32_dumpinfo(const char *func, const char *addrStr, const char *vreg, OBJGPU *pGpu, NvU32 addr, NvV32 val)
 {
-    // filter out bar0 windows registers (NV_PRAMIN -- range 0x007FFFFF:0x00700000 )
+    // filter out bar0 windows registers (NV_PRAMIN – range 0x007FFFFF:0x00700000 )
     if ((addr & 0xFFF00000) != 0x00700000)
     {
         NV_PRINTF(LEVEL_NOTICE,
@@ -1488,7 +1515,7 @@ gpuRegWr32_dumpinfo(const char *func, const char *addrStr, const char *vreg, OBJ
 void
 gpuRegWr32Uc_dumpinfo(const char *func, const char *addrStr, const char *vreg, OBJGPU *pGpu, NvU32 addr, NvV32 val)
 {
-    // filter out bar0 windows registers (NV_PRAMIN -- range 0x007FFFFF:0x00700000 )
+    // filter out bar0 windows registers (NV_PRAMIN – range 0x007FFFFF:0x00700000 )
     if ((addr & 0xFFF00000) != 0x00700000)
     {
         NV_PRINTF(LEVEL_NOTICE,
@@ -1522,15 +1549,8 @@ gpuSanityCheckRegisterAccess_IMPL
     NvU32       *pRetVal
 )
 {
-    NV_STATUS   status = NV_OK;
-    NvU32       retVal = ~0;
-    NvBool      bIsPowerHfrpEnabled = NV_FALSE;
-    KernelHFRP *pKernelHfrp  = GPU_GET_KERNEL_HFRP(pGpu);
-    if (pKernelHfrp != NULL)
-    {
-        bIsPowerHfrpEnabled = pKernelHfrp->getProperty(pKernelHfrp, PDB_PROP_KHFRP_IS_ENABLED);
-    }
-
+    NV_STATUS status = NV_OK;
+    NvU32     retVal = ~0;
 
     if (API_GPU_IN_RESET_SANITY_CHECK(pGpu))
     {
@@ -1546,9 +1566,6 @@ gpuSanityCheckRegisterAccess_IMPL
 
     if ((status = gpuSanityCheckVirtRegAccess_HAL(pGpu, addr)) != NV_OK)
     {
-        NV_PRINTF(LEVEL_ERROR, "Invalid register access on VF, addr: 0x%x\n", addr);
-        osAssertFailed();
-
         // Return 0 to match with HW behavior
         retVal = 0;
         goto done;
@@ -1580,7 +1597,6 @@ gpuSanityCheckRegisterAccess_IMPL
          )                                                           &&
         !pGpu->getProperty(pGpu, PDB_PROP_GPU_MSHYBRID_GC6_ACTIVE)   &&
         !pGpu->getProperty(pGpu, PDB_PROP_GPU_ENABLE_REG_ACCESS_IN_LOW_POWER_FOR_SIM_SRTEST) &&
-        !bIsPowerHfrpEnabled                                         &&
         !pGpu->getProperty(pGpu, PDB_PROP_GPU_IN_PM_RESUME_CODEPATH))
     {
         DBG_BREAKPOINT();
@@ -1604,7 +1620,6 @@ done:
  *
  * @param[in] pGpu
  * @param[in] offset
- * @param[in] bSkipPermissionValidation
  *
  * @returns NV_OK if valid
  * @returns NV_ERR_INVALID_ARGUMENT if offset is too large for bar
@@ -1614,22 +1629,18 @@ NV_STATUS
 gpuValidateRegOffset_IMPL
 (
     OBJGPU *pGpu,
-    NvU32   offset,
-    NvBool bSkipPermissionValidation
+    NvU32   offset
 )
 {
     NvU64 maxBar0Size = pGpu->deviceMappings[0].gpuNvLength;
 
-    // The register offset should be 4 bytes smaller than the max bar size
+    // The register offset should be 4 bytes smaller than the max bar size 
     if (offset > (maxBar0Size - 4))
     {
         return NV_ERR_INVALID_ARGUMENT;
     }
 
-    // Regop calls are typically subject to the allowlist, however certain regop calls might originate from RM on behalf of user-space clients.
-    // In these cases, we can skip permission validation so that these ctrl calls can be made by any UMD without adding these registers to the allowlist.
-    // To bypass this check, set bSkipPermissionValidation to true in gpuExecRegOps().
-    if (!bSkipPermissionValidation && !osIsAdministrator() &&
+    if (!osIsAdministrator() &&
         !gpuGetUserRegisterAccessPermissions(pGpu, offset))
     {
         NV_PRINTF(LEVEL_ERROR,
@@ -1765,149 +1776,4 @@ gpuSanityCheckRegRead_IMPL
     }
 
     return NV_OK;
-}
-
-
-NV_STATUS swbcaprtConstruct_IMPL
-(
-    SwBcAperture      *pAperture,
-    IoAperture        *pApertures,
-    NvU32              numApertures
-)
-{
-    NV_ASSERT_OR_RETURN(numApertures != 0, NV_ERR_INVALID_ARGUMENT);
-
-    pAperture->pApertures = pApertures;
-    pAperture->numApertures = numApertures;
-
-    return NV_OK;
-}
-
-NvU8
-swbcaprtReadReg08_IMPL
-(
-    SwBcAperture *pAperture,
-    NvU32         addr
-)
-{
-    NvU8 val = REG_RD08(&pAperture->pApertures[0], addr);
-
-#if defined(DEBUG)
-    NvU32 i;
-    for (i = 1; i < pAperture->numApertures; i++)
-        NV_ASSERT(REG_RD08(&pAperture->pApertures[i], addr) == val);
-#endif // defined(DEBUG)
-
-    return val;
-}
-
-NvU16
-swbcaprtReadReg16_IMPL
-(
-    SwBcAperture *pAperture,
-    NvU32         addr
-)
-{
-    NvU16 val = REG_RD16(&pAperture->pApertures[0], addr);
-
-#if defined(DEBUG)
-    NvU32 i;
-    for (i = 1; i < pAperture->numApertures; i++)
-        NV_ASSERT(REG_RD16(&pAperture->pApertures[i], addr) == val);
-#endif // defined(DEBUG)
-
-    return val;
-}
-
-NvU32
-swbcaprtReadReg32_IMPL
-(
-    SwBcAperture *pAperture,
-    NvU32         addr
-)
-{
-    NvU32 val = REG_RD32(&pAperture->pApertures[0], addr);
-
-#if defined(DEBUG)
-    NvU32 i;
-    for (i = 1; i < pAperture->numApertures; i++)
-        NV_ASSERT(REG_RD32(&pAperture->pApertures[i], addr) == val);
-#endif // defined(DEBUG)
-
-    return val;
-}
-
-void
-swbcaprtWriteReg08_IMPL
-(
-    SwBcAperture *pAperture,
-    NvU32         addr,
-    NvV8          value
-)
-{
-    NvU32 i;
-
-    for (i = 0; i < pAperture->numApertures; i++)
-        REG_WR08(&pAperture->pApertures[i], addr, value);
-}
-
-void
-swbcaprtWriteReg16_IMPL
-(
-    SwBcAperture *pAperture,
-    NvU32         addr,
-    NvV16         value
-)
-{
-    NvU32 i;
-
-    for (i = 0; i < pAperture->numApertures; i++)
-        REG_WR16(&pAperture->pApertures[i], addr, value);
-}
-
-void
-swbcaprtWriteReg32_IMPL
-(
-    SwBcAperture *pAperture,
-    NvU32         addr,
-    NvV32         value
-)
-{
-    NvU32 i;
-
-    for (i = 0; i < pAperture->numApertures; i++)
-        REG_WR32(&pAperture->pApertures[i], addr, value);
-}
-
-void
-swbcaprtWriteReg32Uc_IMPL
-(
-    SwBcAperture *pAperture,
-    NvU32         addr,
-    NvV32         value
-)
-{
-    NvU32 i;
-
-    for (i = 0; i < pAperture->numApertures; i++)
-        REG_WR32_UC(&pAperture->pApertures[i], addr, value);
-}
-
-NvBool
-swbcaprtIsRegValid_IMPL
-(
-    SwBcAperture *pAperture,
-    NvU32         addr
-)
-{
-
-    NvU32 i;
-
-    for (i = 0; i < pAperture->numApertures; i++)
-    {
-        if (!REG_VALID(&pAperture->pApertures[i], addr))
-            return NV_FALSE;
-    }
-
-    return NV_TRUE;
 }

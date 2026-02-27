@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2018-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2018-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -26,12 +26,10 @@
 #include "os/os.h"
 #include "kernel/gpu/mem_sys/kern_mem_sys.h"
 #include "kernel/gpu/mem_mgr/mem_mgr.h"
+#include "kernel/gpu/subdevice/subdevice.h"
 #include "gpu/mem_mgr/mem_desc.h"
-#include "ctrl/ctrl2080/ctrl2080fb.h"
 
 #include "published/ampere/ga100/dev_fb.h"
-#include "published/ampere/ga100/dev_fuse.h"
-#include "published/ampere/ga100/hwproject.h"
 
 /*!
  * @brief Write the sysmemFlushBuffer val into the NV_PFB_NISO_FLUSH_SYSMEM_ADDR register
@@ -53,7 +51,7 @@ kmemsysProgramSysmemFlushBuffer_GA100
 
     NV_ASSERT(pKernelMemorySystem->sysmemFlushBuffer != 0);
 
-    alignedSysmemFlushBufferAddr = pKernelMemorySystem->sysmemFlushBuffer >> kmemsysGetFlushSysmemBufferAddrShift_HAL(pGpu, pKernelMemorySystem);
+    alignedSysmemFlushBufferAddr = pKernelMemorySystem->sysmemFlushBuffer >> NV_PFB_NISO_FLUSH_SYSMEM_ADDR_SHIFT;
     alignedSysmemFlushBufferAddrHi = DRF_VAL(_PFB, _NISO_FLUSH_SYSMEM_ADDR_HI, _ADR_63_40,
                                             NvU64_HI32(alignedSysmemFlushBufferAddr));
 
@@ -92,9 +90,6 @@ kmemsysInitFlushSysmemBuffer_GA100
     //
     if (pKernelMemorySystem->pSysmemFlushBufferMemDesc == NULL)
     {
-        NvU64 flags = MEMDESC_FLAGS_NONE;
-
-            flags |= MEMDESC_FLAGS_ALLOC_IN_UNPROTECTED_MEMORY;
         //
         // Sysmem flush buffer
         // The sysmembar flush does a zero byte read of sysmem if there was a
@@ -104,16 +99,15 @@ kmemsysInitFlushSysmemBuffer_GA100
         //
         status = memdescCreate(&pKernelMemorySystem->pSysmemFlushBufferMemDesc,
                                pGpu, RM_PAGE_SIZE,
-                               1 << kmemsysGetFlushSysmemBufferAddrShift_HAL(pGpu, pKernelMemorySystem),
+                               (1 << NV_PFB_NISO_FLUSH_SYSMEM_ADDR_SHIFT),
                                NV_TRUE,
                                ADDR_SYSMEM,
                                NV_MEMORY_UNCACHED,
-                               flags);
+                               MEMDESC_FLAGS_NONE);
         if (status != NV_OK)
             return status;
 
-        memdescTagAlloc(status, NV_FB_ALLOC_RM_INTERNAL_OWNER_UNNAMED_TAG_139, 
-                        pKernelMemorySystem->pSysmemFlushBufferMemDesc);
+        status = memdescAlloc(pKernelMemorySystem->pSysmemFlushBufferMemDesc);
 
         if (status != NV_OK)
         {
@@ -136,24 +130,17 @@ kmemsysInitFlushSysmemBuffer_GA100
  * @param[in] pGpu                OBJGPU pointer
  * @param[in[ pKernelMemorySystem KernelMemorySystem pointer
  *
- * @returns NV_STATUS - NV_OK if sysmemFlushBuffer is valid otherwise NV_ERR_INVALID_STATE
+ * @returns void
  */
-NV_STATUS
+void
 kmemsysAssertSysmemFlushBufferValid_GA100
 (
     OBJGPU *pGpu,
     KernelMemorySystem *pKernelMemorySystem
 )
 {
-    NvU32 regPfbNisoFlushSysmemAddrValLo = GPU_REG_RD_DRF(pGpu, _PFB, _NISO_FLUSH_SYSMEM_ADDR, _ADR_39_08);
-    NvU32 regPfbNisoFlushSysmemAddrValHi = GPU_REG_RD_DRF(pGpu, _PFB, _NISO_FLUSH_SYSMEM_ADDR_HI, _ADR_63_40);
-
-    if (regPfbNisoFlushSysmemAddrValLo == 0 && regPfbNisoFlushSysmemAddrValHi == 0)
-    {
-        return NV_ERR_INVALID_STATE;
-    }
-
-    return NV_OK;
+    NV_ASSERT((GPU_REG_RD_DRF(pGpu, _PFB, _NISO_FLUSH_SYSMEM_ADDR, _ADR_39_08) != 0)
+               || (GPU_REG_RD_DRF(pGpu, _PFB,  _NISO_FLUSH_SYSMEM_ADDR_HI, _ADR_63_40) != 0));
 }
 
 /*!
@@ -195,8 +182,9 @@ kmemsysInitMIGMemoryPartitionTable_GA100
 )
 {
     RM_API *pRmApi = GPU_GET_PHYSICAL_RMAPI(pGpu);
+    const MEMORY_SYSTEM_STATIC_CONFIG *pMemorySystemConfig = kmemsysGetStaticConfig(pGpu, pKernelMemorySystem);
 
-    if (!pKernelMemorySystem->bDisablePlcForCertainOffsetsBug3046774)
+    if (!pMemorySystemConfig->bDisablePlcForCertainOffsetsBug3046774)
         return NV_OK;
 
     NV_ASSERT_OK_OR_RETURN(
@@ -274,14 +262,14 @@ kmemsysSwizzIdToVmmuSegmentsRange_GA100
     {
         case 0:
         {
-            numBoundaries = 0;
+            numBoundaries = 0; 
             partitionDivFactor = 1;
             break;
         }
         case 1:
         case 2:
         {
-            numBoundaries = 1;
+            numBoundaries = 1; 
             partitionDivFactor = 2;
             break;
         }
@@ -290,7 +278,7 @@ kmemsysSwizzIdToVmmuSegmentsRange_GA100
         case 5:
         case 6:
         {
-            numBoundaries = 3;
+            numBoundaries = 3; 
             partitionDivFactor = 4;
             break;
         }
@@ -448,35 +436,4 @@ kmemsysIsPagePLCable_GA100
     default:
         return NV_TRUE;
     }
-}
-
-NvU16
-kmemsysGetMaximumBlacklistPages_GA100
-(
-    OBJGPU *pGpu,
-    KernelMemorySystem *pKernelMemorySystem
-)
-{
-    return NV2080_CTRL_FB_DYNAMIC_BLACKLIST_MAX_PAGES;
-}
-
-NvU32
-kmemsysGetMaxFbpas_GA100
-(
-    OBJGPU             *pGpu,
-    KernelMemorySystem *pKernelMemorySystem
-)
-{
-    return NV_SCAL_LITTER_NUM_FBPAS;
-}
-
-NvBool
-kmemsysCheckReadoutEccEnablement_GA100
-(
-    OBJGPU *pGpu,
-    KernelMemorySystem *pKernelMemorySystem
-)
-{
-    NvU32 fuse = GPU_REG_RD32(pGpu, NV_FUSE_FEATURE_READOUT);
-    return FLD_TEST_DRF(_FUSE, _FEATURE_READOUT, _ECC_DRAM, _ENABLED, fuse);
 }

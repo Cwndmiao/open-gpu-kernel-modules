@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2018-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2018-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -174,23 +174,19 @@ subdeviceCtrlCmdFlaRange_IMPL
 )
 {
     NV_STATUS status = NV_OK;
-    OBJGPU   *pGpu = GPU_RES_GET_GPU(pSubdevice);
+    POBJGPU   pGpu = GPU_RES_GET_GPU(pSubdevice);
     KernelBus *pKernelBus = GPU_GET_KERNEL_BUS(pGpu);
     KernelMIGManager *pKernelMIGManager;
-    RmClient *pRmClient = dynamicCast(RES_GET_CLIENT(pSubdevice), RmClient);
-    CALL_CONTEXT *pCallContext;
-
-    NV_ASSERT_OR_RETURN(NULL != pRmClient, NV_ERR_INVALID_CLIENT);
-
-    pCallContext = resservGetTlsCallContext();
+    NvHandle hClient = RES_GET_CLIENT_HANDLE(pSubdevice);
+    CALL_CONTEXT *pCallContext = resservGetTlsCallContext();
 
     NV_ASSERT_OR_RETURN(pCallContext != NULL, NV_ERR_INVALID_STATE);
 
-    NV_ASSERT_OR_RETURN(rmapiLockIsOwner() && rmGpuLockIsOwner(), NV_ERR_INVALID_LOCK_STATE);
+    LOCK_ASSERT_AND_RETURN(rmApiLockIsOwner() && rmGpuLockIsOwner());
 
-    if (!rmclientIsCapableOrAdmin(pRmClient,
-                                  NV_RM_CAP_EXT_FABRIC_MGMT,
-                                  pCallContext->secInfo.privLevel))
+    if (!rmclientIsCapableOrAdminByHandle(hClient,
+                                          NV_RM_CAP_EXT_FABRIC_MGMT,
+                                          pCallContext->secInfo.privLevel))
     {
         return NV_ERR_INSUFFICIENT_PERMISSIONS;
     }
@@ -248,27 +244,24 @@ subdeviceCtrlCmdFlaRange_IMPL
 
 // Control call to manage FLA range in RM
 NV_STATUS
+subdeviceCtrlCmdFlaSetupInstanceMemBlock_IMPL
+(
+    Subdevice *pSubdevice,
+    NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS *pParams
+)
+{
+    return NV_ERR_NOT_SUPPORTED;
+}
+
+// Control call to manage FLA range in RM
+NV_STATUS
 subdeviceCtrlCmdFlaGetRange_IMPL
 (
     Subdevice *pSubdevice,
     NV2080_CTRL_FLA_GET_RANGE_PARAMS *pParams
 )
 {
-    OBJGPU       *pGpu          = GPU_RES_GET_GPU(pSubdevice);
-    KernelBus    *pKernelBus    = GPU_GET_KERNEL_BUS(pGpu);
-    NvBool        bIsConntectedToNvswitch;
-
-    NV_ASSERT_OR_RETURN(rmapiLockIsOwner() && rmGpuLockIsOwner(), NV_ERR_INVALID_LOCK_STATE);
-
-    {
-        KernelNvlink *pKernelNvlink = GPU_GET_KERNEL_NVLINK(pGpu);
-        NV_CHECK_OR_RETURN(LEVEL_ERROR, pKernelNvlink != NULL, NV_ERR_NOT_SUPPORTED);
-        bIsConntectedToNvswitch = knvlinkIsGpuConnectedToNvswitch(pGpu, pKernelNvlink);
-    }
-
-    NV_CHECK_OR_RETURN(LEVEL_ERROR, kbusIsFlaSupported(pKernelBus), NV_ERR_NOT_SUPPORTED);
-
-    return kbusGetFlaRange_HAL(pGpu, pKernelBus, &pParams->base, &pParams->size, bIsConntectedToNvswitch);
+    return NV_ERR_NOT_SUPPORTED;
 }
 
 NV_STATUS
@@ -282,7 +275,7 @@ subdeviceCtrlCmdFlaGetFabricMemStats_IMPL
     FABRIC_VASPACE *pFabricVAS = NULL;
     NV_STATUS       status = NV_OK;
 
-    NV_ASSERT_OR_RETURN(rmapiLockIsOwner() && rmGpuLockIsOwner(), NV_ERR_INVALID_LOCK_STATE);
+    LOCK_ASSERT_AND_RETURN(rmApiLockIsOwner() && rmGpuLockIsOwner());
 
     if (pGpu->pFabricVAS == NULL)
     {
@@ -306,9 +299,8 @@ subdeviceCtrlCmdFlaGetFabricMemStats_IMPL
         return status;
     }
 
-    pParams->totalSize = fabricvaspaceGetUCFlaLimit(pFabricVAS) -
-                         fabricvaspaceGetUCFlaStart(pFabricVAS) + 1;
+    pParams->totalSize = fabricvaspaceGetVaLimit(pFabricVAS) -
+                         fabricvaspaceGetVaStart(pFabricVAS) + 1;
 
     return fabricvaspaceGetFreeHeap(pFabricVAS, &pParams->freeSize);
 }
-

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1993-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -32,6 +32,7 @@
 #include "gpu/mem_mgr/vaspace_api.h"
 #include "rmapi/rs_utils.h"
 #include "gpu/device/device.h"
+#include "gpu/subdevice/subdevice.h"
 #include "gpu/mem_mgr/mem_mgr.h"
 
 #include "gpu/mem_mgr/virt_mem_allocator.h"
@@ -131,7 +132,7 @@ deviceInitClientShare
     //
     else if (hClientShare == RES_GET_CLIENT_HANDLE(pDevice))
     {
-        NvU32 flags = 0;
+        NvU32 flags = VASPACE_FLAGS_DEFAULT_PARAMS;
         NvU64 vaLimit;
 
         flags |= (deviceAllocFlags & NV_DEVICE_ALLOCATION_FLAGS_VASPACE_SHARED_MANAGEMENT) ?
@@ -151,6 +152,7 @@ deviceInitClientShare
         }
         else
         {
+            flags |= VASPACE_FLAGS_DEFAULT_SIZE; // only needed for Tesla
             vaLimit = 0;
         }
 
@@ -241,17 +243,6 @@ deviceInitClientShare
         {
             flags |= VASPACE_FLAGS_PTETABLE_PMA_MANAGED;
         }
-
-        //
-        // For RM unlinked SLI: the fixed offset requirement is enforced at the OBJGVASPACE
-        // level during allocations and mappings, so the Device flag must be converted
-        // into the internal VASPACE flag.
-        //
-        if (deviceAllocFlags & NV_DEVICE_ALLOCATION_FLAGS_VASPACE_REQUIRE_FIXED_OFFSET)
-        {
-            flags |= VASPACE_FLAGS_REQUIRE_FIXED_OFFSET;
-        }
-
         status = vmmCreateVaspace(pVmm, vaspaceClass, 0, gpuMask, 0,
                                         vaLimit, pDevice->vaStartInternal,
                                         pDevice->vaLimitInternal, NULL, flags, &pVAS);

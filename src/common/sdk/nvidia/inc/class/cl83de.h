@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2010-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2010-2014 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,16 +21,17 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#pragma once
 
-#include <nvtypes.h>
+#ifndef _cl83de_h_
+#define _cl83de_h_
 
-//
-// This file was generated with FINN, an NVIDIA coding tool.
-// Source file:      class/cl83de.finn
-//
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#define GT200_DEBUGGER (0x83deU) /* finn: Evaluated from "NV83DE_ALLOC_PARAMETERS_MESSAGE_ID" */
+#include "nvtypes.h"
+
+#define  GT200_DEBUGGER                                            (0x000083de)
 
 /*
  * Creating the GT200_DEBUGGER object:
@@ -46,11 +47,15 @@
  *      NvRmAlloc(hDebuggerClient, hDebuggerClient, hDebugger, GT200_DEBUGGER, &params);
  */
 
-#define NV83DE_ALLOC_PARAMETERS_MESSAGE_ID (0x83deU)
-
-typedef struct NV83DE_ALLOC_PARAMETERS {
-    NvHandle hDebuggerClient_Obsolete;  // No longer supported (must be zero)
-    NvHandle hAppClient;
-    NvHandle hClass3dObject;
+typedef struct {
+    NvHandle    hDebuggerClient_Obsolete;  // No longer supported (must be zero)
+    NvHandle    hAppClient;
+    NvHandle    hClass3dObject;
 } NV83DE_ALLOC_PARAMETERS;
+
+#ifdef __cplusplus
+};     /* extern "C" */
+#endif
+
+#endif /* _cl83de_h_ */
 

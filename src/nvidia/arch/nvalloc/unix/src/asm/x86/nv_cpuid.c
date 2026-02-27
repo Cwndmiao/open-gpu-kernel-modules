@@ -27,9 +27,10 @@
 
 #if defined(NVCPU_X86_64)
 
-int osNv_cpuid(
-    int    op,
-    int    subop,
+NvS32 nv_cpuid(
+    OBJOS *pOS,
+    NvS32  op,
+    NvS32  subop,
     NvU32  *eax,
     NvU32  *ebx,
     NvU32  *ecx,

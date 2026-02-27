@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1993-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-/***************************** HW State Routines ***************************\
+/***************************** HW State Rotuines ***************************\
 *                                                                          *
 *         VirtMemAllocator Object Function Definitions.                    *
 *                                                                          *
@@ -29,7 +29,8 @@
 
 #include "core/core.h"
 #include "core/hal.h"
-#include "nvrm_registry.h"
+#include "core/info_block.h"
+#include "nvRmReg.h"
 #include "os/os.h"
 #include "vgpu/rpc.h"
 #include "gpu/gpu.h"

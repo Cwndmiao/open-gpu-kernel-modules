@@ -33,8 +33,6 @@ extern "C" {
 struct NvKmsPerOpenDev *nvAllocPerOpenDev(struct NvKmsPerOpen *pOpen,
                                           NVDevEvoPtr pDevEvo, NvBool isPrivileged);
 
-void nvRevokeDevice(NVDevEvoPtr pDevEvo);
-
 void nvFreePerOpenDev(struct NvKmsPerOpen *pOpen,
                       struct NvKmsPerOpenDev *pOpenDev);
 
@@ -49,8 +47,9 @@ void nvSendFrameLockAttributeChangedEventEvo(
     const enum NvKmsFrameLockAttribute attribute,
     const NvS64 value);
 
-void nvSendFlipOccurredEventEvo(const NVDispEvoRec *pDispEvo,
-                                const NvU32 apiHead, const NvU32 layer);
+void nvSendFlipOccurredEventEvo(
+    const NVDevEvoRec *pDevEvo,
+    NVEvoChannelMask channelMask);
 
 void nvSendUnicastEvent(struct NvKmsPerOpen *pOpen);
 
@@ -69,6 +68,8 @@ const struct NvKmsModesetPermissions *nvGetModesetPermissionsFromOpenDev(
 NVEvoApiHandlesRec *nvGetSurfaceHandlesFromOpenDev(
     struct NvKmsPerOpenDev *pOpenDev);
 const NVEvoApiHandlesRec *nvGetSurfaceHandlesFromOpenDevConst(
+    const struct NvKmsPerOpenDev *pOpenDev);
+NVDevEvoPtr nvGetDevEvoFromOpenDev(
     const struct NvKmsPerOpenDev *pOpenDev);
 
 void nvKmsServiceNonStallInterrupt(void *dataPtr, NvU32 dataU32);

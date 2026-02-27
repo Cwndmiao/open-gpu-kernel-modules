@@ -21,7 +21,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-/***************************** HW State Routines ***************************\
+/***************************** HW State Rotuines ***************************\
 *         Platform object function definitions.                             *
 \***************************************************************************/
 
@@ -30,7 +30,6 @@
 
 #include "core/system.h"
 #include "os/os.h"
-#include "platform/nbsi/nbsi_read.h"
 #include "gpu/gpu.h"
 #include "gpu_mgr/gpu_mgr.h"
 
@@ -39,8 +38,17 @@
 //! OBJPFM's constructor
 NV_STATUS pfmConstruct_IMPL(OBJPFM *pPfm)
 {
-    initNbsiObject(&pPfm->nbsi);
     return NV_OK;
+}
+
+void
+pfmBlobDataDestroy_IMPL
+(
+    OBJPFM *pPfm
+)
+{
+    // if blob data cache is allocated, free the memory
+    portMemFree(pPfm->blobData.pEntry);
 }
 
 void

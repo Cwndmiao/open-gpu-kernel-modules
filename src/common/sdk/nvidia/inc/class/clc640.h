@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2020 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,21 +21,20 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#pragma once
 
-#include <nvtypes.h>
+#ifndef _clc640_h_
+#define _clc640_h_
 
-//
-// This file was generated with FINN, an NVIDIA coding tool.
-// Source file:      class/clc640.finn
-//
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#define AMPERE_SMC_MONITOR_SESSION (0xc640U) /* finn: Evaluated from "NVC640_ALLOCATION_PARAMETERS_MESSAGE_ID" */
+#include "nvtypes.h"
+
+#define AMPERE_SMC_MONITOR_SESSION    (0x0000c640)
 
 /* NvRmAlloc parameters */
-#define NVC640_ALLOCATION_PARAMETERS_MESSAGE_ID (0xc640U)
-
-typedef struct NVC640_ALLOCATION_PARAMETERS {
+typedef struct {
     //
     // capDescriptor is a file descriptor for unix RM clients, but a void
     // pointer for windows RM clients.
@@ -46,3 +45,8 @@ typedef struct NVC640_ALLOCATION_PARAMETERS {
     NV_DECLARE_ALIGNED(NvU64 capDescriptor, 8);
 } NVC640_ALLOCATION_PARAMETERS;
 
+#ifdef __cplusplus
+};     /* extern "C" */
+#endif
+
+#endif /* _clc640_h_ */

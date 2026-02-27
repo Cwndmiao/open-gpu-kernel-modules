@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -50,32 +50,25 @@
 #include "gpu/gsp/message_queue_priv.h"
 #include "msgq/msgq_priv.h"
 #include "gpu/gsp/kernel_gsp.h"
-#include "nvrm_registry.h"
-#include "gpu/conf_compute/ccsl.h"
-#include "gpu/conf_compute/conf_compute.h"
 
 ct_assert(GSP_MSG_QUEUE_HEADER_SIZE > sizeof(msgqTxHeader) + sizeof(msgqRxHeader));
-
-static void _gspMsgQueueCleanup(MESSAGE_QUEUE_INFO *pMQI);
 
 static void
 _getMsgQueueParams
 (
     OBJGPU *pGpu,
-    MESSAGE_QUEUE_COLLECTION *pMQCollection
+    MESSAGE_QUEUE_INFO *pMQI
 )
 {
     NvLength queueSize;
-    MESSAGE_QUEUE_INFO *pRmQueueInfo = &pMQCollection->rpcQueues[RPC_TASK_RM_QUEUE_IDX];
     NvU32 numPtes;
     const NvLength defaultCommandQueueSize = 0x40000; // 256 KB
     const NvLength defaultStatusQueueSize  = 0x40000; // 256 KB
-    NvU32 regStatusQueueSize;
 
-    // RmQueue sizes
     if (IS_SILICON(pGpu))
     {
-        pRmQueueInfo->commandQueueSize = defaultCommandQueueSize;
+        pMQI->commandQueueSize = defaultCommandQueueSize;
+        pMQI->statusQueueSize = defaultStatusQueueSize;
     }
     else
     {
@@ -83,27 +76,15 @@ _getMsgQueueParams
         // Pre-silicon platforms need a large command queue in order to send
         // the VBIOS image via RPC.
         //
-        pRmQueueInfo->commandQueueSize = defaultCommandQueueSize * 6;
-    }
-
-    // Check for status queue size overried
-    if (osReadRegistryDword(pGpu, NV_REG_STR_RM_GSP_STATUS_QUEUE_SIZE, &regStatusQueueSize) == NV_OK)
-    {
-        regStatusQueueSize *= 1024; // to bytes
-        regStatusQueueSize = NV_MAX(GSP_MSG_QUEUE_ELEMENT_SIZE_MAX, regStatusQueueSize);
-        regStatusQueueSize = NV_ALIGN_UP(regStatusQueueSize, 1 << GSP_MSG_QUEUE_ALIGN);
-        pRmQueueInfo->statusQueueSize = regStatusQueueSize;
-    }
-    else
-    {
-        pRmQueueInfo->statusQueueSize = defaultStatusQueueSize;
+        pMQI->commandQueueSize = defaultCommandQueueSize * 6;
+        pMQI->statusQueueSize = defaultStatusQueueSize;
     }
 
     //
     // Calculate the number of entries required to map both queues in addition
     // to the page table itself.
     //
-    queueSize = pRmQueueInfo->commandQueueSize + pRmQueueInfo->statusQueueSize;
+    queueSize = pMQI->commandQueueSize + pMQI->statusQueueSize;
     NV_ASSERT((queueSize & RM_PAGE_MASK) == 0);
     numPtes = (queueSize >> RM_PAGE_SHIFT);
 
@@ -114,28 +95,124 @@ _getMsgQueueParams
     // Align the page table size to RM_PAGE_SIZE, so that the command queue is
     // aligned.
     //
-    pMQCollection->pageTableSize = RM_PAGE_ALIGN_UP(numPtes * sizeof(RmPhysAddr));
-    pMQCollection->pageTableEntryCount = numPtes;
+    pMQI->pageTableSize = RM_PAGE_ALIGN_UP(numPtes * sizeof(RmPhysAddr));
+    pMQI->pageTableEntryCount = numPtes;
 }
 
-static NV_STATUS
-_gspMsgQueueInit
+/*!
+ * GspMsgQueueInit
+ *
+ * Initialize the command queue for CPU side.
+ * Must not be called before portInitialize.
+ */
+NV_STATUS
+GspMsgQueueInit
 (
-    MESSAGE_QUEUE_INFO *pMQI
+    OBJGPU              *pGpu,
+    MESSAGE_QUEUE_INFO **ppMQI
 )
 {
-    NvU32 workAreaSize;
-    NV_STATUS nvStatus = NV_OK;
-    int nRet;
+    MESSAGE_QUEUE_INFO *pMQI = NULL;
+    RmPhysAddr  *pPageTbl;
+    int          nRet;
+    NvP64        pVaKernel;
+    NvP64        pPrivKernel;
+    NV_STATUS    nvStatus         = NV_OK;
+    NvLength     sharedBufSize;
+    NvLength     firstCmdOffset;
+    NvU32        workAreaSize;
+
+    if (*ppMQI != NULL)
+    {
+        NV_PRINTF(LEVEL_ERROR, "GSP message queue was already initialized.\n");
+        return NV_ERR_INVALID_STATE;
+    }
+
+    pMQI = portMemAllocNonPaged(sizeof *pMQI);
+    if (pMQI == NULL)
+    {
+        NV_PRINTF(LEVEL_ERROR, "Error allocating queue info area.\n");
+        nvStatus = NV_ERR_NO_MEMORY;
+        goto done;
+    }
+    portMemSet(pMQI, 0, sizeof *pMQI);
+
+    _getMsgQueueParams(pGpu, pMQI);
+
+    sharedBufSize = pMQI->pageTableSize +
+                    pMQI->commandQueueSize +
+                    pMQI->statusQueueSize;
+
+    //
+    // For now, put all shared queue memory in one block.
+    //
+    NV_ASSERT_OK_OR_GOTO(nvStatus,
+        memdescCreate(&pMQI->pSharedMemDesc, pGpu, sharedBufSize,
+            RM_PAGE_SIZE, NV_MEMORY_NONCONTIGUOUS, ADDR_SYSMEM, NV_MEMORY_CACHED,
+            MEMDESC_FLAGS_NONE),
+        done);
+
+    memdescSetFlag(pMQI->pSharedMemDesc, MEMDESC_FLAGS_KERNEL_MODE, NV_TRUE);
+
+    NV_ASSERT_OK_OR_GOTO(nvStatus,
+        memdescAlloc(pMQI->pSharedMemDesc),
+        error_ret);
+
+    // Create kernel mapping for command queue.
+    NV_ASSERT_OK_OR_GOTO(nvStatus,
+        memdescMap(pMQI->pSharedMemDesc, 0, sharedBufSize,
+            NV_TRUE, NV_PROTECT_WRITEABLE,
+            &pVaKernel, &pPrivKernel),
+        error_ret);
+
+    memdescSetKernelMapping(pMQI->pSharedMemDesc, pVaKernel);
+    memdescSetKernelMappingPriv(pMQI->pSharedMemDesc, pPrivKernel);
+
+    if (pVaKernel == NvP64_NULL)
+    {
+        NV_PRINTF(LEVEL_ERROR, "Error allocating message queue shared buffer\n");
+        nvStatus = NV_ERR_NO_MEMORY;
+        goto error_ret;
+    }
+
+    portMemSet((void *)pVaKernel, 0, sharedBufSize);
+
+    pPageTbl = pVaKernel;
+
+    // Shared memory layout.
+    //
+    // Each of the following are page aligned:
+    //   Shared memory layout header (includes page table)
+    //   Command queue header
+    //   Command queue entries
+    //   Status queue header
+    //   Status queue entries
+    memdescGetPhysAddrs(pMQI->pSharedMemDesc,
+                    AT_GPU,                     // addressTranslation
+                    0,                          // offset
+                    RM_PAGE_SIZE,               // stride
+                    pMQI->pageTableEntryCount,  // count
+                    pPageTbl);                  // physical address table
+
+    pMQI->pCommandQueue  = NvP64_VALUE(
+        NvP64_PLUS_OFFSET(pVaKernel, pMQI->pageTableSize));
+
+    pMQI->pStatusQueue   = NvP64_VALUE(
+        NvP64_PLUS_OFFSET(NV_PTR_TO_NvP64(pMQI->pCommandQueue), pMQI->commandQueueSize));
+
+    NV_ASSERT(NvP64_PLUS_OFFSET(pVaKernel, sharedBufSize) ==
+              NvP64_PLUS_OFFSET(NV_PTR_TO_NvP64(pMQI->pStatusQueue), pMQI->statusQueueSize));
 
     // Allocate work area.
     workAreaSize = (1 << GSP_MSG_QUEUE_ELEMENT_ALIGN) +
                    GSP_MSG_QUEUE_ELEMENT_SIZE_MAX + msgqGetMetaSize();
     pMQI->pWorkArea = portMemAllocNonPaged(workAreaSize);
+
     if (pMQI->pWorkArea == NULL)
     {
         NV_PRINTF(LEVEL_ERROR, "Error allocating pWorkArea.\n");
-        return NV_ERR_NO_MEMORY;
+        nvStatus = NV_ERR_NO_MEMORY;
+        goto error_ret;
     }
 
     portMemSet(pMQI->pWorkArea, 0, workAreaSize);
@@ -166,141 +243,21 @@ _gspMsgQueueInit
         goto error_ret;
     }
 
+    NV_PRINTF(LEVEL_INFO, "Created command queue.\n");
+
+    *ppMQI             = pMQI;
+    pMQI->sharedMemPA  = pPageTbl[0];
     pMQI->pRpcMsgBuf   = &pMQI->pCmdQueueElement->rpc;
 
-    NV_PRINTF(LEVEL_INFO, "Created command queue.\n");
-    return nvStatus;
-
-error_ret:
-    _gspMsgQueueCleanup(pMQI);
-    return nvStatus;
-}
-
-/*!
- * GspMsgQueueInit
- *
- * Initialize the command queues for CPU side.
- * Must not be called before portInitialize.
- */
-NV_STATUS
-GspMsgQueuesInit
-(
-    OBJGPU                    *pGpu,
-    MESSAGE_QUEUE_COLLECTION **ppMQCollection
-)
-{
-    MESSAGE_QUEUE_COLLECTION *pMQCollection = NULL;
-    MESSAGE_QUEUE_INFO  *pRmQueueInfo = NULL;
-    RmPhysAddr  *pPageTbl;
-    NvP64        pVaKernel;
-    NvP64        pPrivKernel;
-    NV_STATUS    nvStatus         = NV_OK;
-    NvLength     sharedBufSize;
-    NvP64        lastQueueVa;
-    NvLength     lastQueueSize;
-    NvU64 flags = MEMDESC_FLAGS_NONE;
-
-    if (*ppMQCollection != NULL)
-    {
-        NV_PRINTF(LEVEL_ERROR, "GSP message queue was already initialized.\n");
-        return NV_ERR_INVALID_STATE;
-    }
-
-    pMQCollection = portMemAllocNonPaged(sizeof *pMQCollection);
-    if (pMQCollection == NULL)
-    {
-        NV_PRINTF(LEVEL_ERROR, "Error allocating queue info area.\n");
-        nvStatus = NV_ERR_NO_MEMORY;
-        goto done;
-    }
-    portMemSet(pMQCollection, 0, sizeof *pMQCollection);
-
-    _getMsgQueueParams(pGpu, pMQCollection);
-
-    pRmQueueInfo      = &pMQCollection->rpcQueues[RPC_TASK_RM_QUEUE_IDX];
-
-    sharedBufSize = pMQCollection->pageTableSize +
-                    pRmQueueInfo->commandQueueSize +
-                    pRmQueueInfo->statusQueueSize;
-
-    flags |= MEMDESC_FLAGS_ALLOC_IN_UNPROTECTED_MEMORY;
-
-    //
-    // For now, put all shared queue memory in one block.
-    //
-    NV_ASSERT_OK_OR_GOTO(nvStatus,
-        memdescCreate(&pMQCollection->pSharedMemDesc, pGpu, sharedBufSize,
-            RM_PAGE_SIZE, NV_MEMORY_NONCONTIGUOUS, ADDR_SYSMEM, NV_MEMORY_CACHED,
-            flags),
-        done);
-
-    memdescSetFlag(pMQCollection->pSharedMemDesc, MEMDESC_FLAGS_KERNEL_MODE, NV_TRUE);
-
-    memdescSetPageSize(pMQCollection->pSharedMemDesc, AT_GPU, RM_PAGE_SIZE_HUGE);
-    memdescTagAlloc(nvStatus, NV_FB_ALLOC_RM_INTERNAL_OWNER_UNNAMED_TAG_58,
-                    pMQCollection->pSharedMemDesc);
-    NV_ASSERT_OK_OR_GOTO(nvStatus, nvStatus, error_ret);
-
-    // Create kernel mapping for command queue.
-    NV_ASSERT_OK_OR_GOTO(nvStatus,
-        memdescMap(pMQCollection->pSharedMemDesc, 0, sharedBufSize,
-            NV_TRUE, NV_PROTECT_WRITEABLE,
-            &pVaKernel, &pPrivKernel),
-        error_ret);
-
-    memdescSetKernelMapping(pMQCollection->pSharedMemDesc, pVaKernel);
-    memdescSetKernelMappingPriv(pMQCollection->pSharedMemDesc, pPrivKernel);
-
-    if (pVaKernel == NvP64_NULL)
-    {
-        NV_PRINTF(LEVEL_ERROR, "Error allocating message queue shared buffer\n");
-        nvStatus = NV_ERR_NO_MEMORY;
-        goto error_ret;
-    }
-
-    portMemSet((void *)pVaKernel, 0, sharedBufSize);
-
-    pPageTbl = pVaKernel;
-
-    // Shared memory layout.
-    //
-    // Each of the following are page aligned:
-    //   Shared memory layout header (includes page table)
-    //   RM Command queue header
-    //   RM Command queue entries
-    //   RM Status queue header
-    //   RM Status queue entries
-    memdescGetPhysAddrs(pMQCollection->pSharedMemDesc,
-                    AT_GPU,                     // addressTranslation
-                    0,                          // offset
-                    RM_PAGE_SIZE,               // stride
-                    pMQCollection->pageTableEntryCount,  // count
-                    pPageTbl);                  // physical address table
-
-    pRmQueueInfo->pCommandQueue = NvP64_VALUE(
-        NvP64_PLUS_OFFSET(pVaKernel, pMQCollection->pageTableSize));
-
-    pRmQueueInfo->pStatusQueue  = NvP64_VALUE(
-        NvP64_PLUS_OFFSET(NV_PTR_TO_NvP64(pRmQueueInfo->pCommandQueue), pRmQueueInfo->commandQueueSize));
-
-    lastQueueVa   = NV_PTR_TO_NvP64(pRmQueueInfo->pStatusQueue);
-    lastQueueSize = pRmQueueInfo->statusQueueSize;
-
-    // Assert that the last queue offset + size fits into the shared memory.
-    NV_ASSERT(NvP64_PLUS_OFFSET(pVaKernel, sharedBufSize) ==
-              NvP64_PLUS_OFFSET(lastQueueVa, lastQueueSize));
-
-    NV_ASSERT_OK_OR_GOTO(nvStatus, _gspMsgQueueInit(pRmQueueInfo), error_ret);
-    pRmQueueInfo->queueIdx = RPC_TASK_RM_QUEUE_IDX;
-
-    *ppMQCollection             = pMQCollection;
-    pMQCollection->sharedMemPA  = pPageTbl[0];
-
+    firstCmdOffset = pMQI->pageTableSize + GSP_MSG_QUEUE_HEADER_SIZE;
+    pMQI->pInitMsgBuf  = NvP64_PLUS_OFFSET(pVaKernel, firstCmdOffset);
+    pMQI->initMsgBufPA = pPageTbl[firstCmdOffset >> RM_PAGE_SHIFT] +
+                         (firstCmdOffset & RM_PAGE_MASK);
 done:
     return nvStatus;
 
 error_ret:
-    GspMsgQueuesCleanup(&pMQCollection);
+    GspMsgQueueCleanup(&pMQI);
     return nvStatus;
 }
 
@@ -310,7 +267,7 @@ NV_STATUS GspStatusQueueInit(OBJGPU *pGpu, MESSAGE_QUEUE_INFO **ppMQI)
     int        nRet = 0;
     int        nRetries;
     RMTIMEOUT  timeout;
-    NvU32      timeoutUs = 4000000;
+    NvU32      timeoutUs = 2000000;
     NvU32      timeoutFlags = GPU_TIMEOUT_FLAGS_DEFAULT;
     KernelGsp *pKernelGsp = GPU_GET_KERNEL_GSP(pGpu);
 
@@ -333,7 +290,7 @@ NV_STATUS GspStatusQueueInit(OBJGPU *pGpu, MESSAGE_QUEUE_INFO **ppMQI)
 
     gpuSetTimeout(pGpu, timeoutUs, &timeout, timeoutFlags);
 
-    // Wait other end of the queue to run msgqInit.  Retry until the timeout.
+    // Wait other end of the queue to run msgqInit.  Retry for up to 10 ms.
     for (nRetries = 0; ; nRetries++)
     {
         // Link in status queue
@@ -363,12 +320,7 @@ NV_STATUS GspStatusQueueInit(OBJGPU *pGpu, MESSAGE_QUEUE_INFO **ppMQI)
         if (nvStatus != NV_OK)
             break;
 
-        kgspDumpGspLogs(pKernelGsp, NV_FALSE);
-        if (!kgspHealthCheck_HAL(pGpu, pKernelGsp))
-        {
-            nvStatus = NV_ERR_RESET_REQUIRED;
-            break;
-        }
+        kgspDumpGspLogs(pGpu, pKernelGsp, NV_FALSE);
     }
 
     if (nRet < 0)
@@ -376,60 +328,68 @@ NV_STATUS GspStatusQueueInit(OBJGPU *pGpu, MESSAGE_QUEUE_INFO **ppMQI)
         NV_PRINTF(LEVEL_ERROR,
             "msgqRxLink failed: %d, nvStatus 0x%08x, retries: %d\n",
             nRet, nvStatus, nRetries);
-        _gspMsgQueueCleanup(*ppMQI);
+        GspMsgQueueCleanup(ppMQI);
     }
 
     return nvStatus;
 }
 
-static void
-_gspMsgQueueCleanup(MESSAGE_QUEUE_INFO *pMQI)
+void GspMsgQueueCleanup(MESSAGE_QUEUE_INFO **ppMQI)
 {
-    if (pMQI == NULL)
-    {
+    MESSAGE_QUEUE_INFO *pMQI = NULL;
+
+    if ((ppMQI == NULL) || (*ppMQI == NULL))
         return;
+
+    pMQI         = *ppMQI;
+    pMQI->hQueue = NULL;
+
+    if (pMQI->pWorkArea != NULL)
+    {
+        portMemFree(pMQI->pWorkArea);
+        pMQI->pWorkArea        = NULL;
+        pMQI->pCmdQueueElement = NULL;
+        pMQI->pMetaData        = NULL;
     }
 
-    portMemFree(pMQI->pWorkArea);
-
-    pMQI->pWorkArea        = NULL;
-    pMQI->pCmdQueueElement = NULL;
-    pMQI->pMetaData        = NULL;
-}
-
-void GspMsgQueuesCleanup(MESSAGE_QUEUE_COLLECTION **ppMQCollection)
-{
-    MESSAGE_QUEUE_COLLECTION *pMQCollection = NULL;
-    MESSAGE_QUEUE_INFO       *pRmQueueInfo  = NULL;
-
-    if ((ppMQCollection == NULL) || (*ppMQCollection == NULL))
-        return;
-
-    pMQCollection     = *ppMQCollection;
-    pRmQueueInfo      = &pMQCollection->rpcQueues[RPC_TASK_RM_QUEUE_IDX];
-
-    _gspMsgQueueCleanup(pRmQueueInfo);
-
-    if (pMQCollection->pSharedMemDesc != NULL)
+    if (pMQI->pSharedMemDesc != NULL)
     {
-        NvP64 pVaKernel   = memdescGetKernelMapping(pMQCollection->pSharedMemDesc);
-        NvP64 pPrivKernel = memdescGetKernelMappingPriv(pMQCollection->pSharedMemDesc);
+        NvP64 pVaKernel   = memdescGetKernelMapping(pMQI->pSharedMemDesc);
+        NvP64 pPrivKernel = memdescGetKernelMappingPriv(pMQI->pSharedMemDesc);
 
         // Destroy kernel mapping for command queue.
         if (pVaKernel != 0)
         {
-            memdescUnmap(pMQCollection->pSharedMemDesc, NV_TRUE,
+            memdescUnmap(pMQI->pSharedMemDesc, NV_TRUE, osGetCurrentProcess(),
                          pVaKernel, pPrivKernel);
         }
 
         // Free command queue memory.
-        memdescFree(pMQCollection->pSharedMemDesc);
-        memdescDestroy(pMQCollection->pSharedMemDesc);
-        pMQCollection->pSharedMemDesc = NULL;
+        memdescFree(pMQI->pSharedMemDesc);
+        memdescDestroy(pMQI->pSharedMemDesc);
+        pMQI->pSharedMemDesc = NULL;
     }
 
-    portMemFree(pMQCollection);
-    *ppMQCollection = NULL;
+    portMemFree(pMQI);
+    *ppMQI = NULL;
+}
+
+/*!
+ * Calculate 32-bit checksum
+ *
+ * This routine assumes that the data is padded out with zeros to the next
+ * 8-byte alignment, and it is OK to read past the end to the 8-byte alignment.
+ */
+static NV_INLINE NvU32 _checkSum32(void *pData, NvU32 uLen)
+{
+    NvU64 *p        = (NvU64 *)pData;
+    NvU64 *pEnd     = (NvU64 *)((NvUPtr)pData + uLen);
+    NvU64  checkSum = 0;
+
+    while (p < pEnd)
+        checkSum ^= *p++;
+
+    return NvU64_HI32(checkSum) ^ NvU64_LO32(checkSum);
 }
 
 /*!
@@ -449,78 +409,40 @@ NV_STATUS GspMsgQueueSendCommand(MESSAGE_QUEUE_INFO *pMQI, OBJGPU *pGpu)
     NvU8      *pSrc             = (NvU8 *)pCQE;
     NvU8      *pNextElement     = NULL;
     int        nRet;
-    NvU32      i;
+    int        i;
+    int        nRetries;
+    int        nElements;
     RMTIMEOUT  timeout;
     NV_STATUS  nvStatus         = NV_OK;
-    NvU32      msgLen           = GSP_MSG_QUEUE_ELEMENT_HDR_SIZE +
+    NvU32      uElementSize     = GSP_MSG_QUEUE_ELEMENT_HDR_SIZE +
                                   pMQI->pCmdQueueElement->rpc.length;
 
-    if ((msgLen < sizeof(GSP_MSG_QUEUE_ELEMENT)) ||
-        (msgLen > GSP_MSG_QUEUE_ELEMENT_SIZE_MAX))
+    if ((uElementSize < sizeof(GSP_MSG_QUEUE_ELEMENT)) ||
+        (uElementSize > GSP_MSG_QUEUE_ELEMENT_SIZE_MAX))
     {
-        NV_PRINTF(LEVEL_ERROR, "Incorrect message length %u\n",
+        NV_PRINTF(LEVEL_ERROR, "Incorrect length %u\n",
             pMQI->pCmdQueueElement->rpc.length);
         nvStatus = NV_ERR_INVALID_PARAM_STRUCT;
         goto done;
     }
 
     // Make sure the queue element in our working space is zero padded for checksum.
-    if ((msgLen & 7) != 0)
-        portMemSet(pSrc + msgLen, 0, 8 - (msgLen & 7));
+    if ((uElementSize & 7) != 0)
+        portMemSet(pSrc + uElementSize, 0, 8 - (uElementSize & 7));
 
-    pCQE->seqNum    = pMQI->txSeqNum;
-    pCQE->elemCount = GSP_MSG_QUEUE_BYTES_TO_ELEMENTS(msgLen);
-    pCQE->checkSum  = 0; // The checkSum field is included in the checksum calculation, so zero it.
+    pCQE->seqNum   = pMQI->txSeqNum++;
+    pCQE->checkSum = 0;
+    pCQE->checkSum = _checkSum32(pSrc, uElementSize);
 
-    if (gpuIsCCFeatureEnabled(pGpu))
+    nElements = GSP_MSG_QUEUE_BYTES_TO_ELEMENTS(uElementSize);
+
+    for (i = 0; i < nElements; i++)
     {
-        ConfidentialCompute *pCC = GPU_GET_CONF_COMPUTE(pGpu);
-
-        // Use sequence number as AAD.
-        portMemCopy((NvU8*)pCQE->aadBuffer, sizeof(pCQE->aadBuffer), (NvU8 *)&pCQE->seqNum, sizeof(pCQE->seqNum));
-
-        // We need to encrypt the full queue elements to obscure the data.
-        nvStatus = ccslEncryptWithRotationChecks(pCC->pRpcCcslCtx,
-                               (pCQE->elemCount * GSP_MSG_QUEUE_ELEMENT_SIZE_MIN) - GSP_MSG_QUEUE_ELEMENT_HDR_SIZE,
-                               pSrc + GSP_MSG_QUEUE_ELEMENT_HDR_SIZE,
-                               (NvU8*)pCQE->aadBuffer,
-                               sizeof(pCQE->aadBuffer),
-                               pSrc + GSP_MSG_QUEUE_ELEMENT_HDR_SIZE,
-                               pCQE->authTagBuffer);
-
-        if (nvStatus != NV_OK)
-        {
-            // Do not re-try if encryption fails.
-            NV_PRINTF(LEVEL_ERROR, "Encryption failed with status = 0x%x.\n", nvStatus);
-            if (nvStatus == NV_ERR_INSUFFICIENT_RESOURCES)
-            {
-                // We hit potential IV overflow, this is fatal.
-                NV_PRINTF(LEVEL_ERROR, "Fatal error detected in RPC encrypt: IV overflow!\n");
-                confComputeSetErrorState(pGpu, pCC);
-            }
-            return nvStatus;
-        }
-
-        // Now that encryption covers elements completely, include them in checksum.
-        pCQE->checkSum = _checkSum32(pSrc, pCQE->elemCount * GSP_MSG_QUEUE_ELEMENT_SIZE_MIN);
-    }
-    else
-    {
-        pCQE->checkSum = _checkSum32(pSrc, msgLen);
-    }
-
-    for (i = 0; i < pCQE->elemCount; i++)
-    {
-        NvU32 timeoutFlags = 0;
-
-        if (pMQI->txBufferFull)
-            timeoutFlags |= GPU_TIMEOUT_FLAGS_BYPASS_JOURNAL_LOG;
-
         // Set a timeout of 1 sec
-        gpuSetTimeout(pGpu, 1000000, &timeout, timeoutFlags);
+        gpuSetTimeout(pGpu, 1000000, &timeout, 0);
 
-        // Wait for space to put the next element.
-        while (NV_TRUE)
+        // Wait for space to put the next element. Retry for up to 10 ms.
+        for (nRetries = 0; ; nRetries++)
         {
             // Must get the buffers one at a time, since they could wrap.
             pNextElement = (NvU8 *)msgqTxGetWriteBuffer(pMQI->hQueue, i);
@@ -538,16 +460,9 @@ NV_STATUS GspMsgQueueSendCommand(MESSAGE_QUEUE_INFO *pMQI, OBJGPU *pGpu)
 
         if (pNextElement == NULL)
         {
-            pMQI->txBufferFull++;
-            NV_PRINTF_COND(pMQI->txBufferFull == 1, LEVEL_ERROR, LEVEL_INFO,
-                           "buffer is full (waiting for %d free elements, got %d)\n",
-                           pCQE->elemCount, i);
+            NV_PRINTF(LEVEL_ERROR, "buffer is full\n");
             nvStatus = NV_ERR_BUSY_RETRY;
             goto done;
-        }
-        else
-        {
-            pMQI->txBufferFull = 0;
         }
 
         portMemCopy(pNextElement, GSP_MSG_QUEUE_ELEMENT_SIZE_MIN,
@@ -565,7 +480,7 @@ NV_STATUS GspMsgQueueSendCommand(MESSAGE_QUEUE_INFO *pMQI, OBJGPU *pGpu)
     //
     portAtomicMemoryFenceStore();
 
-    nRet = msgqTxSubmitBuffers(pMQI->hQueue, pCQE->elemCount);
+    nRet = msgqTxSubmitBuffers(pMQI->hQueue, nElements);
 
     if (nRet != 0)
     {
@@ -573,9 +488,6 @@ NV_STATUS GspMsgQueueSendCommand(MESSAGE_QUEUE_INFO *pMQI, OBJGPU *pGpu)
         nvStatus = NV_ERR_INVALID_STATE;
         goto done;
     }
-
-    // Advance seq num only if we actually used it.
-    pMQI->txSeqNum++;
 
     nvStatus = NV_OK;
 
@@ -595,17 +507,16 @@ done:
  *  NV_ERR_NOT_READY            - Partial read.
  *  NV_ERR_INVALID_STATE        - Something really bad happenned.
  */
-NV_STATUS GspMsgQueueReceiveStatus(MESSAGE_QUEUE_INFO *pMQI, OBJGPU *pGpu)
+NV_STATUS GspMsgQueueReceiveStatus(MESSAGE_QUEUE_INFO *pMQI)
 {
     const NvU8 *pNextElement = NULL;
     NvU8       *pTgt         = (NvU8 *)pMQI->pCmdQueueElement;
     int         nRet;
-    NvU32       i;
-    NvU32       nRetries;
-    NvU32       nMaxRetries  = 3;
-    NvU32       nElements    = 1;  // Assume record fits in one queue element for now.
-    NvU32       msgLen;
-    NvU32       checkSum;
+    int         i;
+    int         nRetries;
+    int         nMaxRetries  = 3;
+    int         nElements    = 1;  // Assume record fits in one 256-byte queue element for now.
+    NvU32       uElementSize = 0;
     NvU32       seqMismatchDiff = NV_U32_MAX;
     NV_STATUS   nvStatus     = NV_OK;
 
@@ -613,7 +524,7 @@ NV_STATUS GspMsgQueueReceiveStatus(MESSAGE_QUEUE_INFO *pMQI, OBJGPU *pGpu)
     {
         pTgt      = (NvU8 *)pMQI->pCmdQueueElement;
         nvStatus  = NV_OK;
-        nElements = 1;  // Assume record fits in one queue element for now.
+        nElements = 1;  // Assume record fits in one 256-byte queue element for now.
 
         for (i = 0; i < nElements; i++)
         {
@@ -639,14 +550,29 @@ NV_STATUS GspMsgQueueReceiveStatus(MESSAGE_QUEUE_INFO *pMQI, OBJGPU *pGpu)
                         pNextElement, GSP_MSG_QUEUE_ELEMENT_SIZE_MIN);
             pTgt += GSP_MSG_QUEUE_ELEMENT_SIZE_MIN;
 
-            if (i == 0)
+            if (i != 0)
+                continue;
+
+            //
+            // Special processing for first element of the record.
+            // Pull out the length and make sure it is valid.
+            //
+            uElementSize = GSP_MSG_QUEUE_ELEMENT_HDR_SIZE +
+                pMQI->pCmdQueueElement->rpc.length;
+
+            if ((uElementSize < sizeof(GSP_MSG_QUEUE_ELEMENT)) ||
+                (uElementSize > GSP_MSG_QUEUE_ELEMENT_SIZE_MAX))
             {
-                //
-                // Special processing for first element of the record.
-                // Pull out the element count. This adjusts the loop condition.
-                //
-                nElements = pMQI->pCmdQueueElement->elemCount;
+                // The length is not valid.  If we are running without a fence,
+                // this could mean that the data is still in flight from the CPU.
+                NV_PRINTF(LEVEL_ERROR, "Incorrect length %u\n",
+                    pMQI->pCmdQueueElement->rpc.length);
+                nvStatus = NV_ERR_INVALID_PARAM_STRUCT;
+                break;
             }
+
+            // This adjusts the loop condition.
+            nElements = GSP_MSG_QUEUE_BYTES_TO_ELEMENTS(uElementSize);
         }
 
         // Retry if there was an error.
@@ -654,25 +580,7 @@ NV_STATUS GspMsgQueueReceiveStatus(MESSAGE_QUEUE_INFO *pMQI, OBJGPU *pGpu)
             continue;
 
         // Retry if checksum fails.
-        if (gpuIsCCFeatureEnabled(pGpu))
-        {
-            //
-            // In the Confidential Compute scenario, the actual message length
-            // is inside the encrypted payload, and we can't access it before
-            // decryption, therefore the checksum encompasses the whole element
-            // range. This makes checksum verification significantly slower
-            // because messages are typically much smaller than element size.
-            //
-            checkSum = _checkSum32(pMQI->pCmdQueueElement,
-                                   (nElements * GSP_MSG_QUEUE_ELEMENT_SIZE_MIN));
-        } else
-        {
-            checkSum = _checkSum32(pMQI->pCmdQueueElement,
-                                   (GSP_MSG_QUEUE_ELEMENT_HDR_SIZE +
-                                    pMQI->pCmdQueueElement->rpc.length));
-        }
-
-        if (checkSum != 0)
+        if (_checkSum32(pMQI->pCmdQueueElement, uElementSize) != 0)
         {
             NV_PRINTF(LEVEL_ERROR, "Bad checksum.\n");
             nvStatus = NV_ERR_INVALID_DATA;
@@ -712,6 +620,18 @@ NV_STATUS GspMsgQueueReceiveStatus(MESSAGE_QUEUE_INFO *pMQI, OBJGPU *pGpu)
         break;
     }
 
+    if (nvStatus == NV_OK)
+    {
+        pMQI->rxSeqNum++;
+
+        nRet = msgqRxMarkConsumed(pMQI->hQueue, nElements);
+        if (nRet < 0)
+        {
+            NV_PRINTF(LEVEL_ERROR, "msgqRxMarkConsumed failed: %d\n", nRet);
+            nvStatus = NV_ERR_GENERIC;
+        }
+    }
+
     if (nRetries > 0)
     {
         if (nvStatus == NV_OK)
@@ -721,55 +641,7 @@ NV_STATUS GspMsgQueueReceiveStatus(MESSAGE_QUEUE_INFO *pMQI, OBJGPU *pGpu)
         else
         {
             NV_PRINTF(LEVEL_ERROR, "Read failed after %d retries.\n", nRetries);
-            goto exit;
         }
-    }
-
-    if (gpuIsCCFeatureEnabled(pGpu))
-    {
-        ConfidentialCompute *pCC = GPU_GET_CONF_COMPUTE(pGpu);
-        nvStatus = ccslDecryptWithRotationChecks(pCC->pRpcCcslCtx,
-                               (nElements * GSP_MSG_QUEUE_ELEMENT_SIZE_MIN) - GSP_MSG_QUEUE_ELEMENT_HDR_SIZE,
-                               ((NvU8*)pMQI->pCmdQueueElement) + GSP_MSG_QUEUE_ELEMENT_HDR_SIZE,
-                               NULL,
-                               (NvU8*)pMQI->pCmdQueueElement->aadBuffer,
-                               sizeof(pMQI->pCmdQueueElement->aadBuffer),
-                               ((NvU8*)pMQI->pCmdQueueElement) + GSP_MSG_QUEUE_ELEMENT_HDR_SIZE,
-                               ((NvU8*)pMQI->pCmdQueueElement->authTagBuffer));
-
-        if (nvStatus != NV_OK)
-        {
-            // Do not re-try if decryption failed. Decryption failure is considered fatal.
-            NV_PRINTF(LEVEL_ERROR, "Fatal error detected in RPC decrypt: 0x%x!\n", nvStatus);
-            confComputeSetErrorState(pGpu, pCC);
-            return nvStatus;
-        }
-    }
-
-    // Sanity check for the given RPC length
-    msgLen = GSP_MSG_QUEUE_ELEMENT_HDR_SIZE + pMQI->pCmdQueueElement->rpc.length;
-
-    if ((msgLen < sizeof(GSP_MSG_QUEUE_ELEMENT)) ||
-        (msgLen > GSP_MSG_QUEUE_ELEMENT_SIZE_MAX))
-    {
-        // The length is not valid.  If we are running without a fence,
-        // this could mean that the data is still in flight from the CPU.
-        NV_PRINTF(LEVEL_ERROR, "Incorrect message length %u\n",
-            pMQI->pCmdQueueElement->rpc.length);
-        nvStatus = NV_ERR_INVALID_PARAM_STRUCT;
-    }
-
-exit:
-
-    nRet = msgqRxMarkConsumed(pMQI->hQueue, nElements);
-    if (nRet < 0)
-    {
-        NV_PRINTF(LEVEL_ERROR, "msgqRxMarkConsumed failed: %d\n", nRet);
-        nvStatus = NV_ERR_GENERIC;
-    }
-    else
-    {
-        pMQI->rxSeqNum++;
     }
 
     return nvStatus;

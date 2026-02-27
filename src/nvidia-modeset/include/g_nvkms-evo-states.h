@@ -32,15 +32,9 @@ extern "C" {
 #endif
 
 void nvEvoStateStartNoLock(NVEvoSubDevPtr);
-#if defined(DEBUG)
-void nvEvoStateAssertNoLock(const NVEvoSubDevRec *);
-#else
-static inline void nvEvoStateAssertNoLock(const NVEvoSubDevRec *unused) { };
-#endif
 
 #ifdef __cplusplus
 };
 #endif
 
 #endif /* __EVO_STATE_H__ */
-

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1999-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1999-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -28,7 +28,8 @@
 #include <os/os.h>
 #include <ctrl/ctrl402c.h>
 #include <gpu/disp/kern_disp_max.h>
-#include <gpu/disp/kern_disp_type.h>
+
+#include <efi-console.h>
 
 #define NV_PRIV_REG_WR08(b,o,d)   (*((volatile NvV8*)&(b)->Reg008[(o)/1])=(NvV8)(d))
 #define NV_PRIV_REG_WR16(b,o,d)   (*((volatile NvV16*)&(b)->Reg016[(o)/2])=(NvV16)(d))
@@ -38,16 +39,13 @@
 #define NV_PRIV_REG_RD16(b,o)     ((b)->Reg016[(o)/2])
 #define NV_PRIV_REG_RD32(b,o)     ((b)->Reg032[(o)/4])
 
+#define NV_NUM_CR_REGS      0x99
+
 struct OBJGPU;
 
-typedef struct
-{
-    NvBool              baseValid;
-    VGAADDRDESC         base;
-    NvBool              workspaceBaseValid;
-    VGAADDRDESC         workspaceBase;
-    NvU32               vesaMode;
-} nv_vga_t;
+
+#define NV_BIT_PLANE_SIZE  64 * 1024
+#define NV_NUM_VGA_BIT_PLANES 4
 
 /*
 * device state during Power Management
@@ -77,6 +75,28 @@ typedef struct nv_work_item_s
 #define NV_WORK_ITEM_FLAGS_REQUIRES_GPU     0x1
 #define NV_WORK_ITEM_FLAGS_DONT_FREE_DATA   0x2
 
+/*
+ * pseudo-registry data structure
+ */
+
+typedef enum
+{
+    NV_REGISTRY_ENTRY_TYPE_UNKNOWN = 0,
+    NV_REGISTRY_ENTRY_TYPE_DWORD,
+    NV_REGISTRY_ENTRY_TYPE_BINARY,
+    NV_REGISTRY_ENTRY_TYPE_STRING
+} nv_reg_type_t;
+
+typedef struct nv_reg_entry_s
+{
+    char *regParmStr;
+    NvU32 type;
+    NvU32 data;   // used when type == NV_REGISTRY_ENTRY_TYPE_DWORD
+    NvU8 *pdata;  // used when type == NV_REGISTRY_ENTRY_TYPE_{BINARY,STRING}
+    NvU32 len;    // used when type == NV_REGISTRY_ENTRY_TYPE_{BINARY,STRING}
+    struct nv_reg_entry_s *next;
+} nv_reg_entry_t;
+
 #define INVALID_DISP_ID 0xFFFFFFFF
 #define MAX_DISP_ID_PER_ADAPTER 0x2
 
@@ -93,10 +113,12 @@ typedef struct nv_i2c_adapter_entry_s
 #define NV_INIT_FLAG_GPU_STATE_LOAD       0x0008
 #define NV_INIT_FLAG_FIFO_WATCHDOG        0x0010
 #define NV_INIT_FLAG_CORE_LOGIC           0x0020
-#define NV_INIT_FLAG_GPUMGR_ATTACH        0x0040
-#define NV_INIT_FLAG_PUBLIC_I2C           0x0080
-#define NV_INIT_FLAG_SCALABILITY          0x0100
-#define NV_INIT_FLAG_DMA                  0x0200
+#define NV_INIT_FLAG_HIRES                0x0040
+#define NV_INIT_FLAG_DISP_STATE_SAVED     0x0080
+#define NV_INIT_FLAG_GPUMGR_ATTACH        0x0100
+#define NV_INIT_FLAG_PUBLIC_I2C           0x0400
+#define NV_INIT_FLAG_SCALABILITY          0x0800
+#define NV_INIT_FLAG_DMA                  0x1000
 
 #define MAX_I2C_ADAPTERS    NV402C_CTRL_NUM_I2C_PORTS
 
@@ -277,12 +299,6 @@ typedef struct nv_dynamic_power_s
     NvBool b_fine_not_supported;
 
     /*
-     * This flag is used to check if a workitem is queued for 
-     * RmQueueIdleSustainedWorkitem().
-     */
-    NvBool b_idle_sustained_workitem_queued;
-
-    /*
      * Counter to track clients disallowing GCOFF.
      */
     NvU32 clients_gcoff_disallow_refcount;
@@ -305,7 +321,13 @@ typedef struct
 
     NvU32 pmc_boot_0;
 
-    nv_vga_t vga;
+    nv_efi_t efi;
+
+    NvU8 scr_vga_active[OBJ_MAX_HEADS];
+    NvU8 scr_dcb_index_lo[OBJ_MAX_HEADS];
+    NvU8 scr_dcb_index_hi[OBJ_MAX_HEADS];
+
+    NvU8 font_bitplanes[NV_NUM_VGA_BIT_PLANES][NV_BIT_PLANE_SIZE];
 
     NvU32 flags;
     NvU32 status;
@@ -330,26 +352,13 @@ typedef struct
     /* Flag to check if S0ix-based power management is enabled. */
     NvBool s0ix_pm_enabled;
 
-    /* Variable to track Dynamic Boost support */
-    int db_supported;
-
     /*
      * Maximum FB allocation size which can be saved in system memory
      * during system supened with S0ix-based power management.
      */
     NvU64 s0ix_gcoff_max_fb_size;
 
-    NvU32 pmc_boot_1;
     NvU32 pmc_boot_42;
-
-    /*
-     * This flag is set if the upstream port has been configured ("D3cold Aux Power Limit" and
-     * "PERST# Assertion Delay") for GC6. This configuration is needed only for desktops.
-     */
-    NvBool gc6_upstream_port_configured;
-
-    /* This flag is set if _PR3 ACPI method is available to support RTD3. */
-    NvBool pr3_acpi_method_present;
 } nv_priv_t;
 
 #define NV_SET_NV_PRIV(nv,p) ((nv)->priv = (p))

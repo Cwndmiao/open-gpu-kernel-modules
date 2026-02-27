@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2015-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -24,7 +24,6 @@
 #include "core/core.h"
 #include "gpu/gpu.h"
 #include "gpu/mem_mgr/mem_mgr.h"
-#include "mem_mgr/ctx_buf_pool.h"
 
 #include "published/volta/gv100/dev_mmu.h"
 
@@ -51,8 +50,7 @@ memmgrScrubMapDoorbellRegion_GV100
                                      pChannel->subdeviceId,
                                      pChannel->doorbellRegionHandle,
                                      VOLTA_USERMODE_A,
-                                     NULL,
-                                     0);
+                                     NULL);
     if (status != NV_OK)
         goto exit;
 
@@ -99,7 +97,7 @@ memmgrGetMaxContextSize_GV100
     NvU64 size = memmgrGetMaxContextSize_GP100(pGpu, pMemoryManager);
 
     // In Volta, the GR context buffer size increased by about 847 KB (doubled from Pascal)
-    if (RMCFG_FEATURE_PLATFORM_WINDOWS)
+    if (RMCFG_FEATURE_PLATFORM_WINDOWS_LDDM)
     {
         //
         // We are increasing the reserved mem size by 10 MB.
@@ -117,7 +115,8 @@ memmgrGetMaxContextSize_GV100
     }
     else
     {
-        if (!ctxBufPoolIsSupported(pGpu))
+        // TODO: Remove the PMA check after enabling on all chips.
+        if (memmgrIsPmaInitialized(pMemoryManager))
         {
             //
             // Increase the context size by 120 MB.
@@ -139,8 +138,18 @@ memmgrIsSurfaceBlockLinear_GV100
 (
     MemoryManager     *pMemoryManager,
     Memory            *pMemory,
-    NvU32              kind
+    NvU32              kind,
+    NvU32              dmaFlags
 )
 {
+    if (FLD_TEST_DRF(OS03, _FLAGS, _PTE_KIND, _BL, dmaFlags))
+    {
+        return NV_TRUE;
+    }
+    else if (FLD_TEST_DRF(OS03, _FLAGS, _PTE_KIND, _PITCH, dmaFlags))
+    {
+        return NV_FALSE;
+    }
+
     return (kind != NV_MMU_PTE_KIND_PITCH) ? NV_TRUE: NV_FALSE;
 }

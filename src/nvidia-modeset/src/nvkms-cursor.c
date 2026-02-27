@@ -24,6 +24,8 @@
 /* this source file contains routines for setting and moving the cursor.
  * NV50 specific */
 
+
+
 #include "nvkms-cursor.h"
 #include "nvkms-types.h"
 #include "nvkms-dma.h"
@@ -74,8 +76,7 @@ NvBool nvGetCursorImageSurfaces(
                 nvEvoGetSurfaceFromHandle(pDevEvo,
                                           pOpenDevSurfaceHandles,
                                           pParams->surfaceHandle[eye],
-                                          TRUE /* isUsedByCursorChannel */,
-                                          FALSE /* isUsedByLayerChannel */);
+                                          NV_EVO_CHANNEL_MASK_CURSOR_ALL);
             if ((pSurfaceEvo == NULL) ||
                 (pSurfaceEvo->isoType != NVKMS_MEMORY_ISO)) {
                 return FALSE;
@@ -89,13 +90,13 @@ NvBool nvGetCursorImageSurfaces(
 }
 
 static void
-SetCursorImageOneHead(NVDispEvoPtr pDispEvo,
-                      const NvU32 head,
-                      NVSurfaceEvoRec *pSurfaceEvoNew,
-                      const struct NvKmsCompositionParams *pCursorCompParams,
-                      NVEvoUpdateState *pUpdateState)
+SetCursorImage(NVDispEvoPtr pDispEvo,
+               const NvU32 head,
+               NVSurfaceEvoRec *pSurfaceEvoNew,
+               const struct NvKmsCompositionParams *pCursorCompParams)
 {
     NVDevEvoPtr pDevEvo = pDispEvo->pDevEvo;
+    NVEvoUpdateState updateState = { };
     const NvU32 sd = pDispEvo->displayOwner;
     NvBool changed = FALSE;
 
@@ -118,7 +119,7 @@ SetCursorImageOneHead(NVDispEvoPtr pDispEvo,
         }
 
         if (pSurfaceEvoOld) {
-            nvEvoDecrementSurfaceRefCnts(pDevEvo, pSurfaceEvoOld);
+            nvEvoDecrementSurfaceRefCnts(pSurfaceEvoOld);
         }
 
         pDevEvo->gpus[sd].headState[head].cursor.pSurfaceEvo = pSurfaceEvoNew;
@@ -131,78 +132,55 @@ SetCursorImageOneHead(NVDispEvoPtr pDispEvo,
             pDevEvo,
             head,
             pDevEvo->gpus[sd].headState[head].cursor.pSurfaceEvo,
-            pUpdateState,
+            &updateState,
             &pDevEvo->gpus[sd].headState[head].cursor.cursorCompParams);
-        nvPopEvoSubDevMask(pDevEvo);
-    }
-}
-
-static void
-SetCursorImage(NVDispEvoPtr pDispEvo,
-               const NvU32 apiHead,
-               NVSurfaceEvoRec *pSurfaceEvoNew,
-               const struct NvKmsCompositionParams *pCursorCompParams)
-{
-    NVDevEvoRec *pDevEvo = pDispEvo->pDevEvo;
-    const NVDispApiHeadStateEvoRec *pApiHeadState =
-        &pDispEvo->apiHeadState[apiHead];
-    NvU32 head;
-    NVEvoUpdateState updateState = { };
-    NvBool changed = FALSE;
-
-    FOR_EACH_EVO_HW_HEAD_IN_MASK(pApiHeadState->hwHeadsMask, head) {
-        SetCursorImageOneHead(pDispEvo,
-                              head,
-                              pSurfaceEvoNew,
-                              pCursorCompParams,
-                              &updateState);
-    }
-
-    if (!nvIsUpdateStateEmpty(pDevEvo, &updateState)) {
         nvEvoUpdateAndKickOff(pDispEvo, FALSE, &updateState,
                               TRUE /* releaseElv */);
-        changed = TRUE;
+        nvPopEvoSubDevMask(pDevEvo);
     }
 
-    /*
-     * Unconditionally trigger an unstall: even if the cursor image or
-     * composition didn't change, clients setting the cursor image would expect
-     * a VRR unstall.  Also, if the cursor changed from an image to no image
-     * (i.e., hiding the cursor), that should trigger a VRR unstall, too.
-     */
-    nvTriggerVrrUnstallSetCursorImage(pDispEvo, changed);
+    if (pSurfaceEvoNew) {
+        nvTriggerVrrUnstallSetCursorImage(pDispEvo, changed);
+    }
 }
 
 static NvBool
 FlipCursorImage(NVDispEvoPtr pDispEvo,
                 const struct NvKmsPerOpenDev *pOpenDevice,
-                NvU32 apiHead,
+                NvU32 head,
                 const struct NvKmsSetCursorImageCommonParams *pImageParams)
 {
     const NvU32 sd = pDispEvo->displayOwner;
     NvBool ret;
-    struct NvKmsFlipRequestOneHead *pFlipHead =
-        nvCalloc(1, sizeof(*pFlipHead));
+    struct NvKmsFlipParams *pFlipParams;
+    struct NvKmsFlipRequest *pFlipRequest;
 
-    if (pFlipHead == NULL) {
+    pFlipParams = nvCalloc(1, sizeof(*pFlipParams));
+    if (pFlipParams == NULL) {
         return FALSE;
     }
 
-    pFlipHead->sd = sd;
-    pFlipHead->head = apiHead;
-    pFlipHead->flip.cursor.image = *pImageParams;
-    pFlipHead->flip.cursor.imageSpecified = TRUE;
+    pFlipRequest = &pFlipParams->request;
+
+    pFlipRequest->sd[sd].head[head] = (struct NvKmsFlipCommonParams) {
+        .cursor = {
+            .image          = *pImageParams,
+            .imageSpecified = TRUE,
+        },
+    };
+
+    pFlipRequest->sd[sd].requestedHeadsBitMask = NVBIT(head);
+
+    pFlipRequest->commit = TRUE;
 
     ret = nvFlipEvo(pDispEvo->pDevEvo,
                     pOpenDevice,
-                    pFlipHead,
-                    1     /* numFlipHeads */,
-                    TRUE  /* commit */,
-                    NULL  /* pReply */,
+                    pFlipRequest,
+                    &pFlipParams->reply,
                     FALSE /* skipUpdate */,
                     FALSE /* allowFlipLock */);
 
-    nvFree(pFlipHead);
+    nvFree(pFlipParams);
 
     return ret;
 }
@@ -211,7 +189,7 @@ NvBool nvSetCursorImage(
     NVDispEvoPtr pDispEvo,
     const struct NvKmsPerOpenDev *pOpenDevice,
     const NVEvoApiHandlesRec *pOpenDevSurfaceHandles,
-    NvU32 apiHead,
+    NvU32 head,
     const struct NvKmsSetCursorImageCommonParams *pParams)
 {
     NVDevEvoPtr pDevEvo = pDispEvo->pDevEvo;
@@ -233,32 +211,25 @@ NvBool nvSetCursorImage(
             pDevEvo->capsBits,
             NV5070_CTRL_SYSTEM_CAPS_BUG_2052012_GLITCHY_MCLK_SWITCH)) {
         const NvU32 sd = pDispEvo->displayOwner;
-        const NVDispApiHeadStateEvoRec *pApiHeadState =
-            &pDispEvo->apiHeadState[apiHead];
-        NvU32 head;
 
-        FOR_EACH_EVO_HW_HEAD_IN_MASK(pApiHeadState->hwHeadsMask, head) {
-            NVSurfaceEvoPtr pSurfaceEvoOld =
-                pDevEvo->gpus[sd].headState[head].cursor.pSurfaceEvo;
+        NVSurfaceEvoPtr pSurfaceEvoOld =
+            pDevEvo->gpus[sd].headState[head].cursor.pSurfaceEvo;
 
-            if ((pSurfaceEvoOld != pSurfaceEvoNew) &&
-                (pSurfaceEvoOld == NULL || pSurfaceEvoNew == NULL)) {
-                flipCursorImage = TRUE;
-                break;
-            }
+        if ((pSurfaceEvoOld != pSurfaceEvoNew) &&
+            (pSurfaceEvoOld == NULL || pSurfaceEvoNew == NULL)) {
+            flipCursorImage = TRUE;
         }
     }
 
     if (flipCursorImage) {
         return FlipCursorImage(pDispEvo,
-                               pOpenDevice, apiHead, pParams);
+                               pOpenDevice, head, pParams);
     }
 
     SetCursorImage(pDispEvo,
-                   apiHead,
+                   head,
                    pSurfaceEvoNew,
                    &pParams->cursorCompParams);
-
     return TRUE;
 }
 
@@ -278,43 +249,19 @@ void nvEvoMoveCursorInternal(NVDispEvoPtr pDispEvo,
     }
 }
 
-void nvMoveCursor(NVDispEvoPtr pDispEvo, const NvU32 apiHead,
-                  const struct NvKmsMoveCursorCommonParams *pParams)
+void nvEvoMoveCursor(NVDispEvoPtr pDispEvo, NvU32 head,
+                     const struct NvKmsMoveCursorCommonParams *pParams)
 {
     NVDevEvoPtr pDevEvo = pDispEvo->pDevEvo;
-    const NVDispApiHeadStateEvoRec *pApiHeadState =
-        &pDispEvo->apiHeadState[apiHead];
-    NvU16 hwViewportInWidth;
-    NvU32 head;
-    NvBool firstHead;
+    const NvU32 sd = pDispEvo->displayOwner;
 
     /* XXX NVKMS TODO: validate x,y against current viewport in? */
 
-    nvAssert(apiHead != NV_INVALID_HEAD);
+    pDevEvo->gpus[sd].headState[head].cursor.x = pParams->x;
+    pDevEvo->gpus[sd].headState[head].cursor.y = pParams->y;
 
-    firstHead = NV_TRUE;
-    FOR_EACH_EVO_HW_HEAD_IN_MASK(pApiHeadState->hwHeadsMask, head) {
-        const NVDispHeadStateEvoRec *pHeadState = &pDispEvo->headState[head];
-        const NVHwModeTimingsEvo *pTimings = &pHeadState->timings;
-        const NvU32 sd = pDispEvo->displayOwner;
-
-        if (firstHead) {
-            hwViewportInWidth = pTimings->viewPort.in.width;
-        } else {
-            nvAssert(hwViewportInWidth == pTimings->viewPort.in.width);
-        }
-
-        pDevEvo->gpus[sd].headState[head].cursor.x =
-            pParams->x - (hwViewportInWidth * pHeadState->mergeHeadSection);
-        pDevEvo->gpus[sd].headState[head].cursor.y = pParams->y;
-
-        nvEvoMoveCursorInternal(pDispEvo,
-                                head,
-                                pDevEvo->gpus[sd].headState[head].cursor.x,
-                                pDevEvo->gpus[sd].headState[head].cursor.y);
-
-        firstHead = NV_FALSE;
-    }
+    nvEvoMoveCursorInternal(pDispEvo,
+                            head, pParams->x, pParams->y);
 }
 
 // Allocate and map cursor position PIO channels
@@ -429,11 +376,6 @@ extern NVEvoCursorHAL nvEvoCursor91;
 extern NVEvoCursorHAL nvEvoCursorC3;
 extern NVEvoCursorHAL nvEvoCursorC5;
 extern NVEvoCursorHAL nvEvoCursorC6;
-extern NVEvoCursorHAL nvEvoCursorC9;
-extern NVEvoCursorHAL nvEvoCursorCA;
-extern NVEvoCursorHAL nvEvoCursorCB;
-extern NVEvoCursorHAL nvEvoCursorCC;
-
 
 enum NvKmsAllocDeviceStatus nvInitDispHalCursorEvo(NVDevEvoPtr pDevEvo)
 {
@@ -442,10 +384,6 @@ enum NvKmsAllocDeviceStatus nvInitDispHalCursorEvo(NVDevEvoPtr pDevEvo)
         &nvEvoCursorC3,
         &nvEvoCursorC5,
         &nvEvoCursorC6,
-        &nvEvoCursorC9,
-        &nvEvoCursorCA,
-        &nvEvoCursorCB,
-        &nvEvoCursorCC,
     };
 
     int i;

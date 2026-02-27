@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -23,16 +23,12 @@
 
 #include "kernel/core/core.h"
 #include "kernel/core/locks.h"
-#include "gpu/subdevice/subdevice.h"
 #include "kernel/gpu/mem_mgr/heap.h"
-#include "gpu/mem_mgr/phys_mem_allocator/phys_mem_allocator.h"
 #include "kernel/gpu/mem_mgr/mem_mgr.h"
 #include "kernel/gpu/mig_mgr/kernel_mig_manager.h"
 #include "kernel/gpu/rc/kernel_rc.h"
 #include "kernel/gpu/bif/kernel_bif.h"
-#include "kernel/gpu/bus/kern_bus.h"
 #include "kernel/os/os.h"
-#include "platform/sli/sli.h"
 
 #include "class/cl0000.h" // NV01_NULL_OBJECT
 #include "class/cl0002.h" // NV01_CONTEXT_DMA
@@ -51,12 +47,10 @@
 #include "class/clc36f.h" // VOLTA_CHANNEL_GPFIFO_A
 #include "class/clc46f.h" // TURING_CHANNEL_GPFIFO_A
 #include "class/clc56f.h" // AMPERE_CHANNEL_GPFIFO_A
-#include "class/clc86f.h" // HOPPER_CHANNEL_GPFIFO_A
-
-#include "class/clc96f.h" // BLACKWELL_CHANNEL_GPFIFO_A
 
 #include "deprecated/rmapi_deprecated.h"
-#include "nvrm_registry.h"
+#include "nvRmReg.h"
+
 
 //
 // Watchdog object ids
@@ -111,6 +105,7 @@
 #define WATCHDOG_PUSHBUFFER_OFFSET(pbBytes, pbnum) ((pbBytes) * (pbnum))
 
 #define SUBDEVICE_MASK_ALL DRF_MASK(NV906F_DMA_SET_SUBDEVICE_MASK_VALUE)
+
 
 NV_STATUS
 krcWatchdogChangeState_IMPL
@@ -395,7 +390,9 @@ krcWatchdogShutdown_IMPL
         return NV_OK;
 
     krcWatchdogDisable(pKernelRc);
-    osRemove1HzCallback(pGpu, krcWatchdogTimerProc, NULL /* pData */);
+    osRemove1SecondRepeatingCallback(pGpu,
+                                     krcWatchdogTimerProc,
+                                     NULL /* pData */);
 
     // This should free the client and all associated resources
     pRmApi->Free(pRmApi,
@@ -404,7 +401,7 @@ krcWatchdogShutdown_IMPL
 
     //
     // Make sure to clear any old watchdog data this also clears
-    // WATCHDOG_FLAGS_INITIALIZED, bHandleValid, and hClient
+    // WATCHDOG_FLAGS_INITIALIZED
     //
     portMemSet(&pKernelRc->watchdog, 0, sizeof pKernelRc->watchdog);
     portMemSet(&pKernelRc->watchdogChannelInfo, 0,
@@ -447,8 +444,8 @@ krcWatchdogInit_IMPL
     NvU32           pushBufBytes;
     NvU32           allocationSize;
     NvU32           ctrlSize;
+    NvU32           flags;
     NV_STATUS       status;
-    RsClient       *pClient;
     KernelChannel  *pKernelChannel;
     NvBool          bCacheSnoop;
     RM_API         *pRmApi = rmGpuLockIsOwner() ?
@@ -461,7 +458,7 @@ krcWatchdogInit_IMPL
     {
         NV0080_ALLOC_PARAMETERS                nv0080;
         NV2080_ALLOC_PARAMETERS                nv2080;
-        NV_CHANNEL_ALLOC_PARAMS channelGPFifo;
+        NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS channelGPFifo;
         NV_CONTEXT_DMA_ALLOCATION_PARAMS       ctxDma;
         NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS    virtual;
         NV_MEMORY_ALLOCATION_PARAMS            mem;
@@ -481,36 +478,16 @@ krcWatchdogInit_IMPL
 
     if (bClientUserd)
     {
-        MemoryManager *pMemoryManager = GPU_GET_MEMORY_MANAGER(pGpu);
-
-        if (memmgrIsPmaInitialized(pMemoryManager))
+        Heap *pHeap = GPU_GET_HEAP(pGpu);
+        if (pHeap->pmaObject.bNuma)
         {
-            Heap *pHeap = GPU_GET_HEAP(pGpu);
-            NvU32 pmaConfig = PMA_QUERY_NUMA_ENABLED | PMA_QUERY_NUMA_ONLINED;
-
-            if (pmaQueryConfigs(pHeap->pPmaObject, &pmaConfig) == NV_OK)
-            {
-                // PMA can't be used until it's onlined
-                if (pmaConfig & PMA_QUERY_NUMA_ENABLED)
-                {
-                    // PMA can't be used until it's onlined
-                    if (!(pmaConfig & PMA_QUERY_NUMA_ONLINED))
-                        bClientUserd = NV_FALSE;
-                }
-            }
+            // PMA can't be used until it's onlined
+            bClientUserd = NV_FALSE;
         }
     }
 
     portMemSet(&pKernelRc->watchdogChannelInfo, 0,
                sizeof pKernelRc->watchdogChannelInfo);
-
-    // Bug 4088184 WAR: release GPU lock before allocating NV01_ROOT
-    if (rmGpuLockIsOwner())
-    {
-        bAcquireLock = NV_TRUE;
-        rmGpuLocksRelease(GPUS_LOCK_FLAGS_NONE, NULL);
-        pRmApi = rmapiGetInterface(RMAPI_API_LOCK_INTERNAL);
-    }
 
     // Allocate a root.
     {
@@ -520,8 +497,7 @@ krcWatchdogInit_IMPL
                                     NV01_NULL_OBJECT /* hParent */,
                                     NV01_NULL_OBJECT /* hObject */,
                                     NV01_ROOT,
-                                    &hClient,
-                                    sizeof(hClient)) != NV_OK)
+                                    &hClient) != NV_OK)
         {
             NV_PRINTF(LEVEL_WARNING, "Unable to allocate a watchdog client\n");
             return NV_ERR_GENERIC;
@@ -533,25 +509,7 @@ krcWatchdogInit_IMPL
             status = NV_ERR_NO_MEMORY;
             goto error;
         }
-        pKernelRc->watchdog.hClient = hClient;
-        pKernelRc->watchdog.bHandleValid = NV_TRUE;
     }
-
-    if (bAcquireLock)
-    {
-        status = rmGpuLocksAcquire(GPUS_LOCK_FLAGS_NONE, RM_LOCK_MODULES_RC);
-        if (status != NV_OK)
-        {
-            NV_PRINTF(LEVEL_ERROR, "failed to grab RM-Lock\n");
-            DBG_BREAKPOINT();
-            goto error;
-        }
-        pRmApi = rmapiGetInterface(RMAPI_GPU_LOCK_INTERNAL);
-        bAcquireLock = NV_FALSE;
-    }
-
-    // Due to the Bug 4088184 WAR above, watchdog has to be explicitly set to internal
-    rmclientSetClientFlagsByHandle(hClient, RMAPI_CLIENT_FLAG_RM_INTERNAL_CLIENT);
 
     // Alloc device
     {
@@ -566,8 +524,7 @@ krcWatchdogInit_IMPL
                                          hClient            /* hParent */,
                                          WATCHDOG_DEVICE_ID /* hObject */,
                                          NV01_DEVICE_0,
-                                         pNv0080,
-                                         sizeof(*pNv0080));
+                                         pNv0080);
         if (status != NV_OK)
         {
             NV_PRINTF(LEVEL_WARNING, "Unable to allocate a watchdog device\n");
@@ -590,8 +547,7 @@ krcWatchdogInit_IMPL
             WATCHDOG_DEVICE_ID                             /* hParent */,
             (WATCHDOG_SUB_DEVICE_0_ID + subDeviceInstance) /* hObject */,
             NV20_SUBDEVICE_0,
-            pNv2080,
-            sizeof(*pNv2080));
+            pNv2080);
         if (status != NV_OK)
         {
             NV_PRINTF(LEVEL_WARNING,
@@ -627,8 +583,6 @@ krcWatchdogInit_IMPL
             , {VOLTA_CHANNEL_GPFIFO_A,   sizeof(Nvc36fControl)}
             , {TURING_CHANNEL_GPFIFO_A,  sizeof(Nvc46fControl)}
             , {AMPERE_CHANNEL_GPFIFO_A,  sizeof(Nvc56fControl)}
-            , {HOPPER_CHANNEL_GPFIFO_A,  sizeof(Nvc86fControl)}
-            , {BLACKWELL_CHANNEL_GPFIFO_A,  sizeof(Nvc96fControl)}
         };
 
         NvU32 i;
@@ -671,8 +625,7 @@ krcWatchdogInit_IMPL
                                          WATCHDOG_DEVICE_ID      /* hParent */,
                                          WATCHDOG_VIRTUAL_CTX_ID /* hObject */,
                                          NV01_MEMORY_VIRTUAL,
-                                         pVirtual,
-                                         sizeof(*pVirtual));
+                                         pVirtual);
         if (status != NV_OK)
         {
             NV_PRINTF(LEVEL_WARNING,
@@ -700,109 +653,45 @@ krcWatchdogInit_IMPL
     bCacheSnoop = FLD_TEST_REF(BIF_DMA_CAPS_SNOOP, _CTXDMA,
                                kbifGetDmaCaps(pGpu, pKernelBif));
 
+    // Allocate memory for the notifiers and pushbuffer.
+    flags = ((bCacheSnoop ? DRF_DEF(OS02, _FLAGS, _COHERENCY, _CACHED) :
+                            DRF_DEF(OS02, _FLAGS, _COHERENCY, _UNCACHED)) |
+             DRF_DEF(OS02, _FLAGS, _LOCATION, _PCI) |
+             DRF_DEF(OS02, _FLAGS, _PHYSICALITY, _NONCONTIGUOUS));
+    if ((pKernelRc->watchdog.flags & WATCHDOG_FLAGS_ALLOC_UNCACHED_PCI) != 0)
+    {
+        flags = FLD_SET_DRF(OS02, _FLAGS, _COHERENCY, _UNCACHED, flags);
+    }
+
     {
         NV_MEMORY_ALLOCATION_PARAMS *pMem = &pParams->mem;
-        NvU32 hClass = NV01_MEMORY_SYSTEM;
-        NVOS46_PARAMETERS mapDmaParams = {0};
 
         portMemSet(pMem, 0, sizeof *pMem);
         pMem->owner = HEAP_OWNER_RM_CLIENT_GENERIC;
         pMem->size  = allocationSize;
         pMem->type  = NVOS32_TYPE_IMAGE;
 
-        pMem->attr2 = DRF_DEF(OS32, _ATTR2, _GPU_CACHEABLE, _NO);
-
-        // Apply registry overrides to channel pushbuffer.
-        switch (DRF_VAL(_REG_STR_RM, _INST_LOC_4, _CHANNEL_PUSHBUFFER, pGpu->instLocOverrides4))
+        // TODO - migrate to use newer OS32 flags inline JIRA CORERM-4212
+        status = RmDeprecatedConvertOs02ToOs32Flags(flags,
+                                                    &pMem->attr,
+                                                    &pMem->attr2,
+                                                    &pMem->flags);
+        if (status != NV_OK)
         {
-            case NV_REG_STR_RM_INST_LOC_4_CHANNEL_PUSHBUFFER_VID:
-                hClass = NV01_MEMORY_LOCAL_USER;
-                pMem->attr |= DRF_DEF(OS32, _ATTR, _LOCATION,  _VIDMEM) |
-                              DRF_DEF(OS32, _ATTR, _COHERENCY, _UNCACHED);
-                break;
-
-            case NV_REG_STR_RM_INST_LOC_4_CHANNEL_PUSHBUFFER_COH:
-                hClass = NV01_MEMORY_SYSTEM;
-                pMem->attr |= DRF_DEF(OS32, _ATTR, _LOCATION,  _PCI)    |
-                              DRF_DEF(OS32, _ATTR, _COHERENCY, _CACHED) |
-                              DRF_DEF(OS32, _ATTR, _PHYSICALITY, _NONCONTIGUOUS);
-                break;
-
-            case NV_REG_STR_RM_INST_LOC_4_CHANNEL_PUSHBUFFER_NCOH:
-                hClass = NV01_MEMORY_SYSTEM;
-                pMem->attr |= DRF_DEF(OS32, _ATTR, _LOCATION,  _PCI)      |
-                              DRF_DEF(OS32, _ATTR, _COHERENCY, _UNCACHED) |
-                              DRF_DEF(OS32, _ATTR, _PHYSICALITY, _NONCONTIGUOUS);
-                break;
-
-            case NV_REG_STR_RM_INST_LOC_4_CHANNEL_PUSHBUFFER_DEFAULT:
-            default:
-                hClass = NV01_MEMORY_SYSTEM;
-                pMem->attr |= DRF_DEF(OS32, _ATTR, _LOCATION,  _PCI)      |
-                              DRF_DEF(OS32, _ATTR, _COHERENCY, _UNCACHED) |
-                              DRF_DEF(OS32, _ATTR, _PHYSICALITY, _NONCONTIGUOUS);
+            NV_PRINTF(LEVEL_ERROR, "Invalid flags\n");
+            goto error;
         }
 
-        if (bCacheSnoop && (hClass == NV01_MEMORY_SYSTEM))
-        {
-            pMem->attr = FLD_SET_DRF(OS32, _ATTR, _COHERENCY, _CACHED,
-                                     pMem->attr);
-        }
-
-        if (((pKernelRc->watchdog.flags & WATCHDOG_FLAGS_ALLOC_UNCACHED_PCI) != 0) &&
-            (hClass == NV01_MEMORY_SYSTEM))
-        {
-            pMem->attr = FLD_SET_DRF(OS32, _ATTR, _COHERENCY, _UNCACHED,
-                                     pMem->attr);
-        }
-
-        //
-        // When Hopper CC is enabled all RM internal sysmem allocations that are
-        // required to be accessed from GPU should be in unprotected memory
-        // All video allocations must be in CPR
-        //
-
-        //
-        // Allocate memory using vidHeapControl
-        //
-        // vidHeapControl calls should happen outside GPU locks. This is a PMA
-        // requirement as memory allocation calls may invoke eviction which UVM
-        // could get stuck behind GPU lock
-        //
-        if (hClass == NV01_MEMORY_LOCAL_USER && rmGpuLockIsOwner())
-        {
-            bAcquireLock = NV_TRUE;
-            rmGpuLocksRelease(GPUS_LOCK_FLAGS_NONE, NULL);
-            pRmApi = rmapiGetInterface(RMAPI_API_LOCK_INTERNAL);
-        }
-
-        // Allocate memory for the notifiers and pushbuffer
         status = pRmApi->AllocWithHandle(pRmApi,
                                          hClient            /* hClient */,
                                          WATCHDOG_DEVICE_ID /* hParent */,
                                          WATCHDOG_MEM_ID    /* hObject */,
-                                         hClass,
-                                         pMem,
-                                         sizeof(*pMem));
-
-        if (bAcquireLock)
-        {
-            // Re-acquire the GPU locks
-            if (rmGpuLocksAcquire(GPUS_LOCK_FLAGS_NONE, RM_LOCK_MODULES_RC) != NV_OK)
-            {
-                NV_PRINTF(LEVEL_ERROR, "failed to grab RM-Lock\n");
-                DBG_BREAKPOINT();
-                goto error;
-            }
-            pRmApi = rmapiGetInterface(RMAPI_GPU_LOCK_INTERNAL);
-            bAcquireLock = NV_FALSE;
-        }
-
+                                         NV01_MEMORY_SYSTEM,
+                                         pMem);
         if (status != NV_OK)
         {
             NV_PRINTF(LEVEL_WARNING,
-                      "Unable to allocate %s memory for watchdog\n",
-                      (hClass == NV01_MEMORY_LOCAL_USER) ? "video" : "system");
+                      "Unable to allocate system memory for watchdog\n");
             goto error;
         }
 
@@ -817,30 +706,30 @@ krcWatchdogInit_IMPL
         if (status != NV_OK)
         {
             NV_PRINTF(LEVEL_WARNING,
-                      "Unable to map memory for watchdog\n");
+                      "Unable to map system memory for watchdog\n");
             goto error;
         }
 
         portMemSet(pKernelRc->watchdogChannelInfo.pCpuAddr, 0, pMem->size);
 
-        mapDmaParams.hClient   = hClient;
-        mapDmaParams.hDevice   = WATCHDOG_DEVICE_ID;
-        mapDmaParams.hDma      = WATCHDOG_VIRTUAL_CTX_ID;
-        mapDmaParams.hMemory   = WATCHDOG_MEM_ID;
-        mapDmaParams.length    = allocationSize;
-        mapDmaParams.flags     = (bCacheSnoop ? DRF_DEF(OS46, _FLAGS, _CACHE_SNOOP, _ENABLE) :
-                                     DRF_DEF(OS46, _FLAGS, _CACHE_SNOOP, _DISABLE)) |
-                                     DRF_DEF(OS46, _FLAGS, _ACCESS, _READ_WRITE);
         // Map the allocation into the unified heap.
-        status = pRmApi->Map(pRmApi, &mapDmaParams);
-
+        status = pRmApi->Map(pRmApi,
+            hClient                 /* hClient */,
+            WATCHDOG_DEVICE_ID      /* hDevice */,
+            WATCHDOG_VIRTUAL_CTX_ID /* hMemctx */,
+            WATCHDOG_MEM_ID         /* hMemory */,
+            0                       /* offset */,
+            allocationSize          /* length */,
+            (bCacheSnoop ? DRF_DEF(OS46, _FLAGS, _CACHE_SNOOP, _ENABLE) :
+                           DRF_DEF(OS46, _FLAGS, _CACHE_SNOOP, _DISABLE)) |
+                DRF_DEF(OS46, _FLAGS, _ACCESS, _READ_WRITE),
+            &pKernelRc->watchdogChannelInfo.pGpuAddr);
         if (status != NV_OK)
         {
             NV_PRINTF(LEVEL_ERROR,
-                      "Unable to map memory into watchdog's heap\n");
+                      "Unable to map system memory into watchdog's heap\n");
             goto error;
         }
-        pKernelRc->watchdogChannelInfo.pGpuAddr = mapDmaParams.dmaOffset;
     }
 
     // Allocate the error notifier context DMA.
@@ -867,8 +756,7 @@ krcWatchdogInit_IMPL
                                          WATCHDOG_DEVICE_ID    /* hParent */ ,
                                          WATCHDOG_ERROR_DMA_ID /* hObject */,
                                          NV01_CONTEXT_DMA,
-                                         pCtxDma,
-                                         sizeof(*pCtxDma));
+                                         pCtxDma);
         if (status != NV_OK)
         {
             NV_PRINTF(LEVEL_WARNING,
@@ -902,8 +790,7 @@ krcWatchdogInit_IMPL
                                          WATCHDOG_DEVICE_ID       /* hParent */,
                                          WATCHDOG_NOTIFIER_DMA_ID /* hObject */,
                                          NV01_CONTEXT_DMA,
-                                         pCtxDma,
-                                         sizeof(*pCtxDma));
+                                         pCtxDma);
         if (status != NV_OK)
         {
             NV_PRINTF(LEVEL_WARNING, "Unable to set up watchdog's notifier\n");
@@ -937,14 +824,6 @@ krcWatchdogInit_IMPL
         }
 
         //
-        // When APM is enabled all RM internal allocations must to go to
-        // unprotected memory irrespective of vidmem or sysmem
-        // When Hopper CC is enabled all RM internal sysmem allocations that
-        // are required to be accessed from GPU should be in unprotected memory
-        // and all vidmem allocations must go to protected memory
-        //
-
-        //
         // Allocate memory using vidHeapControl
         //
         // vidHeapControl calls should happen outside GPU locks. This is a PMA
@@ -962,14 +841,12 @@ krcWatchdogInit_IMPL
         // Using device handle since VGPU doesnt support subdevice memory
         // allocations
         //
-        pMem->attr |= DRF_DEF(OS32, _ATTR, _ALLOCATE_FROM_RESERVED_HEAP, _YES);
         status = pRmApi->AllocWithHandle(pRmApi,
             hClient                    /* hClient */,
             WATCHDOG_DEVICE_ID         /* hParent */,
             WATCHDOG_USERD_PHYS_MEM_ID /* hObject */,
             userdMemClass,
-            pMem,
-            sizeof(*pMem));
+            pMem);
 
         if (status != NV_OK)
         {
@@ -980,7 +857,7 @@ krcWatchdogInit_IMPL
     }
 
     {
-        NV_CHANNEL_ALLOC_PARAMS *pChannelGPFifo =
+        NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS *pChannelGPFifo =
             &pParams->channelGPFifo;
 
         //
@@ -997,7 +874,7 @@ krcWatchdogInit_IMPL
         pChannelGPFifo->gpFifoEntries = WATCHDOG_GPFIFO_ENTRIES;
 
         // 2d object is only suppported on GR0
-        pChannelGPFifo->engineType = RM_ENGINE_TYPE_GR0;
+        pChannelGPFifo->engineType = NV2080_ENGINE_TYPE_GR0;
 
         if (bClientUserd)
             pChannelGPFifo->hUserdMemory[0] = WATCHDOG_USERD_PHYS_MEM_ID;
@@ -1015,8 +892,7 @@ krcWatchdogInit_IMPL
             WATCHDOG_DEVICE_ID             /* hParent */,
             WATCHDOG_PUSHBUFFER_CHANNEL_ID /* hObject */,
             gpfifoObj,
-            pChannelGPFifo,
-            sizeof(*pChannelGPFifo));
+            pChannelGPFifo);
 
         if (bAcquireLock)
         {
@@ -1092,19 +968,10 @@ krcWatchdogInit_IMPL
         WATCHDOG_PUSHBUFFER_CHANNEL_ID /* hParent */,
         WATCHDOG_GROBJ_ID              /* hObject */,
         grObj,
-        NULL,
-        0);
+        NULL);
     if (status != NV_OK)
     {
         NV_PRINTF(LEVEL_WARNING, "Unable to allocate class %x\n", grObj);
-        goto error;
-    }
-
-    // Fetch the client object
-    status = serverGetClientUnderLock(&g_resServ, hClient, &pClient);
-    if (status != NV_OK)
-    {
-        NV_PRINTF(LEVEL_ERROR, "Unable to obtain client object\n");
         goto error;
     }
 
@@ -1112,7 +979,7 @@ krcWatchdogInit_IMPL
     // Determine the (class + engine) handle the hardware will understand, if
     // necessary
     //
-    if (CliGetKernelChannelWithDevice(pClient,
+    if (CliGetKernelChannelWithDevice(hClient,
                                       WATCHDOG_DEVICE_ID,
                                       WATCHDOG_PUSHBUFFER_CHANNEL_ID,
                                       &pKernelChannel) != NV_OK)
@@ -1127,7 +994,7 @@ krcWatchdogInit_IMPL
 
     {
         NvU32 classID;
-        RM_ENGINE_TYPE engineID;
+        NvU32 engineID;
 
         status = kchannelGetClassEngineID_HAL(pGpu, pKernelChannel,
             WATCHDOG_GROBJ_ID,
@@ -1186,21 +1053,19 @@ krcWatchdogInit_IMPL
     pKernelRc->watchdog.flags |= WATCHDOG_FLAGS_INITIALIZED;
 
     // Hook into the 1 Hz OS timer
-    osSchedule1HzCallback(pGpu,
-                          krcWatchdogTimerProc,
-                          NULL /* pData */,
-                          NV_OS_1HZ_REPEAT);
+    osSchedule1SecondCallback(pGpu,
+                              krcWatchdogTimerProc,
+                              NULL /* pData */,
+                              NV_OS_1HZ_REPEAT);
 
     // Schedule next interval to run immediately
     pKernelRc->watchdogPersistent.nextRunTime = 0;
 
 error:
     NV_ASSERT(status == NV_OK);
-
     if (status != NV_OK)
     {
         pRmApi->Free(pRmApi, hClient, hClient);
-        pKernelRc->watchdog.bHandleValid = NV_FALSE;
     }
 
     portMemFree(pParams);
@@ -1312,38 +1177,8 @@ krcWatchdogInitPushbuffer_IMPL
               NV902D_NOTIFY, NV902D_NOTIFY_TYPE_WRITE_ONLY);
     PUSH_PAIR(pKernelRc->watchdogChannelInfo.class2dSubch,
               NV902D_NO_OPERATION, 0x0);
-
-    if (!gpuIsClassSupported(pGpu, HOPPER_CHANNEL_GPFIFO_A))
-    {
-        //
-        // TODO Bug 4588210
-        // Ticking bomb when Hopper eventually gets deprecated and
-        // HOPPER_CHANNEL_GPFIFO_A is no longer supported.
-        //
-        // When this assert starts failing, delete this branch of the if
-        // condition above.
-        //
-        NV_ASSERT(!IsHOPPERorBetter(pGpu));
-
-        PUSH_PAIR(pKernelRc->watchdogChannelInfo.class2dSubch,
-                  NV906F_SET_REFERENCE, 0x0);
-    }
-    else
-    {
-        PUSH_PAIR(pKernelRc->watchdogChannelInfo.class2dSubch, NVC86F_WFI, 0);
-        PUSH_PAIR(pKernelRc->watchdogChannelInfo.class2dSubch,
-                  NVC86F_MEM_OP_A,
-                  0);
-        PUSH_PAIR(pKernelRc->watchdogChannelInfo.class2dSubch,
-                  NVC86F_MEM_OP_B,
-                  0);
-        PUSH_PAIR(pKernelRc->watchdogChannelInfo.class2dSubch,
-                  NVC86F_MEM_OP_C,
-                  0);
-        PUSH_PAIR(pKernelRc->watchdogChannelInfo.class2dSubch,
-                  NVC86F_MEM_OP_D,
-                  DRF_DEF(C86F, _MEM_OP_D, _OPERATION, _MEMBAR));
-    }
+    PUSH_PAIR(pKernelRc->watchdogChannelInfo.class2dSubch,
+              NV906F_SET_REFERENCE, 0x0);
 
     // Pushbuffer 1
     {
@@ -1392,17 +1227,9 @@ krcWatchdogInitPushbuffer_IMPL
 
     SLI_LOOP_START(SLI_LOOP_FLAGS_NONE);
     {
-        //
-        // On some architectures, if doorbell is mapped via bar0, we need to send
-        // an extra flush
-        //
-        if (kbusFlushPcieForBar0Doorbell_HAL(pGpu, GPU_GET_KERNEL_BUS(pGpu)) != NV_OK)
-        {
-            NV_PRINTF(LEVEL_ERROR, "Busflush failed.\n");
-            return;
-        }
         kfifoUpdateUsermodeDoorbell_HAL(pGpu, GPU_GET_KERNEL_FIFO(pGpu),
-            pKernelRc->watchdog.notifierToken->info32);
+            pKernelRc->watchdog.notifierToken->info32,
+            pKernelRc->watchdog.runlistId);
     }
     SLI_LOOP_END;
 
@@ -1472,16 +1299,10 @@ krcWatchdogWriteNotifierToGpfifo_IMPL
     SLI_LOOP_START(SLI_LOOP_FLAGS_NONE);
     {
         kfifoUpdateUsermodeDoorbell_HAL(pGpu, GPU_GET_KERNEL_FIFO(pGpu),
-            pKernelRc->watchdog.notifierToken->info32);
+            pKernelRc->watchdog.notifierToken->info32,
+            pKernelRc->watchdog.runlistId);
     }
     SLI_LOOP_END;
 }
 
-NV_STATUS krcWatchdogGetClientHandle(KernelRc *pKernelRc, NvHandle *phClient)
-{
-    if (!pKernelRc->watchdog.bHandleValid)
-        return NV_ERR_INVALID_STATE;
 
-    *phClient = pKernelRc->watchdog.hClient;
-    return NV_OK;
-}

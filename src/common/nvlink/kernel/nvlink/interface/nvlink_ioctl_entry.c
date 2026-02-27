@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2017-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2020 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -28,7 +28,6 @@
 #include "../nvlink_ctx.h"
 #include "../nvlink_helper.h"
 #include "nvlink_lock.h"
-#include "nvctassert.h"
 
 #define NVLINK_IOC_GET_BUF(ctrlParams, type) (ctrlParams)->size >= sizeof(type) ? (type *) (ctrlParams)->buf : NULL
 
@@ -708,12 +707,6 @@ nvlink_lib_ctrl_all_links
             // default initialize status to NVL_SUCCESS
             iocReq->status = NVL_SUCCESS;
 
-            if (links[0]->dev->enableALI)
-            {
-                status = NVL_SUCCESS;
-                goto nvlink_lib_ctrl_all_links_end;
-            }
-
             iocReq->status = nvlink_core_initphase1(links, numLinks,
                                                     NVLINK_STATE_CHANGE_SYNC);
             break;
@@ -732,16 +725,6 @@ nvlink_lib_ctrl_all_links
 
             // default initialize status to NVL_SUCCESS
             iocReq->status = NVL_SUCCESS;
-
-            //
-            // If the current nvlink device does not support the command
-            // skip using the command and return success for FM to continue on.
-            //
-            if (links[0]->version >= NVLINK_DEVICE_VERSION_40)
-            {
-                status = NVL_SUCCESS;
-                goto nvlink_lib_ctrl_all_links_end;
-            }
 
             iocReq->status = nvlink_core_rx_init_term(links, numLinks,
                                                       NVLINK_STATE_CHANGE_ASYNC);
@@ -762,12 +745,6 @@ nvlink_lib_ctrl_all_links
             // default initialize status to NVL_SUCCESS
             iocReq->status = NVL_SUCCESS;
 
-            if (links[0]->dev->enableALI)
-            {
-                status = NVL_SUCCESS;
-                goto nvlink_lib_ctrl_all_links_end;
-            }
-
             iocReq->status = nvlink_core_set_rx_detect(links, numLinks,
                                                       NVLINK_STATE_CHANGE_ASYNC);
             break;
@@ -787,12 +764,6 @@ nvlink_lib_ctrl_all_links
             // default initialize status to NVL_SUCCESS
             iocReq->status = NVL_SUCCESS;
 
-            if (links[0]->dev->enableALI)
-            {
-                status = NVL_SUCCESS;
-                goto nvlink_lib_ctrl_all_links_end;
-            }
-
             iocReq->status = nvlink_core_get_rx_detect(links, numLinks,
                                                       NVLINK_STATE_CHANGE_ASYNC);
             break;
@@ -811,12 +782,6 @@ nvlink_lib_ctrl_all_links
 
             // default initialize status to NVL_SUCCESS
             iocReq->status = NVL_SUCCESS;
-
-            if (links[0]->dev->enableALI)
-            {
-                status = NVL_SUCCESS;
-                goto nvlink_lib_ctrl_all_links_end;
-            }
 
             if (iocReq->commMode)
             {
@@ -850,16 +815,6 @@ nvlink_lib_ctrl_all_links
             // default initialize status to NVL_SUCCESS
             iocReq->status = NVL_SUCCESS;
 
-            //
-            // If the current nvlink device does not support the command
-            // skip using the command and return success for FM to continue on.
-            //
-            if (links[0]->version >= NVLINK_DEVICE_VERSION_40)
-            {
-                iocReq->status = NVL_SUCCESS;
-                goto nvlink_lib_ctrl_all_links_end;
-            }
-
             iocReq->status = nvlink_core_calibrate_links(links, numLinks,
                                                       NVLINK_STATE_CHANGE_SYNC);
             break;
@@ -877,16 +832,6 @@ nvlink_lib_ctrl_all_links
 
             // default initialize status to NVL_SUCCESS
             iocReq->status = NVL_SUCCESS;
-
-            //
-            // If the current nvlink device does not support the command
-            // skip using the command and return success for FM to continue on.
-            //
-            if (links[0]->version >= NVLINK_DEVICE_VERSION_40)
-            {
-                status = NVL_SUCCESS;
-                goto nvlink_lib_ctrl_all_links_end;
-            }
 
             iocReq->status = nvlink_core_enable_data(links, numLinks,
                                                       NVLINK_STATE_CHANGE_SYNC);
@@ -925,17 +870,10 @@ nvlink_lib_ctrl_all_links
             // default initialize status to NVL_SUCCESS
             iocReq->status = NVL_SUCCESS;
 
-            if (links[0]->dev->enableALI)
-            {
-                status = NVL_SUCCESS;
-                goto nvlink_lib_ctrl_all_links_end;
-            }
-
             iocReq->status = nvlink_core_initnegotiate(links, numLinks,
                                                       NVLINK_STATE_CHANGE_ASYNC);
             break;
         }
-
         case CTRL_NVLINK_INITPHASE5:
         {
             nvlink_initphase5 *iocReq;
@@ -950,18 +888,6 @@ nvlink_lib_ctrl_all_links
             // default initialize status to NVL_SUCCESS
             iocReq->status = NVL_SUCCESS;
 
-            //
-            // If the current nvlink device does not support the command
-            // skip using the command and return success for FM to continue on.
-            //
-            if (links[0]->version < NVLINK_DEVICE_VERSION_40 ||
-                links[0]->dev->enableALI)
-            {
-                status = NVL_SUCCESS;
-                goto nvlink_lib_ctrl_all_links_end;
-            }
-            iocReq->status = nvlink_core_initphase5(links, numLinks,
-                                                      NVLINK_STATE_CHANGE_ASYNC);
             break;
         }
 
@@ -1446,54 +1372,6 @@ nvlink_lib_ctrl_device_read_discovery_tokens
 }
 
 /**
- * Perform peer link discovery
- *
- * @param[in]  readParams  IOCTL params
- *
- * return NvlStatus
- */
-static NvlStatus
-_nvlink_lib_ctrl_device_discover_peer_link
-(
-    nvlink_link *link
-)
-{
-    NvlStatus      status   = NVL_SUCCESS;
-
-    //
-    // If the link succeeds rxDet(link is in HS, SAFE, or SLEEP mode) then go through and find its
-    // peer link. What is important is not actually finding the link, but making sure the corelib
-    // goes through the discovery process and has endpoints cache the remote information in the corelib
-    // such that FM or endpoints can query the corelib for the topology of the system.
-    //
-    NvU64 linkMode = NVLINK_LINKSTATE_OFF;
-    status = link->link_handlers->get_dl_link_mode(link, &linkMode);
-    if (status != NVL_SUCCESS)
-    {
-        NVLINK_PRINT((DBG_MODULE_NVLINK_CORE, NVLINK_DBG_LEVEL_ERRORS,
-            "%s: Unable to get link mode for %s:%s\n",
-            __FUNCTION__, link->dev->deviceName, link->linkName));
-        return status;
-    }
-
-    if ((linkMode == NVLINK_LINKSTATE_SAFE) ||
-        (linkMode == NVLINK_LINKSTATE_HS)   ||
-        (linkMode == NVLINK_LINKSTATE_SLEEP))
-    {
-        nvlink_link   *remoteLink = NULL;
-        nvlink_core_discover_and_get_remote_end(link, &remoteLink, 0, NV_FALSE);
-        if (remoteLink == NULL)
-        {
-            NVLINK_PRINT((DBG_MODULE_NVLINK_CORE, NVLINK_DBG_LEVEL_INFO,
-                "%s: link 0x%x: couldn't find link pair! Possible that other device queries need to finish before there is a found connection in the corelib\n",
-                __FUNCTION__, link->linkNumber));
-        }
-    }
-
-    return NVL_SUCCESS;
-}
-
-/**
  * Read the SIDs for the the local and remote device
  *
  * @param[in]  readParams  IOCTL params
@@ -1606,19 +1484,6 @@ nvlink_lib_ctrl_device_read_sids
 
     for (i = 0; i < numLinks; i++)
     {
-        // ALI specific handling to update corelib structures and verify link status
-        if (dev->enableALI)
-        {
-            status = _nvlink_lib_ctrl_device_discover_peer_link(links[i]);
-            if (status != NVL_SUCCESS)
-            {
-                // Release the per-link locks and free links
-                nvlink_lib_link_locks_release(links, numLinks);
-                nvlink_free((void *)links);
-                return status;
-            }
-        }
-
         // Fill-up the local/remote link numbers and SIDs
         readParams->sidInfo[numEntries].localLinkSid  = links[i]->localSid;
         readParams->sidInfo[numEntries].remoteLinkSid = links[i]->remoteSid;
@@ -1746,22 +1611,6 @@ nvlink_lib_ctrl_discover_intranode_conns
                 // If receiver detect has failed, then there is no connection
                 continue;
             }
-
-        // ALI specific handling to update corelib structures and verify link status
-        if (dev->enableALI)
-        {
-            status = _nvlink_lib_ctrl_device_discover_peer_link(link);
-            if (status != NVL_SUCCESS)
-            {
-                // Release the per-link locks
-                nvlink_lib_link_locks_release(links, numLinks);
-
-                // Release the top-level lock
-                nvlink_lib_top_lock_release();
-                nvlink_free((void *)links);
-                return status;
-            }
-        }
 
             writeToken = nvlink_core_get_link_discovery_token(link);
 
@@ -2084,7 +1933,6 @@ nvlink_lib_ctrl_train_intranode_conn
     nvlink_intranode_conn *conn         = NULL;
     NvlStatus              status       = NVL_SUCCESS;
     NvU32                  count;
-    NvU32                  i;
 
     // make sure that this call is for single node systems
     if (trainParams->srcEndPoint.nodeId != trainParams->dstEndPoint.nodeId)
@@ -2194,16 +2042,6 @@ nvlink_lib_ctrl_train_intranode_conn
     {
         case nvlink_train_conn_off_to_swcfg:
         {
-            if (srcLink->version >= NVLINK_DEVICE_VERSION_40)
-            {
-                // non-ALI training for NVLink4.0+
-                if (!srcLink->dev->enableALI)
-                {
-                    nvlink_core_init_links_from_off_to_swcfg_non_ALI(
-                                            initLinks, count, NVLINK_STATE_CHANGE_SYNC);
-                }
-            }
-            else
             {
                 // ALT training for NVLink3.0+
                 nvlink_core_init_links_from_off_to_swcfg(
@@ -2213,16 +2051,8 @@ nvlink_lib_ctrl_train_intranode_conn
         }
         case nvlink_train_conn_swcfg_to_active:
         {
-            if (srcLink->version >= NVLINK_DEVICE_VERSION_40)
-            {
-                // non-ALI training for NVLink4.0+
-                if (!srcLink->dev->enableALI)
-                {
-                    status = nvlink_core_train_intranode_conns_from_swcfg_to_active_non_ALI(
-                                                     &conn, 1, NVLINK_STATE_CHANGE_SYNC);
-                }
-            } 
-            else if (srcLink->version >= NVLINK_DEVICE_VERSION_30)
+            if (srcLink->version >= NVLINK_DEVICE_VERSION_30)
+
             {
                 // ALT training for NVLink3.0+
                 status = nvlink_core_train_intranode_conns_from_swcfg_to_active_ALT(
@@ -2250,44 +2080,6 @@ nvlink_lib_ctrl_train_intranode_conn
             if (status == NVL_SUCCESS)
             {
                 nvlink_core_reset_intranode_conns(&conn, 1, NVLINK_STATE_CHANGE_SYNC);
-            }
-            break;
-        }
-        case nvlink_train_conn_off_to_active_ali_non_blocking:
-        case nvlink_train_conn_off_to_active_ali_blocking:
-        {
-           if (srcLink->version >= NVLINK_DEVICE_VERSION_40 &&
-               srcLink->dev->enableALI)
-            {
-                status = nvlink_core_train_intranode_conns_from_off_to_active_ALI(initLinks, count);
-
-                if (trainParams->trainTo == nvlink_train_conn_off_to_active_ali_blocking)
-                {
-                    NvU32 timeout = NVLINK_TRANSITION_HS_TIMEOUT;
-                    do
-                    {
-                        nvlink_sleep(1);
-                        status = nvlink_core_train_check_link_ready_ALI(initLinks, count);
-                        if (status == NVL_SUCCESS)
-                        {
-                            break;
-                        }
-
-                        timeout--;
-                    } while(timeout > 0);
-
-                    if (status == NVL_SUCCESS)
-                    {
-                        for ( i = 0; i < count; ++i)
-                        {
-                            //
-                            // NVLINK_LINKSTATE_TRAFFIC_SETUP will make sure a request to active completes before
-                            // setting buffer ready so use the internal check to see if the request for ALI completed
-                            //
-                            (void)initLinks[i]->link_handlers->set_dl_link_mode(initLinks[i], NVLINK_LINKSTATE_TRAFFIC_SETUP, 0);
-                        }
-                }
-            }
             }
             break;
         }
@@ -2333,12 +2125,6 @@ nvlink_lib_ctrl_train_intranode_conns_parallel
     NvlStatus               status     = NVL_SUCCESS;
     NvU32                   i;
     NvU32                   count = 0;
-
-    // sanity check endPointPairsCount
-    if (trainParams->endPointPairsCount > NVLINK_MAX_PARALLEL_CONNS_TRAIN_COUNT)
-    {
-        return NVL_BAD_ARGS;
-    }
 
     //
     // sanity check the input parms
@@ -2546,16 +2332,6 @@ nvlink_lib_ctrl_train_intranode_conns_parallel
     {
         case nvlink_train_conn_off_to_swcfg:
         {
-            if (srcLink->version >= NVLINK_DEVICE_VERSION_40)
-            {
-                // non-ALI training for NVLink4.0+
-                if (!srcLink->dev->enableALI)
-                {
-                    nvlink_core_init_links_from_off_to_swcfg_non_ALI(
-                                            initLinks, count, NVLINK_STATE_CHANGE_SYNC);
-                }
-            }
-            else
             {
                 // ALT training for NVLink3.0+
                 nvlink_core_init_links_from_off_to_swcfg(
@@ -2565,16 +2341,6 @@ nvlink_lib_ctrl_train_intranode_conns_parallel
         }
         case nvlink_train_conn_swcfg_to_active:
         {
-            if (srcLink->version >= NVLINK_DEVICE_VERSION_40)
-            {
-                // non-ALI training for NVLink4.0+
-                if (!srcLink->dev->enableALI)
-                {
-                    status = nvlink_core_train_intranode_conns_from_swcfg_to_active_non_ALI(
-                                                        conns, numConns, NVLINK_STATE_CHANGE_SYNC);
-                }
-            }
-            else
             {
                 // ALT training for NVLink3.0+
                 status = nvlink_core_train_intranode_conns_from_swcfg_to_active_ALT(
@@ -2596,45 +2362,6 @@ nvlink_lib_ctrl_train_intranode_conns_parallel
             if (status == NVL_SUCCESS)
             {
                 nvlink_core_reset_intranode_conns(conns, numConns, NVLINK_STATE_CHANGE_SYNC);
-            }
-            break;
-        }
-        case nvlink_train_conn_off_to_active_ali_non_blocking:
-        case nvlink_train_conn_off_to_active_ali_blocking:
-        {
-            if (srcLink->version == NVLINK_DEVICE_VERSION_40 &&
-                srcLink->dev->enableALI)
-            {
-                status = nvlink_core_train_intranode_conns_from_off_to_active_ALI(
-                                                 initLinks, count);
-
-                if (trainParams->trainTo == nvlink_train_conn_off_to_active_ali_blocking)
-                {
-                    NvU32 timeout = NVLINK_TRANSITION_HS_TIMEOUT;
-                    do
-                    {
-                        nvlink_sleep(1);
-                        status = nvlink_core_train_check_link_ready_ALI(initLinks, count);
-                        if (status == NVL_SUCCESS)
-                        {
-                            break;
-                        }
-
-                        timeout--;
-                    } while(timeout > 0);
-
-                    if (status == NVL_SUCCESS)
-                    {
-                        for ( i = 0; i < count; ++i)
-                        {
-                            //
-                            // NVLINK_LINKSTATE_TRAFFIC_SETUP will make sure a request to active completes before
-                            // setting buffer ready so use the internal check to see if the request for ALI completed
-                            //
-                            (void)initLinks[i]->link_handlers->set_dl_link_mode(initLinks[i], NVLINK_LINKSTATE_TRAFFIC_SETUP, 0);
-                        }
-                }
-            }
             }
             break;
         }
@@ -3559,8 +3286,6 @@ static NvlStatus nvlink_lib_ctrl_get_link_state
     NvU32         numLinks  = 0;
     NvU32         i         = 0;
 
-    ct_assert(NVLINK_MAX_SYSTEM_LINK_NUM == NVLINK_MAX_NVLINK_ENDPOINTS);
-
     nvlink_link   **links = (nvlink_link **)nvlink_malloc(
                             sizeof(nvlink_link *) * NVLINK_MAX_SYSTEM_LINK_NUM);
     if (links == NULL)
@@ -3692,23 +3417,18 @@ nvlink_lib_ctrl_get_device_link_states
 {
     nvlink_link  *endpoint  = NULL;
     nvlink_device *dev      = NULL;
+	nvlink_device *devIter    = NULL;
+    nvlink_link   *remoteLink = NULL;
     NvlStatus     status    = NVL_SUCCESS;
     NvU32         numLinks  = 0;
     NvU32         i         = 0;
-    NvU8          linkNumber;
 
     nvlink_link   **links = (nvlink_link **)nvlink_malloc(
-                            sizeof(nvlink_link *) * NVLINK_MAX_DEVICE_CONN);
-
-    // Get current monotonic time in seconds.nanoseconds
-    params->time = nvlink_get_platform_time();
-
+                            sizeof(nvlink_link *) * NVLINK_MAX_NVLINK_ENDPOINTS);
     if (links == NULL)
     {
         return NVL_NO_MEM;
     }
-
-    nvlink_memset(params->endStates, 0x0, sizeof(params->endStates));    
 
     // Acquire the top-level lock
     status = nvlink_lib_top_lock_acquire();
@@ -3740,12 +3460,14 @@ nvlink_lib_ctrl_get_device_link_states
     // Top-level lock is now acquired. Proceed to traversing the list
     // of devices and list of links to lock all links
     //
-    FOR_EACH_LINK_REGISTERED(endpoint, dev, node)
+    FOR_EACH_DEVICE_REGISTERED(devIter, nvlinkLibCtx.nv_devicelist_head, node)
     {
-        if (numLinks >= NVLINK_MAX_DEVICE_CONN)
+        FOR_EACH_LINK_REGISTERED(endpoint, devIter, node)
+    {
+            if (numLinks >= NVLINK_MAX_SYSTEM_LINK_NUM)
         {
             NVLINK_PRINT((DBG_MODULE_NVLINK_CORE, NVLINK_DBG_LEVEL_ERRORS,
-                "%s: numLinks >= NVLINK_MAX_DEVICE_CONN",
+                    "%s: numLinks >= NVLINK_MAX_SYSTEM_LINK_NUM",
                 __FUNCTION__));
 
             nvlink_assert(0);
@@ -3758,6 +3480,7 @@ nvlink_lib_ctrl_get_device_link_states
         links[numLinks] = endpoint;
         numLinks++;
     }
+	}
 
     // Acquire the per-link locks
     status = nvlink_lib_link_locks_acquire(links, numLinks);
@@ -3783,20 +3506,44 @@ nvlink_lib_ctrl_get_device_link_states
 
     for (i = 0; i < numLinks; ++i)
     {
-        linkNumber = links[i]->linkNumber;
-
-        nvlink_assert(linkNumber < NVLINK_MAX_DEVICE_CONN);
+        // Check RxDet status of the link and repopulate as necessary
+        nvlink_core_get_rx_detect(&links[i], 1, 0);
 
         // Get the endpoint states of the link
-        nvlink_core_get_endpoint_state(links[i], &(params->endStates[linkNumber]));
+        nvlink_core_get_endpoint_state(links[i], &(params->endStates[i]));
 
         NVLINK_PRINT((DBG_MODULE_NVLINK_CORE, NVLINK_DBG_LEVEL_INFO,
-            "%s: link 0x%x -- linkMode 0x%x,\n",
-            __FUNCTION__, linkNumber, params->endStates[linkNumber].linkMode));
+            "%s: link 0x%x -- rxDet status 0x%x, linkMode 0x%x,\n",
+            __FUNCTION__, i, links[i]->bRxDetected, params->endStates[i].linkMode));
+
+        //
+        // If the link succeeds rxDet then go through and find its peer link. What is important
+        // is not actually finding the link, but making sure the corelib goes through the discovery
+        // process and has endpoints cache the remote information in the corelib such that
+        // FM or endpoints can query the corelib for the topology of the system.
+        //
+        if (links[i]->bRxDetected)
+        {
+            remoteLink = NULL;
+            nvlink_core_discover_and_get_remote_end(links[i], &remoteLink, 0);
+
+            if (remoteLink == NULL)
+            {
+                NVLINK_PRINT((DBG_MODULE_NVLINK_CORE, NVLINK_DBG_LEVEL_ERRORS,
+                    "%s: link 0x%x: couldn't find link pair\n",
+                    __FUNCTION__, i));
+                continue;
+            }
+
+        // If the link is in active, issue postActive settings
+        if (params->endStates[i].linkMode == nvlink_link_mode_active)
+        {
+            links[i]->link_handlers->training_complete(links[i]);
+        }
+    }
     }
 
-    // This is done to preserve client behavior that uses endStatesCount to iterate across endStates array
-    params->endStatesCount = NVLINK_MAX_DEVICE_CONN;
+    params->endStatesCount = numLinks;
 
     // Release the per-link locks
     nvlink_lib_link_locks_release(links, numLinks);

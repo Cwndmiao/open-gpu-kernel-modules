@@ -22,7 +22,6 @@
  */
 
 #include "core/core.h"
-#include "platform/sli/sli.h"
 #include "gpu/gpu.h"
 #include "gpu/mem_mgr/mem_mgr.h"
 #include "gpu/mem_mgr/mem_desc.h"
@@ -39,7 +38,7 @@ memmgrGetMaxContextSize_GM200
     MemoryManager *pMemoryManager
 )
 {
-    NvU64  size = 0;
+    NvU64  size;
 
     //
     // This function's original purpose was to estimate how much heap memory RM
@@ -52,7 +51,7 @@ memmgrGetMaxContextSize_GM200
     // spaces.
     //
 
-    if (RMCFG_FEATURE_PLATFORM_WINDOWS)
+    if (RMCFG_FEATURE_PLATFORM_WINDOWS_LDDM)
     {
         if (pGpu->getProperty(pGpu, PDB_PROP_GPU_EXTERNAL_HEAP_CONTROL))
         {
@@ -90,8 +89,7 @@ memmgrGetMaxContextSize_GM200
     }
     else
     {
-        if (memmgrIsPmaEnabled(pMemoryManager) &&
-            memmgrIsPmaSupportedOnPlatform(pMemoryManager))
+        if (memmgrIsPmaInitialized(pMemoryManager))
         {
             //
             // We need to estimate the reserved memory needs before PMA is initialized
@@ -105,9 +103,5 @@ memmgrGetMaxContextSize_GM200
             size = 0;
         }
     }
-
-    // Reserve enough memory for CeUtils 
-    size += (7*1024*1024);
-
     return size;
 }

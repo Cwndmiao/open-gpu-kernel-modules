@@ -152,7 +152,7 @@ typedef enum
     /**
      * No valid aligned 4K PTE state for a 64K PTE
      * 64K big PTE state indicating that there is no valid 4K aligned PTEs
-     *
+     * 
      * @note This is not supported pre Volta.
      */
     MMU_WALK_FILL_NV4K,
@@ -376,7 +376,7 @@ MmuWalkCBCopyEntries
  *                           copied.
  * @param[in] tableSize      Size of the current level of PD/PT, in
  *                           entries. The offsets into the staging
- *                           buffer are the entry indices taken
+ *                           buffer are the entry indices taken 
  *                           modulo tableSize.
  * @param[in] entrySize      Size of each entry, in bytes
  */
@@ -440,6 +440,15 @@ typedef struct
      *             4K PTE) in MMU walker
      */
     NvBool bAtsEnabled : 1;
+    /**
+     * @brief      Indicates if the iterative implementation should be used
+     * @details    In certain situations like running the MMU Tracer or running
+     *             on platforms like PPC, the recursive implementation of the
+     *             MMU Walker consumes too much stack space. Enabling this option
+     *             changes the MMU Walker to use iteration instead of recursion to
+     *             reduce stack usage.
+     */
+    NvBool bUseIterative : 1;
 } MMU_WALK_FLAGS;
 
 /*!
@@ -500,11 +509,6 @@ struct MMU_MAP_TARGET
      * Callback to map the batch of entries.
      */
     MmuWalkCBMapNextEntries *MapNextEntries;
-
-    /*!
-     * Page array granularity of the physical target memory
-     */
-    NvU64 pageArrayGranularity;
 };
 
 /*----------------------------Public Interface--------------------------------*/
@@ -660,7 +664,7 @@ mmuWalkReleaseEntries
  *
  * Traverse the walker and rewrite the PDEs from the SW state.
  * This won't trigger any new PDE allocations or state change.
- *
+ * 
  * This call won't affect the PTEs. If needed, support can be added later.
  *
  * The VA range must be aligned to the MMU's smallest page size and
@@ -741,11 +745,11 @@ mmuWalkGetPageLevelInfo
     NvU32                   *pMemSize
 );
 
-/*!
+/*! 
  * Force frees all page level instances. We may have to force free page levels
- * in case of surprise removal. In the surprise removal case, we may end up
+ * in case of surprise removal. In the surprise removal case, we may end up 
  * with many failed unmappings once the GPU is off the bus. This might leave
- * some of the MMU_WALK_LEVEL and MMU_WALK_LEVEL_INST objects to be in an
+ * some of the MMU_WALK_LEVEL and MMU_WALK_LEVEL_INST objects to be in an 
  * allocated state. This function just iterates over the level instances at
  * each level and force frees everything ignoring any outstanding valid, sparse
  * and reserved entries..
@@ -825,7 +829,7 @@ mmuWalkGetUserCtx
 /*!
  * Set the user context of a walker state.
  */
-NV_STATUS
+void
 mmuWalkSetUserCtx
 (
     MMU_WALK          *pWalk,

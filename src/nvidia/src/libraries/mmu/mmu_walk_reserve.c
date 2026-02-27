@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2014-2015,2020-2022,2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2014-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -22,6 +22,9 @@
  */
 
 /*--------------------------------Includes------------------------------------*/
+#if defined(SRT_BUILD)
+#include "shrdebug.h"
+#endif
 
 #include "mmu_walk_private.h"
 
@@ -69,8 +72,16 @@ mmuWalkReserveEntries
     opParams.bIgnoreSubLevelConflicts = NV_TRUE;
 
     // Start reserving from root (only one instance).
-    status = mmuWalkProcessPdes(pWalk, &opParams, &pWalk->root, pWalk->root.pInstances,
-                                vaLo, vaHi);
+    if (pWalk->flags.bUseIterative)
+    {
+        status = mmuWalkProcessPdes(pWalk, &opParams, &pWalk->root, pWalk->root.pInstances,
+                                    vaLo, vaHi);
+    }
+    else
+    {
+        status = _mmuWalkReserveEntries(pWalk, &opParams, &pWalk->root, pWalk->root.pInstances,
+                                        vaLo, vaHi);
+    }
 
     if (NV_OK != status)
     {
@@ -99,8 +110,6 @@ mmuWalkReleaseEntries
     MMU_WALK_OP_PARAMS   opParams = {0};
     NV_STATUS            status   = NV_OK;
 
-    NV_ASSERT_OR_RETURN(NULL != pWalk, NV_ERR_INVALID_ARGUMENT);
-
     NV_ASSERT_OR_RETURN(NULL != mmuWalkFindLevel(pWalk, pLevelFmt),
                      NV_ERR_INVALID_ARGUMENT);
     NV_ASSERT_OR_RETURN(NV_IS_ALIGNED(vaLo, mmuFmtLevelPageSize(pLevelFmt)),
@@ -118,8 +127,16 @@ mmuWalkReleaseEntries
         opParams.bIgnoreSubLevelConflicts = NV_TRUE;
         opParams.bRelease                 = NV_TRUE;
 
-        status = mmuWalkProcessPdes(pWalk, &opParams, &pWalk->root, pWalk->root.pInstances,
-                                    vaLo, vaHi);
+        if (pWalk->flags.bUseIterative)
+        {
+            status = mmuWalkProcessPdes(pWalk, &opParams, &pWalk->root, pWalk->root.pInstances,
+                                        vaLo, vaHi);
+        }
+        else
+        {
+            status = _mmuWalkReleaseEntries(pWalk, &opParams, &pWalk->root, pWalk->root.pInstances,
+                                            vaLo, vaHi);
+        }
 
         NV_ASSERT_OR_RETURN(NV_OK == status, status);
 
@@ -150,7 +167,21 @@ _mmuWalkReserveEntries
     {
         NV_ASSERT_OR_RETURN(0 != pLevel->pFmt->numSubLevels, NV_ERR_INVALID_ARGUMENT);
 
-        return NV_ERR_MORE_PROCESSING_REQUIRED;
+        if (pWalk->flags.bUseIterative)
+        {
+            return NV_ERR_MORE_PROCESSING_REQUIRED;
+        }
+        else
+        {
+            // Process all the page level entries falling within [vaLo, vaHi]
+            NV_ASSERT_OK_OR_RETURN(
+                mmuWalkProcessPdes(pWalk,
+                                   pOpParams,
+                                   pLevel,
+                                   pLevelInst,
+                                   vaLo,
+                                   vaHi));
+        }
     }
     // We have reached the target page level.
     else
@@ -187,7 +218,21 @@ _mmuWalkReleaseEntries
     {
         NV_ASSERT_OR_RETURN(0 != pLevel->pFmt->numSubLevels, NV_ERR_INVALID_ARGUMENT);
 
-        return NV_ERR_MORE_PROCESSING_REQUIRED;
+        if (pWalk->flags.bUseIterative)
+        {
+            return NV_ERR_MORE_PROCESSING_REQUIRED;
+        }
+        else
+        {
+            // Process all the page level entries falling within [vaLo, vaHi]
+            NV_ASSERT_OK_OR_RETURN(
+                mmuWalkProcessPdes(pWalk,
+                                   pOpParams,
+                                   pLevel,
+                                   pLevelInst,
+                                   vaLo,
+                                   vaHi));
+        }
     }
     // We have reached the target page level.
     else

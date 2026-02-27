@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -22,14 +22,12 @@
  */
 
 #define RM_STRICT_CONFIG_EMIT_DISP_ENGINE_DEFINITIONS     0
-#include "gpu/disp/kern_disp.h"
 #include "gpu/disp/head/kernel_head.h"
-#include "gpu/timer/objtmr.h"
+#include "objtmr.h"
 
-NV_STATUS
+NV_STATUS 
 kheadConstruct_IMPL(KernelHead *pKernelHead)
 {
-    pKernelHead->Vblank.IntrState = NV_HEAD_VBLANK_INTR_UNAVAILABLE;
     return NV_OK;
 }
 
@@ -133,6 +131,16 @@ kheadIsVblankCallbackDue
         // Every other callback whose time has come.
         if (pCallback->VBlankCount == 1+vblankCount)
         {
+            // Some callbacks might have become due, but only want ISR time exclusively (no DPC)
+            if (pCallback->Flags & VBLANK_CALLBACK_FLAG_LOW_LATENCY__ISR_ONLY)
+            {
+                if (!(state & VBLANK_STATE_PROCESS_CALLED_FROM_ISR))
+                {
+                    // Callback explicitly wants ISR time for its processing.
+                    return NV_FALSE;
+                }
+            }
+
             return NV_TRUE;
         }
     }
@@ -207,7 +215,7 @@ kheadCheckVblankCallbacksQueued_IMPL
             {
                 if (kheadIsVblankCallbackDue(pCallback, state, time, vblankCount))
                 {
-                    *expiring |= VBLANK_STATE_PROCESS_NORMAL_LATENCY;
+                    *expiring |= VBLANK_STATE_PROCESS_NORMAL_LATENCY; 
                 }
 
                 pCallback = pCallback->Next;
@@ -226,12 +234,15 @@ kheadReadVblankIntrState_IMPL
 )
 {
     // Check to make sure that our SW state grooves with the HW state
-    if (kheadReadVblankIntrEnable_HAL(pGpu, pKernelHead) &&
-            kheadGetDisplayInitialized_HAL(pGpu, pKernelHead))
+    if (kheadReadVblankIntrEnable_HAL(pGpu, pKernelHead))
     {
         // HW is enabled, check if SW state is not enabled
         if (pKernelHead->Vblank.IntrState != NV_HEAD_VBLANK_INTR_ENABLED)
         {
+            NV_PRINTF(LEVEL_ERROR,
+                      "Head %d: HW: %d != SW: %d!  Fixing SW State...\n",
+                      pKernelHead->PublicId, NV_HEAD_VBLANK_INTR_ENABLED,
+                      pKernelHead->Vblank.IntrState);
             pKernelHead->Vblank.IntrState = NV_HEAD_VBLANK_INTR_ENABLED;
         }
     }
@@ -261,6 +272,9 @@ kheadReadVblankIntrState_IMPL
 
             if (state != pKernelHead->Vblank.IntrState)
             {
+                NV_PRINTF(LEVEL_ERROR,
+                          "Head %d: HW: %d != SW: %d!  Fixing SW State...\n",
+                          pKernelHead->PublicId, state, pKernelHead->Vblank.IntrState);
                 pKernelHead->Vblank.IntrState = state;
             }
         }
@@ -272,6 +286,9 @@ kheadReadVblankIntrState_IMPL
             //
             if (!kheadGetDisplayInitialized_HAL(pGpu, pKernelHead))
             {
+                NV_PRINTF(LEVEL_ERROR,
+                          "Head %d: HW: %d != SW: %d!  Fixing SW State...\n",
+                          pKernelHead->PublicId, NV_HEAD_VBLANK_INTR_UNAVAILABLE, pKernelHead->Vblank.IntrState);
                 pKernelHead->Vblank.IntrState = NV_HEAD_VBLANK_INTR_UNAVAILABLE;
             }
         }
@@ -397,32 +414,6 @@ kheadWriteVblankIntrState_IMPL
     if (updatehw)
     {
         kheadWriteVblankIntrEnable_HAL(pGpu, pKernelHead, enablehw);
-
-    }
-}
-
-void
-kheadProcessRgLineCallbacks_KERNEL
-(
-    OBJGPU       *pGpu,
-    KernelHead   *pKernelHead,
-    NvU32         head,
-    NvU32        *headIntrMask,
-    NvU32        *clearIntrMask,
-    NvBool        bIsIrqlIsr
-)
-{
-    KernelDisplay *pKernelDisplay = GPU_GET_KERNEL_DISPLAY(pGpu);
-    NvU32 rgIntrMask[MAX_RG_LINE_CALLBACKS_PER_HEAD] = {headIntr_RgLineA, headIntr_RgLineB};
-    NvU32 rgIntr;
-
-    for (rgIntr = 0; rgIntr < MAX_RG_LINE_CALLBACKS_PER_HEAD; rgIntr++)
-    {
-        if (*headIntrMask & rgIntrMask[rgIntr])
-        {
-            kdispInvokeRgLineCallback(pKernelDisplay, head, rgIntr, bIsIrqlIsr);
-            *clearIntrMask |= rgIntrMask[rgIntr];
-        }
     }
 }
 

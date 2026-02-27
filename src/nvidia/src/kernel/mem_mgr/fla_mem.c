@@ -55,7 +55,7 @@ flamemConstruct_IMPL
     NvBool                           bContig;
     NvU32                            hwResId      = 0;
     NvU32                            format       = 0;
-    NvU64                            pageSize     = 0;
+    NvU32                            pageSize     = 0;
     NvU64                            pageCount    = 0;
     NvU64                            newBase      = 0;
     NvU64                            flaBaseAddr  = 0;
@@ -227,7 +227,7 @@ flamemConstruct_IMPL
     if(!NV_IS_ALIGNED(flaBaseAddr, pageSize))
     {
         NV_PRINTF(LEVEL_ERROR,
-                  "flaBaseAsddr: 0x%llx is not aligned to page size: 0x%llx\n",
+                  "flaBaseAsddr: 0x%llx is not aligned to page size: 0x%x\n",
                   flaBaseAddr, pageSize);
         return NV_ERR_INVALID_ARGUMENT;
     }
@@ -236,7 +236,7 @@ flamemConstruct_IMPL
            || (flaSize < pageSize)
        )
     {
-         NV_PRINTF(LEVEL_ERROR, "flaSize: %llx is either 0 or less than page size: %llx, gpu: %x\n",
+         NV_PRINTF(LEVEL_ERROR, "flaSize: %llx is either 0 or less than page size: %x, gpu: %x\n",
                    flaSize, pageSize, pGpu->gpuInstance);
         return NV_ERR_INVALID_ARGUMENT;
     }
@@ -344,13 +344,12 @@ flamemConstruct_IMPL
         pAllocParams->base  = newBase;
         pAllocParams->limit = flaSize - 1;
         NV_RM_RPC_ALLOC_OBJECT(pGpu,
-                               pParams->hClient,
-                               pParams->hParent,
-                               pParams->hResource,
-                               pParams->externalClassId,
-                               pAllocParams,
-                               sizeof(*pAllocParams),
-                               status);
+                                pParams->hClient,
+                                pParams->hParent,
+                                pParams->hResource,
+                                pParams->externalClassId,
+                                pAllocParams,
+                                status);
 
         if (status != NV_OK)
         {
@@ -369,7 +368,10 @@ delete_memory:
     memDestructCommon(pMemory);
 
 done_fbmem:
-    memdescDestroy(pMemDesc);
+    if (pMemDesc != NULL)
+    {
+        memdescDestroy(pMemDesc);
+    }
 
     // free the duped memory
     if (!bLoopback &&  pAllocParams->hExportHandle)

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2004-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2004-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -32,7 +32,6 @@
 #include "core/system.h"
 #include "os/os.h"
 #include "nvpcie.h"
-#include "nvdevid.h"
 
 #include "nvcst.h"
 
@@ -102,28 +101,6 @@ BRINFO upstreamPortInfo[] =
     // last element must have zero vendor id and device id
     {0, 0, NULL}
 };
-
-static NV_STATUS
-AMD_14D8_setupFunc
-(
-    OBJCL *pCl
-)
-{
-    pCl->setProperty(pCl, PDB_PROP_CL_WAR_4802761_ENABLED, NV_TRUE);
-
-    return NV_OK;
-}
-
-static NV_STATUS
-Intel_A70D_setupFunc
-(
-    OBJCL *pCl
-)
-{
-    pCl->setProperty(pCl, PDB_PROP_CL_WAR_4802761_ENABLED, NV_TRUE);
-
-    return NV_OK;
-}
 
 static NV_STATUS
 Intel_25XX_setupFunc
@@ -780,6 +757,15 @@ Intel_8C4B_setupFunc
     OBJCL *pCl
 )
 {
+    switch (pCl->FHBBusInfo.deviceID)
+    {
+        case DEVICE_ID_INTEL_0C00_HASWELL_HOST_BRIDGE:
+        case DEVICE_ID_INTEL_0C04_HASWELL_HOST_BRIDGE:
+            pCl->setProperty(pCl, PDB_PROP_CL_ON_HASWELL_HOST_BRIDGE, NV_TRUE);
+            break;
+        default:
+            break;
+    }
 
     // Set ASPM L0S\L1 properties
     _Set_ASPM_L0S_L1(pCl, NV_TRUE, NV_FALSE);
@@ -879,34 +865,12 @@ Intel_4381_setupFunc
 {
     pCl->setProperty(pCl, PDB_PROP_CL_HAS_RESIZABLE_BAR_ISSUE, NV_TRUE);
 
-    //
-    // Apply the WAR to restrict the max target gen speed capable to previous gen
-    // on ASUS Z590 (Intel RKL-S) platform only
-    // Bug 3751839
-    //
-    if (pCl->chipsetIDInfo.subvendorID == PCI_VENDOR_ID_ASUS)
-    {
-        pCl->setProperty(pCl, PDB_PROP_CL_BUG_3751839_GEN_SPEED_WAR, NV_TRUE);
-    }
-
     return NV_OK;
 }
 
 // Intel Z690 platform (Alder Lake)
 static NV_STATUS
 Intel_7A82_setupFunc
-(
-    OBJCL *pCl
-)
-{
-    pCl->setProperty(pCl, PDB_PROP_CL_HAS_RESIZABLE_BAR_ISSUE, NV_TRUE);
-
-    return NV_OK;
-}
-
-// Intel Z790 platform (Raptor Lake)
-static NV_STATUS
-Intel_7A04_setupFunc
 (
     OBJCL *pCl
 )
@@ -956,30 +920,6 @@ Nvidia_T194_setupFunc
         return status;
 
     pCl->setProperty(pCl, PDB_PROP_CL_IS_CHIPSET_IO_COHERENT, NV_TRUE);
-
-    return NV_OK;
-}
-
-static NV_STATUS
-Nvidia_TH500_setupFunc
-(
-    OBJCL *pCl
-)
-{
-    if (!pCl->FHBAddr.valid)
-        return NV_ERR_GENERIC;
-
-    if (clInsertPcieConfigSpaceBase(pCl, 0, 0, 0, (NvU8)(PCI_MAX_BUSES - 1)) == NV_OK)
-        pCl->setProperty(pCl, PDB_PROP_CL_PCIE_CONFIG_ACCESSIBLE, NV_TRUE);
-
-    // Enable Gen2 ASLM
-    pCl->setProperty(pCl, PDB_PROP_CL_ASLM_SUPPORTS_GEN2_LINK_UPGRADE, NV_TRUE);
-
-    pCl->setProperty(pCl, PDB_PROP_CL_IS_CHIPSET_IO_COHERENT, NV_TRUE);
-
-    pCl->setProperty(pCl, PDB_PROP_CL_BUG_3562968_WAR_ALLOW_PCIE_ATOMICS, NV_TRUE);
-
-    _Set_ASPM_L0S_L1(pCl, NV_FALSE, NV_FALSE);
 
     return NV_OK;
 }
@@ -1136,10 +1076,6 @@ AMD_X370_setupFunc
     OBJCL *pCl
 )
 {
-
-    // WAR for bug 5107271 handling
-    pCl->setProperty(pCl, PDB_PROP_CL_WAR_AMD_5107271, NV_TRUE);
-
     // Set ASPM L0S\L1 properties
     _Set_ASPM_L0S_L1(pCl, NV_FALSE, NV_FALSE);
 
@@ -1250,19 +1186,6 @@ Mellanox_BlueField_setupFunc
     return NV_OK;
 }
 
-// Mellanox BlueField3 Setup Function
-static NV_STATUS
-Mellanox_BlueField3_setupFunc
-(
-    OBJCL *pCl
-)
-{
-    // Bug 4151565: BlueField 3 does not support WC mapping 
-    pCl->setProperty(pCl, PDB_PROP_CL_DISABLE_IOMAP_WC, NV_TRUE);
-    return NV_OK;
-}
-
-
 // Amazon Gravitron2 Setup Function
 static NV_STATUS
 Amazon_Gravitron2_setupFunc
@@ -1278,6 +1201,18 @@ Amazon_Gravitron2_setupFunc
 // Fujitsu A64FX Setup Function
 static NV_STATUS
 Fujitsu_A64FX_setupFunc
+(
+    OBJCL *pCl
+)
+{
+    // TODO Need to check if any more PDB properties should be set
+    pCl->setProperty(pCl, PDB_PROP_CL_IS_CHIPSET_IO_COHERENT, NV_TRUE);
+    return NV_OK;
+}
+
+// Phytium FT2000 Setup Function
+static NV_STATUS
+Phytium_FT2000_setupFunc
 (
     OBJCL *pCl
 )
@@ -1317,40 +1252,6 @@ Arm_NeoverseN1_setupFunc
     return NV_OK;
 }
 
-static NV_STATUS
-Riscv_generic_setupFunc
-(
-    OBJCL *pCl
-)
-{
-    pCl->setProperty(pCl, PDB_PROP_CL_IS_CHIPSET_IO_COHERENT, NV_TRUE);
-    return NV_OK;
-}
-
-static NV_STATUS
-PLDA_XpressRichAXI_setupFunc
-(
-    OBJCL *pCl
-)
-{
-#if NVCPU_IS_RISCV64
-    pCl->setProperty(pCl, PDB_PROP_CL_IS_CHIPSET_IO_COHERENT, NV_TRUE);
-#endif
-    return NV_OK;
-}
-
-// Ampere AmpereOne Setup Function
-static NV_STATUS
-Ampere_AmpereOne_setupFunc
-(
-    OBJCL *pCl
-)
-{
-    // TODO Need to check if any more PDB properties should be set
-    pCl->setProperty(pCl, PDB_PROP_CL_IS_CHIPSET_IO_COHERENT, NV_TRUE);
-    return NV_OK;
-}
-
 void
 csGetInfoStrings
 (
@@ -1364,7 +1265,7 @@ csGetInfoStrings
 {
     NvU32 i;
     const char* pszUnknown = "Unknown";
-    NvU32 szUnknownLen = portStringLength(pszUnknown) + 1;
+    NvU32 szUnknownLen = portStringLength(pszUnknown);
 
     if (!pCl->chipsetIDBusAddr.valid)
     {

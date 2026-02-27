@@ -28,7 +28,7 @@
 *                                                                           *
 ****************************************************************************/
 
-#include "gpu/objsweng.h"
+#include "objsweng.h"
 
 NV_STATUS
 swengConstructEngine_IMPL(OBJGPU *pGpu, OBJSWENG *pSwEng, ENGDESCRIPTOR engDesc)

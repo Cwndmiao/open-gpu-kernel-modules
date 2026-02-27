@@ -73,10 +73,6 @@ NV_STATUS rmapiParamsAcquire
 
         pParamCopy->flags |= RMAPI_PARAM_COPY_FLAGS_IS_DIRECT_USAGE;
         pKernelParams     = NvP64_VALUE(pParamCopy->pUserParams);
-
-        if (pParamCopy->flags & RMAPI_PARAM_COPY_FLAGS_ZERO_BUFFER)
-            portMemSet(pKernelParams, 0, pParamCopy->paramsSize);
-
         goto done;
     }
 
@@ -126,11 +122,8 @@ NV_STATUS rmapiParamsAcquire
 done:
     if (rmStatus != NV_OK) // There was an error, be sure to free the buffer
     {
-        if (pKernelParams != NULL)
-        {
-            portMemFree(pKernelParams);
-            pKernelParams = NULL;
-        }
+        portMemFree(pKernelParams);
+        pKernelParams = NULL;
     }
 
     NV_ASSERT(pParamCopy->ppKernelParams != NULL);

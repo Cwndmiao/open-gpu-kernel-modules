@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1993-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -232,12 +232,7 @@ Buffer::Buffer(const Buffer & other)
     else
     {
         if (resize(other.getLength()) && other.getData())
-        {
-            if (capacity && getData())
-            {
-                dpMemCopy(getData(), other.getData(), getLength());
-            }
-        }
+            dpMemCopy(getData(), other.getData(), getLength());
     }
 }
 

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2010-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2010-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -32,7 +32,6 @@
 #include "dp_auxbus.h"
 #include "dp_internal.h"
 #include "dp_edid.h"
-#include "dp_printf.h"
 
 using namespace DisplayPort;
 
@@ -136,8 +135,8 @@ static bool readNextBlock(AuxBus * auxBus, NvU8 seg, NvU8 offset, Buffer & buffe
             if (retries >= EDID_MAX_AUX_RETRIES)
                 return false;
 
-            DP_PRINTF(DP_WARNING, "DisplayPort: %s: Retrying at totalRead 0x%08x (replyType %x, size %x)",
-                  __FUNCTION__, totalRead, auxStatus, sizeRequested);
+            DP_LOG(("DisplayPort: %s: Retrying at totalRead 0x%08x (replyType %x, size %x)",
+                __FUNCTION__, totalRead, auxStatus, sizeRequested));
 
             // Wait for sometime between retries
             timer->sleep(EDID_AUX_WAIT_TIME);
@@ -150,8 +149,8 @@ static bool readNextBlock(AuxBus * auxBus, NvU8 seg, NvU8 offset, Buffer & buffe
         if ((sizeRequested != sizeCompleted) &&
             (totalRead + transactionSize < EDID_BLOCK_SIZE))
         {
-            DP_PRINTF(DP_ERROR, "DisplayPort: %s: dpAux returned edid block smaller than expected. Read from totalRead 0x%08x (replyType %x, size %x)",
-                  __FUNCTION__, totalRead, auxStatus, sizeRequested);
+            DP_LOG(("DisplayPort: %s: dpAux returned edid block smaller than expected. Read from totalRead 0x%08x (replyType %x, size %x)",
+                __FUNCTION__, totalRead, auxStatus, sizeRequested));
             DP_ASSERT(0);
         }
 
@@ -241,13 +240,10 @@ bool DisplayPort::EdidReadSST(Edid & edid, AuxBus * auxBus, Timer* timer,
     Edid previousEdid;
     Buffer *buffer;
     bool status;
-    bool firstTrial = true;
-    NvU64 startTime, elapsedTime;
+
     for (unsigned i = 0; i < ddcAddrListSize; i++)
     {
-        startTime = timer->getTimeUs();
-        elapsedTime = 0;
-        do
+        for (unsigned j = 0; j < EDID_READ_MAX_RETRY_COUNT; j++)
         {
             //
             // Client asks to use RM control code to fetch EDID.
@@ -294,7 +290,7 @@ bool DisplayPort::EdidReadSST(Edid & edid, AuxBus * auxBus, Timer* timer,
                     }
                     else
                     {
-                        DP_PRINTF(DP_ERROR, "EDID> Failed to read EDID from RM and DPLib");
+                        DP_LOG(("EDID> Failed to read EDID from RM and DPLib"));
                     }
                 }
             }
@@ -316,10 +312,9 @@ bool DisplayPort::EdidReadSST(Edid & edid, AuxBus * auxBus, Timer* timer,
                 }
                 else
                 {
-                    if (firstTrial) // first failure?
+                    if (j == 0) // first failure?
                     {
                         previousEdid.swap(edid);
-                        firstTrial = false;
                     }
                     else
                     {
@@ -332,12 +327,10 @@ bool DisplayPort::EdidReadSST(Edid & edid, AuxBus * auxBus, Timer* timer,
                     }
                 }
             }
-            elapsedTime = timer->getTimeUs() - startTime;
-            timer->sleep(1);
-        } while (elapsedTime < (EDID_READ_RETRY_TIMEOUT_MS * 1000));
+        }
     }
 
-    DP_PRINTF(DP_ERROR, "EDID> Failed to ping sst DDC addresses");
+    DP_LOG(("EDID> Failed to ping sst DDC addresses"));
 
     return false;
 }

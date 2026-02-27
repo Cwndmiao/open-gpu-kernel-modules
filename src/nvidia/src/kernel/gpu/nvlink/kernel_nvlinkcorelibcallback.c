@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,13 +21,11 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#define NVOC_KERNEL_NVLINK_H_PRIVATE_ACCESS_ALLOWED
-
 #include "os/os.h"
 #include "core/hal.h"
+#include "core/info_block.h"
 #include "core/locks.h"
 #include "core/thread_state.h"
-#include "gpu_mgr/gpu_mgr.h"
 #include "gpu/gpu.h"
 
 #include "kernel/gpu/nvlink/kernel_nvlink.h"
@@ -38,74 +36,66 @@
 static void _knvlinkCorePassiveLinkChangeCallback(NvU32, void *);
 
 /*!
- * Compile time assert to ensure NV2080_CTRL_INTERNAL_NVLINK_MAX_SEED_BUFFER_SIZE ==
+ * Compile time assert to ensure NV2080_CTRL_NVLINK_MAX_SEED_BUFFER_SIZE ==
  * NVLINK_MAX_SEED_BUFFER_SIZE
  */
-ct_assert(NV2080_CTRL_INTERNAL_NVLINK_MAX_SEED_BUFFER_SIZE ==
+ct_assert(NV2080_CTRL_NVLINK_MAX_SEED_BUFFER_SIZE ==
           NVLINK_MAX_SEED_BUFFER_SIZE);
 
 /*!
- * Compile time asserts to ensure NV2080_INTERNAL_NVLINK_CORE_LINK_STATE* ==
+ * Compile time asserts to ensure NV2080_NVLINK_CORE_LINK_STATE* ==
  * NVLINK_LINKSTATE*
  */
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_OFF ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_OFF ==
           NVLINK_LINKSTATE_OFF);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_HS ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_HS ==
           NVLINK_LINKSTATE_HS);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SAFE ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_SAFE ==
           NVLINK_LINKSTATE_SAFE);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_FAULT ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_FAULT ==
           NVLINK_LINKSTATE_FAULT);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RECOVERY ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_RECOVERY ==
           NVLINK_LINKSTATE_RECOVERY);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_FAIL ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_FAIL ==
           NVLINK_LINKSTATE_FAIL);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DETECT ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_DETECT ==
           NVLINK_LINKSTATE_DETECT);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RESET ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_RESET ==
           NVLINK_LINKSTATE_RESET);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ENABLE_PM ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_ENABLE_PM ==
           NVLINK_LINKSTATE_ENABLE_PM);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_PM ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_DISABLE_PM ==
           NVLINK_LINKSTATE_DISABLE_PM);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SLEEP ==
-          NVLINK_LINKSTATE_SLEEP);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SAVE_STATE ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_SAVE_STATE ==
           NVLINK_LINKSTATE_SAVE_STATE);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RESTORE_STATE ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_RESTORE_STATE ==
           NVLINK_LINKSTATE_RESTORE_STATE);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_PRE_HS ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_PRE_HS ==
           NVLINK_LINKSTATE_PRE_HS);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_ERR_DETECT ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_DISABLE_ERR_DETECT ==
           NVLINK_LINKSTATE_DISABLE_ERR_DETECT);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_LANE_DISABLE ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_LANE_DISABLE ==
           NVLINK_LINKSTATE_LANE_DISABLE);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_LANE_SHUTDOWN ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_LANE_SHUTDOWN ==
           NVLINK_LINKSTATE_LANE_SHUTDOWN);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_TRAFFIC_SETUP ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_TRAFFIC_SETUP ==
           NVLINK_LINKSTATE_TRAFFIC_SETUP);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITPHASE1 ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_INITPHASE1 ==
           NVLINK_LINKSTATE_INITPHASE1);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITNEGOTIATE ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_INITNEGOTIATE ==
           NVLINK_LINKSTATE_INITNEGOTIATE);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_POST_INITNEGOTIATE ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_POST_INITNEGOTIATE ==
           NVLINK_LINKSTATE_POST_INITNEGOTIATE);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITOPTIMIZE ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_INITOPTIMIZE ==
           NVLINK_LINKSTATE_INITOPTIMIZE);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_POST_INITOPTIMIZE ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_POST_INITOPTIMIZE ==
           NVLINK_LINKSTATE_POST_INITOPTIMIZE);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_HEARTBEAT ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_DISABLE_HEARTBEAT ==
           NVLINK_LINKSTATE_DISABLE_HEARTBEAT);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_CONTAIN ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_CONTAIN ==
           NVLINK_LINKSTATE_CONTAIN);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITTL ==
+ct_assert(NV2080_NVLINK_CORE_LINK_STATE_INITTL ==
           NVLINK_LINKSTATE_INITTL);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITPHASE5 ==
-          NVLINK_LINKSTATE_INITPHASE5);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ALI ==
-          NVLINK_LINKSTATE_ALI);
-ct_assert(NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ACTIVE_PENDING ==
-          NVLINK_LINKSTATE_ACTIVE_PENDING);
 
 /*!
  * Compile time asserts to ensure NV2080_NVLINK_CORE_SUBLINK_STATE_TX* ==
@@ -437,6 +427,7 @@ knvlinkCoreQueueLinkChangeCallback
 
     KNVLINK_RM_LINK *pNvlinkLink;
     OBJGPU          *pGpu   = NULL;
+    OBJOS           *pOS    = NULL;
     NV_STATUS        status = NV_OK;
     void            *pWorkItemData;
 
@@ -451,6 +442,8 @@ knvlinkCoreQueueLinkChangeCallback
     // The master should be marked as such
     NV_ASSERT_OR_RETURN(link_change->master->master, NV_ERR_INVALID_STATE);
 
+    pOS = GPU_GET_OS(pGpu);
+
     pWorkItemData = portMemAllocNonPaged(sizeof(nvlink_link_change *));
     NV_ASSERT_OR_RETURN(pWorkItemData != NULL, NVL_NO_MEM);
 
@@ -460,10 +453,8 @@ knvlinkCoreQueueLinkChangeCallback
     // This function will free the argument if it succeeds, hence the need for
     // the work item data wrapper.
     //
-    status = osQueueWorkItem(pGpu,
-                             _knvlinkCorePassiveLinkChangeCallback,
-                             pWorkItemData,
-                             OS_QUEUE_WORKITEM_FLAGS_NONE);
+    status = pOS->osQueueWorkItem(pGpu, _knvlinkCorePassiveLinkChangeCallback,
+                                  pWorkItemData);
     if (status != NV_OK)
     {
         portMemFree(pWorkItemData);
@@ -494,10 +485,10 @@ knvlinkCoreSetDlLinkModeCallback
     OBJGPU           *pGpu          = NULL;
     KernelNvlink     *pKernelNvlink = NULL;
     KernelIoctrl     *pKernelIoctrl = NULL;
-    NV_STATUS         status        = NV_OK;
+    NV_STATUS         status        = NV_OK; 
     NvU8              linkIndex;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
-    NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS
                     *pSetDlLinkModeParams;
 
     portMemSet(&params, 0, sizeof(params));
@@ -515,12 +506,6 @@ knvlinkCoreSetDlLinkModeCallback
     linkIndex     = pNvlinkLink->linkId;
     pKernelIoctrl = KNVLINK_LINK_GET_IOCTRL(pKernelNvlink, linkIndex);
 
-    if ((pKernelNvlink->ipVerNvlink < NVLINK_VERSION_50) && (pKernelIoctrl == NULL))
-        return 0;
-
-    if ((knvlinkGetSupportedCoreLinkStateMask_HAL(pGpu, pKernelNvlink) & NVBIT32(mode)) == 0x0)
-        return 0;
-
     // If link training is disabled through regkey
     if (pKernelNvlink->bSkipLinkTraining)
     {
@@ -528,7 +513,7 @@ knvlinkCoreSetDlLinkModeCallback
     }
 
     params.linkId = linkIndex;
-    params.callbackType.type = NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_DL_LINK_MODE;
+    params.callbackType.type = NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_DL_LINK_MODE;
 
     pSetDlLinkModeParams = &params.callbackType.callbackParams.setDlLinkMode;
     pSetDlLinkModeParams->mode = mode;
@@ -540,14 +525,14 @@ knvlinkCoreSetDlLinkModeCallback
         case NVLINK_LINKSTATE_OFF:
         {
             pSetDlLinkModeParams->linkMode =
-                NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_OFF;
+                NV2080_NVLINK_CORE_LINK_STATE_OFF;
 
             break;
         }
         case NVLINK_LINKSTATE_PRE_HS:
         {
             pSetDlLinkModeParams->linkMode =
-                NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_PRE_HS;
+                NV2080_NVLINK_CORE_LINK_STATE_PRE_HS;
 
             pSetDlLinkModeParams->linkModeParams.linkModePreHsParams.remoteDeviceType =
                 pKernelNvlink->nvlinkLinks[linkIndex].remoteEndInfo.deviceType;
@@ -559,15 +544,15 @@ knvlinkCoreSetDlLinkModeCallback
         case NVLINK_LINKSTATE_INITPHASE1:
         {
             pSetDlLinkModeParams->linkMode =
-                NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITPHASE1;
+                NV2080_NVLINK_CORE_LINK_STATE_INITPHASE1;
 
-            if ((pKernelIoctrl != NULL) && pKernelIoctrl->getProperty(pKernelIoctrl, PDB_PROP_KIOCTRL_MINION_CACHE_SEEDS))
+            if (pKernelIoctrl->getProperty(pKernelIoctrl, PDB_PROP_KIOCTRL_MINION_CACHE_SEEDS))
             {
                 NvU32 *seedDataSrc  = pKernelNvlink->nvlinkLinks[linkIndex].core_link->seedData;
                 NvU32 *seedDataDest =
                     pSetDlLinkModeParams->linkModeParams.linkModeInitPhase1Params.seedData;
 
-                portMemCopy(seedDataDest, sizeof(*seedDataDest) * NV2080_CTRL_INTERNAL_NVLINK_MAX_SEED_BUFFER_SIZE,
+                portMemCopy(seedDataDest, sizeof(*seedDataDest) * NV2080_CTRL_NVLINK_MAX_SEED_BUFFER_SIZE,
                             seedDataSrc, sizeof(*seedDataSrc) * NVLINK_MAX_SEED_BUFFER_SIZE);
             }
 
@@ -576,7 +561,7 @@ knvlinkCoreSetDlLinkModeCallback
         case NVLINK_LINKSTATE_POST_INITNEGOTIATE:
         {
             pSetDlLinkModeParams->linkMode =
-                NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_POST_INITNEGOTIATE;
+                NV2080_NVLINK_CORE_LINK_STATE_POST_INITNEGOTIATE;
 
             break;
         }
@@ -624,13 +609,13 @@ knvlinkCoreSetDlLinkModeCallback
                                           (NvU64)initoptimizeTimeout / 1000);
 
             pSetDlLinkModeParams->linkMode =
-                NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_POST_INITOPTIMIZE;
+                NV2080_NVLINK_CORE_LINK_STATE_POST_INITOPTIMIZE;
 
             // Poll for 10 seconds to avoid GSP timeout
             while(1)
             {
                 status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                             NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                             NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                              (void *)&params, sizeof(params));
                 if (status != NV_OK)
                 {
@@ -669,7 +654,7 @@ knvlinkCoreSetDlLinkModeCallback
     }
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                 NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                  (void *)&params, sizeof(params));
     if (status != NV_OK)
     {
@@ -694,12 +679,12 @@ knvlinkCoreSetDlLinkModeCallback
         }
         case NVLINK_LINKSTATE_OFF:
         {
-            if ((pKernelIoctrl != NULL) && pKernelIoctrl->getProperty(pKernelIoctrl, PDB_PROP_KIOCTRL_MINION_CACHE_SEEDS))
+            if (pKernelIoctrl->getProperty(pKernelIoctrl, PDB_PROP_KIOCTRL_MINION_CACHE_SEEDS))
             {
                 NvU32 *seedDataSrc  = pSetDlLinkModeParams->linkModeParams.linkModeOffParams.seedData;
                 NvU32 *seedDataDest = pKernelNvlink->nvlinkLinks[linkIndex].core_link->seedData;
 
-                portMemCopy(seedDataDest, sizeof(*seedDataDest) * NV2080_CTRL_INTERNAL_NVLINK_MAX_SEED_BUFFER_SIZE,
+                portMemCopy(seedDataDest, sizeof(*seedDataDest) * NV2080_CTRL_NVLINK_MAX_SEED_BUFFER_SIZE,
                             seedDataSrc, sizeof(*seedDataSrc) * NVLINK_MAX_SEED_BUFFER_SIZE);
             }
 
@@ -707,7 +692,7 @@ knvlinkCoreSetDlLinkModeCallback
         }
         case NVLINK_LINKSTATE_POST_INITNEGOTIATE:
         {
-            NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS
+            NV2080_CTRL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS
                 *pPostInitNegotiateParams;
 
             pPostInitNegotiateParams =
@@ -756,7 +741,7 @@ knvlinkCoreGetDlLinkModeCallback
     OBJGPU          *pGpu          = NULL;
     KernelNvlink    *pKernelNvlink = NULL;
     NV_STATUS        status        = NV_OK;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
 
     portMemSet(&params, 0, sizeof(params));
 
@@ -772,10 +757,10 @@ knvlinkCoreGetDlLinkModeCallback
     pKernelNvlink = GPU_GET_KERNEL_NVLINK(pGpu);
 
     params.linkId            = pNvlinkLink->linkId;
-    params.callbackType.type = NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_DL_LINK_MODE;
+    params.callbackType.type = NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_DL_LINK_MODE;
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                 NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                  (void *)&params, sizeof(params));
     if (status != NV_OK)
     {
@@ -808,8 +793,8 @@ knvlinkCoreSetTlLinkModeCallback
     OBJGPU          *pGpu          = NULL;
     KernelNvlink    *pKernelNvlink = NULL;
     NV_STATUS        status        = NV_OK;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
-    NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CALLBACK_SET_TL_LINK_MODE_PARAMS
                     *pSetTlLinkModeParams;
 
     portMemSet(&params, 0, sizeof(params));
@@ -832,7 +817,7 @@ knvlinkCoreSetTlLinkModeCallback
     }
 
     params.linkId            = pNvlinkLink->linkId;
-    params.callbackType.type = NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_TL_LINK_MODE;
+    params.callbackType.type = NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_TL_LINK_MODE;
 
     pSetTlLinkModeParams        = &params.callbackType.callbackParams.setTlLinkMode;
     pSetTlLinkModeParams->mode  = mode;
@@ -840,7 +825,7 @@ knvlinkCoreSetTlLinkModeCallback
                                    NV_TRUE : NV_FALSE;
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                 NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                  (void *)&params, sizeof(params));
     if (status != NV_OK)
     {
@@ -870,7 +855,7 @@ knvlinkCoreGetTlLinkModeCallback
     OBJGPU          *pGpu          = NULL;
     KernelNvlink    *pKernelNvlink = NULL;
     NV_STATUS        status        = NV_OK;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
 
     portMemSet(&params, 0, sizeof(params));
 
@@ -886,10 +871,10 @@ knvlinkCoreGetTlLinkModeCallback
     pKernelNvlink = GPU_GET_KERNEL_NVLINK(pGpu);
 
     params.linkId            = pNvlinkLink->linkId;
-    params.callbackType.type = NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_TL_LINK_MODE;
+    params.callbackType.type = NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_TL_LINK_MODE;
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                 NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                  (void *)&params, sizeof(params));
     if (status != NV_OK)
     {
@@ -921,8 +906,8 @@ knvlinkCoreSetTxSublinkModeCallback
     OBJGPU          *pGpu          = NULL;
     KernelNvlink    *pKernelNvlink = NULL;
     NV_STATUS        status        = NV_OK;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
-    NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CALLBACK_SET_TX_SUBLINK_MODE_PARAMS
         *pSetTxSublinkModeParams;
 
     portMemSet(&params, 0, sizeof(params));
@@ -946,7 +931,7 @@ knvlinkCoreSetTxSublinkModeCallback
 
     params.linkId            = pNvlinkLink->linkId;
     params.callbackType.type =
-        NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_TX_SUBLINK_MODE;
+        NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_TX_SUBLINK_MODE;
 
     pSetTxSublinkModeParams        = &params.callbackType.callbackParams.setTxSublinkMode;
     pSetTxSublinkModeParams->mode  = mode;
@@ -954,7 +939,7 @@ knvlinkCoreSetTxSublinkModeCallback
                                       NV_TRUE : NV_FALSE;
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                 NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                  (void *)&params, sizeof(params));
     if (status != NV_OK)
     {
@@ -997,8 +982,8 @@ knvlinkCoreSetRxSublinkModeCallback
     OBJGPU          *pGpu          = NULL;
     KernelNvlink    *pKernelNvlink = NULL;
     NV_STATUS        status        = NV_OK;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
-    NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CALLBACK_SET_RX_SUBLINK_MODE_PARAMS
                     *pSetRxSublinkModeParams;
 
     pNvlinkLink = (KNVLINK_RM_LINK *)link->link_info;
@@ -1020,7 +1005,7 @@ knvlinkCoreSetRxSublinkModeCallback
 
     params.linkId            = pNvlinkLink->linkId;
     params.callbackType.type =
-        NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_MODE;
+        NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_MODE;
 
     pSetRxSublinkModeParams        =
         &params.callbackType.callbackParams.setRxSublinkMode;
@@ -1029,7 +1014,7 @@ knvlinkCoreSetRxSublinkModeCallback
                                       NV_TRUE : NV_FALSE;
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                 NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                  (void *)&params, sizeof(params));
     if (status != NV_OK)
     {
@@ -1070,7 +1055,7 @@ knvlinkCoreGetTxSublinkModeCallback
     OBJGPU          *pGpu          = NULL;
     KernelNvlink    *pKernelNvlink = NULL;
     NV_STATUS        status        = NV_OK;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
 
     portMemSet(&params, 0, sizeof(params));
 
@@ -1093,10 +1078,10 @@ knvlinkCoreGetTxSublinkModeCallback
 
     params.linkId            = pNvlinkLink->linkId;
     params.callbackType.type =
-        NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_TX_SUBLINK_MODE;
+        NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_TX_SUBLINK_MODE;
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                 NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                  (void *)&params, sizeof(params));
     if (status != NV_OK)
     {
@@ -1129,7 +1114,7 @@ knvlinkCoreGetRxSublinkModeCallback
     OBJGPU          *pGpu          = NULL;
     KernelNvlink    *pKernelNvlink = NULL;
     NV_STATUS        status        = NV_OK;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
 
     portMemSet(&params, 0, sizeof(params));
 
@@ -1152,10 +1137,10 @@ knvlinkCoreGetRxSublinkModeCallback
 
     params.linkId            = pNvlinkLink->linkId;
     params.callbackType.type =
-        NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_MODE;
+        NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_MODE;
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                 NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                  (void *)&params, sizeof(params));
     if (status != NV_OK)
     {
@@ -1186,8 +1171,8 @@ knvlinkCoreSetRxSublinkDetectCallback
     OBJGPU          *pGpu          = NULL;
     KernelNvlink    *pKernelNvlink = NULL;
     NV_STATUS        status        = NV_OK;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
-    NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CALLBACK_SET_RX_DETECT_PARAMS
                     *pSetRxDetectParams;
 
     portMemSet(&params, 0, sizeof(params));
@@ -1205,7 +1190,7 @@ knvlinkCoreSetRxSublinkDetectCallback
 
     params.linkId            = pNvlinkLink->linkId;
     params.callbackType.type =
-        NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_DETECT;
+        NV2080_CTRL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_DETECT;
 
     pSetRxDetectParams        =
         &params.callbackType.callbackParams.setRxSublinkDetect;
@@ -1213,7 +1198,7 @@ knvlinkCoreSetRxSublinkDetectCallback
                                  NV_TRUE : NV_FALSE;
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                 NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                  (void *)&params, sizeof(params));
     if (status != NV_OK)
     {
@@ -1243,8 +1228,8 @@ knvlinkCoreGetRxSublinkDetectCallback
     KernelNvlink    *pKernelNvlink = NULL;
     NV_STATUS        status        = NV_OK;
     NvU32            linkId;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
-    NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CALLBACK_GET_RX_DETECT_PARAMS
                     *pGetRxDetectParams;
 
     portMemSet(&params, 0,  sizeof(params));
@@ -1263,12 +1248,12 @@ knvlinkCoreGetRxSublinkDetectCallback
 
     params.linkId            = linkId;
     params.callbackType.type =
-        NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_DETECT;
+        NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_DETECT;
 
     pGetRxDetectParams = &params.callbackType.callbackParams.getRxSublinkDetect;
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                 NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                  (void *)&params, sizeof(params));
 
     // Store RXDET status mask
@@ -1315,45 +1300,16 @@ knvlinkCoreWriteDiscoveryTokenCallback
 
     pKernelNvlink = GPU_GET_KERNEL_NVLINK(pGpu);
 
-    //
-    // If Nvlink4.0+ get the "token" values via SIDs stored
-    // by MINION
-    //
-    if (pNvlinkLink->ipVerDlPl >= NVLINK_VERSION_40)
-    {
-        NV2080_CTRL_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS params;
-        portMemSet(&params, 0, sizeof(params));
-        params.linkId = pNvlinkLink->linkId;
-
-        status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                     NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID,
-                                     (void *)&params, sizeof(params));
-        if (status != NV_OK)
-        {
-            NV_PRINTF(LEVEL_ERROR, "Error updating Local/Remote SID Info!\n");
-            return status;
-        }
-
-        link->remoteSid =
-            params.remoteLocalSidInfo.remoteSid;
-        link->remoteDeviceType =
-            params.remoteLocalSidInfo.remoteDeviceType;
-        link->remoteLinkId =
-            params.remoteLocalSidInfo.remoteLinkId;
-        link->localSid =
-            params.remoteLocalSidInfo.localSid;
-    }
-    else
     {
 
-        NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
-        NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS
+        NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
+        NV2080_CTRL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS
                 *pWriteDiscoveryTokenParams;
 
         portMemSet(&params, 0, sizeof(params));
         params.linkId            = pNvlinkLink->linkId;
         params.callbackType.type =
-                NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_WRITE_DISCOVERY_TOKEN;
+                NV2080_CTRL_NVLINK_CALLBACK_TYPE_WRITE_DISCOVERY_TOKEN;
 
         pWriteDiscoveryTokenParams            =
             &params.callbackType.callbackParams.writeDiscoveryToken;
@@ -1361,7 +1317,7 @@ knvlinkCoreWriteDiscoveryTokenCallback
         pWriteDiscoveryTokenParams->token     = token;
 
         status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                     NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                     NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                      (void *)&params, sizeof(params));
     }
 
@@ -1401,8 +1357,9 @@ knvlinkCoreReadDiscoveryTokenCallback
     OBJGPU          *pGpu          = pNvlinkLink->pGpu;
     KernelNvlink    *pKernelNvlink = NULL;
     NV_STATUS        status        = NV_OK;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
-    NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS *pReadDiscoveryTokenParams = NULL;
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS
+        *pReadDiscoveryTokenParams;
 
     portMemSet(&params, 0, sizeof(params));
 
@@ -1420,23 +1377,17 @@ knvlinkCoreReadDiscoveryTokenCallback
 
     pKernelNvlink = GPU_GET_KERNEL_NVLINK(pGpu);
 
-    // If Nvlink4.0+ then reading tokens is no longer supported
-    if (pNvlinkLink->ipVerDlPl >= NVLINK_VERSION_40)
-    {
-        status = NV_ERR_NOT_SUPPORTED;
-    }
-    else
     {
         params.linkId            = pNvlinkLink->linkId;
         params.callbackType.type =
-            NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_READ_DISCOVERY_TOKEN;
+            NV2080_CTRL_NVLINK_CALLBACK_TYPE_READ_DISCOVERY_TOKEN;
 
         pReadDiscoveryTokenParams            =
             &params.callbackType.callbackParams.readDiscoveryToken;
         pReadDiscoveryTokenParams->ipVerDlPl = pNvlinkLink->ipVerDlPl;
 
         status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                     NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                     NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                      (void *)&params, sizeof(params));
     }
 
@@ -1474,7 +1425,7 @@ knvlinkCoreTrainingCompleteCallback
     OBJGPU          *pGpu          = NULL;
     KernelNvlink    *pKernelNvlink = NULL;
     NV_STATUS        status;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
 
     portMemSet(&params, 0, sizeof(params));
 
@@ -1484,72 +1435,15 @@ knvlinkCoreTrainingCompleteCallback
     pKernelNvlink = GPU_GET_KERNEL_NVLINK(pGpu);
 
     params.linkId = pNvlinkLink->linkId;
-    params.callbackType.type = NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_TRAINING_COMPLETE;
+    params.callbackType.type = NV2080_CTRL_NVLINK_CALLBACK_TYPE_TRAINING_COMPLETE;
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                 NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                  (void *)&params, sizeof(params));
     if (status != NV_OK)
     {
         NV_PRINTF(LEVEL_ERROR, "Error issuing NvLink Training Complete callback!\n");
     }
-}
-
-NvlStatus
-knvlinkCoreGetCciLinkModeCallback
-(
-    nvlink_link *link,
-    NvU64       *mode
-)
-{
-    return NVL_SUCCESS;
-}
-
-/*
- * @brief nvlinkCoreGetUphyLoadCallback send ALI training on the specified link
- *
- * @param[in]  link        nvlink_link pointer
- */
-NvlStatus
-knvlinkCoreAliTrainingCallback
-(
-    nvlink_link *link
-)
-{
-    KNVLINK_RM_LINK *pNvlinkLink = (KNVLINK_RM_LINK *) link->link_info;
-    OBJGPU          *pGpu        = pNvlinkLink->pGpu;
-    KernelNvlink   * pKernelNvlink     = NULL;
-    NV_STATUS        status;
-
-    if (pGpu == NULL)
-    {
-        NV_PRINTF(LEVEL_ERROR, "Error processing link info!\n");
-        return 1;
-    }
-
-    pKernelNvlink = GPU_GET_KERNEL_NVLINK(pGpu);
-
-    if (pKernelNvlink->ipVerNvlink >= NVLINK_VERSION_50)
-        return 0;
-
-    status = knvlinkPreTrainLinksToActiveAli(pGpu, pKernelNvlink,
-                                                 BIT(pNvlinkLink->linkId), NV_TRUE);
-    if (status != NV_OK)
-    {
-        goto knvlinkCoreAliTrainingCallback_end;
-    }
-
-    status = knvlinkTrainLinksToActiveAli(pGpu, pKernelNvlink, NVBIT(pNvlinkLink->linkId), NV_FALSE);
-
-knvlinkCoreAliTrainingCallback_end:
-    if (status != NV_OK)
-    {
-        NV_PRINTF(LEVEL_ERROR,
-                  "Failed to request Link %d to transition to active\n", pNvlinkLink->linkId);
-        return 1;
-    }
-
-    return 0;
 }
 
 /*!
@@ -1570,8 +1464,8 @@ knvlinkCoreGetUphyLoadCallback
     OBJGPU          *pGpu          = pNvlinkLink->pGpu;
     KernelNvlink    *pKernelNvlink = NULL;
     NV_STATUS        status;
-    NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS params;
-    NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS
+    NV2080_CTRL_NVLINK_CORE_CALLBACK_PARAMS params;
+    NV2080_CTRL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS
         *pGetUphyLoadParams;
 
     portMemSet(&params, 0, sizeof(params));
@@ -1586,13 +1480,13 @@ knvlinkCoreGetUphyLoadCallback
 
     params.linkId            = pNvlinkLink->linkId;
     params.callbackType.type =
-        NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_UPHY_LOAD;
+        NV2080_CTRL_NVLINK_CALLBACK_TYPE_GET_UPHY_LOAD;
 
     pGetUphyLoadParams =
         &params.callbackType.callbackParams.getUphyLoad;
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK,
+                                 NV2080_CTRL_CMD_NVLINK_CORE_CALLBACK,
                                  (void *)&params, sizeof(params));
     if (status != NV_OK)
     {

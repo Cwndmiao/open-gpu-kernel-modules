@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -27,8 +27,11 @@
 
 //
 // This file was generated with FINN, an NVIDIA coding tool.
-// Source file:      ctrl/ctrl2080/ctrl2080grmgr.finn
+// Source file: ctrl/ctrl2080/ctrl2080grmgr.finn
 //
+
+
+
 
 #include "ctrl/ctrl2080/ctrl2080base.h"
 
@@ -46,7 +49,7 @@
 // log the error and march on.
 //
 // NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS
-//  numQueries[in]
+//  numQueries[IN]
 //      - Specifies the number of valid queries that the caller will be passing in
 //
 // Possible status values returned are:
@@ -69,7 +72,7 @@
 
 /*!
  * NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS
- *  gpcCount[out]
+ *  gpcCount[OUT]
  *      - No. of logical/local GPCs which client can use to create the
  *        logical/local mask respectively
  */
@@ -79,9 +82,9 @@ typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS {
 
 /*!
  * NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS
- *  gpcId[in]
+ *  gpcId[IN]
  *      - Logical/local GPC ID
- *  chipletGpcMap[out]
+ *  chipletGpcMap[OUT]
  *      - Returns chiplet GPC ID for legacy case and device monitoring client
  *      - Returns local GPC ID (== input gpcId) for SMC client
  *      - Does not support DM attribution case
@@ -93,9 +96,9 @@ typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS {
 
 /*!
  * NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS
- *  gpcId[in]
+ *  gpcId[IN]
  *      - Logical/local GPC ID
- *  tpcMask[out]
+ *  tpcMask[OUT]
  *      - Returns physical TPC mask for legacy, DM client and SMC cases
  *      - Does not support DM attribution case
  */
@@ -106,9 +109,9 @@ typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS {
 
 /*!
  * NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS
- *  gpcId[in]
+ *  gpcId[IN]
  *      - Logical/local GPC ID
- *  ppcMask[out]
+ *  ppcMask[OUT]
  *      - Returns physical PPC mask for legacy, DM client and SMC cases
  *      - Does not support DM attribution case
  */
@@ -122,14 +125,14 @@ typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS {
  *               it would break driver compatibility !!!
  *
  *  NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS
- *  swizzId[in]
+ *  swizzId[IN]
  *      - Swizz ID of partition
  *      - A DM client with an invalid swizz ID, will fail this call
  *      - This parameter is not compulsory for an SMC client; the subscription
  *        itself will do the necessary validation.
- *  gpcId[in]
+ *  gpcId[IN]
  *      - Logical/local GPC ID
- *  chipletGpcMap[out]
+ *  chipletGpcMap[OUT]
  *      - Returns chiplet GPC ID for legacy case and device monitoring client
  *      - Returns local GPC ID (== input gpcId) for SMC client
  *      - Does not support non-attribution case for DM client
@@ -142,9 +145,9 @@ typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS {
 
 /*!
  * NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS
- *  gpcId[in]
+ *  gpcId[IN]
  *      - Logical/local GPC ID
- *  ropMask[out]
+ *  ropMask[OUT]
  *      - Returns physical ROP mask for legacy, DM client
  *      - Returns logical ROP mask for SMC
  */
@@ -155,7 +158,7 @@ typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS {
 
 /*!
  *  NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS
- *  chipletSyspipeMask [out]
+ *  chipletSyspipeMask [OUT]
  *      - Mask of chiplet SMC-IDs for DM client attribution case
  *      - Mask of local SMC-IDs for SMC client
  *      - Legacy case returns 1 GR
@@ -167,13 +170,13 @@ typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS {
 
 /*!
  *  NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS
- *  swizzId[in]
+ *  swizzId[IN]
  *      - Swizz ID of partition
  *      - A DM client with an invalid swizz ID, will fail this call
- *  physSyspipeId[GRMGR_MAX_SMC_IDS] [out]
+ *  physSyspipeId[GRMGR_MAX_SMC_IDS] [OUT]
  *      - Physical SMC-IDs mapped to partition local idx for DM client attribution case
  *      - Does not support non-attribution case for DM client, SMC clients, legacy case
- *  physSyspipeIdCount[out]
+ *  physSyspipeIdCount[OUT]
  *      - Valid count of physSmcIds which has been populated in above array.
  *      - Failure case will return 0
  */
@@ -185,14 +188,14 @@ typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS
 
 /*!
  * NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS
- * swizzId[in]
+ * swizzId[IN]
  *      - Swizz ID of partition
  *      - Mandatory parameter
  *      - A DM client with an invalid swizz ID, will fail this call
- * grIdx[in]
+ * grIdx[IN]
  *      - Local grIdx for a partition
  *      - Mandatory parameter
- * gpcEnMask[out]
+ * gpcEnMask[OUT]
  *      - Logical enabled GPC mask associated with requested grIdx of the partition i.e swizzid->engineId->gpcMask
  *      - These Ids should be used as input further
  *      - Does not support non-attribution case for DM client, SMC clients, legacy case
@@ -205,7 +208,7 @@ typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS {
 
 /*!
  * NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID
- * syspipeId[out]
+ * syspipeId[OUT]
  *      - Partition-local GR idx for client subscribed to exec partition
  *      - Does not support legacy case, DM client, or SMC client subscribed only to partition
  */
@@ -214,41 +217,9 @@ typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS {
 } NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS;
 
 /*!
- *  NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GRAPHICS_SYSPIPE_MASK_PARAMS
- *  chipletSyspipeMask [out]
- *      - Mask of chiplet GFX capable SMC-IDs for DM client attribution case
- *      - Mask of local GFX capable SMC-IDs for SMC client
- *      - Legacy case returns GR0 if GFX capable, else 0
- *      - Does not support attribution case for DM client
- */
-typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GRAPHICS_SYSPIPE_MASK_PARAMS {
-    NvU32 chipletSyspipeMask;   // param[out] - Mask of chiplet SMC IDs
-} NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GRAPHICS_SYSPIPE_MASK_PARAMS;
-
-/*!
- * NV2080_CTRL_GRMGR_GR_FS_INFO_GFX_CAPABLE_GPC_MASK_PARAMS
- * swizzId[in]
- *      - Swizz ID of partition
- *      - Mandatory parameter
- *      - A DM client with an invalid swizz ID, will fail this call
- * grIdx[in]
- *      - Local grIdx for a partition
- *      - Mandatory parameter
- * gpcEnMask[out]
- *      - Logical enabled GPC mask associated with requested grIdx of the partition i.e swizzid->engineId->gpcMask
- *      - These Ids should be used as input further
- *      - Does not support non-attribution case for DM client, SMC clients, legacy case
- */
-typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_GFX_CAPABLE_GPC_MASK_PARAMS {
-    NvU32 swizzId;      // param[in]  - swizz ID of partition
-    NvU32 grIdx;      // param[in]  - partition local GR ID
-    NvU32 gpcEnMask;      // param[out] - logical enabled GPC mask
-} NV2080_CTRL_GRMGR_GR_FS_INFO_GFX_CAPABLE_GPC_MASK_PARAMS;
-
-/*!
- * queryType[in]
+ * queryType[IN]
  *  - Use queryType defines to specify what information is being requested
- * status[out]
+ * status[OUT]
  *  - Possible status values returned are:
  *      NV_OK
  *      NV_ERR_INVALID_ARGUMENT
@@ -269,8 +240,6 @@ typedef struct NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS {
         NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS         dmGpcMaskData;
         NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS          partitionSyspipeIdData;
         NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS                      ropMaskData;
-        NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GRAPHICS_SYSPIPE_MASK_PARAMS gfxSyspipeMaskData;
-        NV2080_CTRL_GRMGR_GR_FS_INFO_GFX_CAPABLE_GPC_MASK_PARAMS          gfxGpcMaskData;
     } queryData;
 } NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS;
 
@@ -293,7 +262,5 @@ typedef struct NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS {
 #define NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PROFILER_MON_GPC_MASK         8
 #define NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARTITION_SYSPIPE_ID          9
 #define NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_ROP_MASK                      10
-#define NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_CHIPLET_GRAPHICS_SYSPIPE_MASK 11
-#define NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_GFX_CAPABLE_GPC_MASK          12
 
 /* _ctrl2080grmgr_h_ */

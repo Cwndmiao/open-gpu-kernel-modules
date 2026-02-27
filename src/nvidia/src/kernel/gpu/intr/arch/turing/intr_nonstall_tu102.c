@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2017-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -35,59 +35,78 @@
 
 #include "published/turing/tu102/dev_vm.h"
 
-
-/*! Get the current non-stall interrupt enable status. */
+/*!
+ * @brief Get the current non-stall interrupt enable status
+ */
 NvU32
 intrGetNonStallEnable_TU102
 (
-    OBJGPU            *pGpu,
-    Intr              *pIntr,
+    OBJGPU  *pGpu,
+    Intr *pIntr,
     THREAD_STATE_NODE *pThreadState
 )
 {
-    NvU64 nonStallMask;
-    NvU32 maskLo;
-    NvU32 maskHi;
+    NvU32 i;
+    NvU32 val;
+    NvU32 nonStallMask;
+
+    NvU32 isNonStallEnabled = 0;
 
     if (IS_VIRTUAL_WITHOUT_SRIOV(pGpu))
     {
+        if (vgpuShmIsNonStallEnabled(pGpu, &isNonStallEnabled) == NV_OK)
+        {
+            if (isNonStallEnabled)
+                return INTERRUPT_TYPE_MULTI;
+        }
         return INTERRUPT_TYPE_DISABLED;
     }
 
-    nonStallMask = intrGetIntrTopNonStallMask_HAL(pGpu, pIntr);
-    maskLo = NvU64_LO32(nonStallMask);
-    maskHi = NvU64_HI32(nonStallMask);
+    //
+    // We're doing an optimization below to read the TOP_EN_CLEAR register once
+    // after the for() loop that loops over the subtrees. It assumes that we
+    // only have one single top level enable register. HW has support for 2 top
+    // level registers, but until we get to using the second top level register,
+    // there's no need for us to write code that uses it (it should be a long
+    // time away, anyway). Use compile-time asserts to catch that this
+    // assumption has not changed.
+    //
+    ct_assert(sizeof(nonStallMask) == sizeof(NvU32));
 
-    //
-    // We rely on boolean operator short-circuiting here to avoid reading a
-    // TopEnSet register if not strictly necessary.
-    //
-    if ((maskLo != 0 &&
-         (maskLo & intrReadRegTopEnSet_HAL(pGpu, pIntr, 0, pThreadState)) != 0)
-        ||
-        (maskHi != 0 &&
-         (maskHi & intrReadRegTopEnSet_HAL(pGpu, pIntr, 1, pThreadState)) != 0))
+    val = intrReadRegTopEnSet_HAL(pGpu, pIntr, 0, pThreadState);
+
+    nonStallMask = intrGetIntrTopNonStallMask_HAL(pGpu, pIntr);
+    FOR_EACH_INDEX_IN_MASK(32, i, nonStallMask)
+    {
+        if (val & NVBIT(NV_CTRL_INTR_SUBTREE_TO_TOP_BIT(i)))
         {
             //
-        // If any top-level subtree corresponding to non-stall interrupts is
-        // enabled, return that non-stall interrupts are enabled. We only
-        // support enabling or disabling all non-stall interrupts at once, not a
-        // subset.
-        // Note that INTERRUPT_TYPE_MULTI basically means that all kinds of
-        // non-stall interrupts are enabled. The legacy pre-Pascal code had
-        // support to only enable software-triggerable interrupts or
-        // hardware-triggerable interrupts or both. We're just continuing to the
-        // same enum, but the naming of MULTI in the new interrupt tree warrants
-        // some explanation, hence the detailed comment.
+            // If any top-level subtree corresponding to non-stall interrupts
+            // is enabled, return that non-stall interrupts are enabled. We
+            // only support enabling or disabling all non-stall interrupts at
+            // once, not a subset.
+            // Note that INTERRUPT_TYPE_MULTI basically means that all kinds
+            // of non-stall interrupts are enabled. The legacy pre-Pascal code
+            // had support to only enable software-triggerable interrupts or
+            // hardware-triggerable interrupts or both. We're just continuing
+            // to the same enum, but the naming of MULTI in the new interrupt
+            // tree warrants some explanation, hence the detailed comment.
             //
             return INTERRUPT_TYPE_MULTI;
         }
+    }
+    FOR_EACH_INDEX_IN_MASK_END;
 
     return INTERRUPT_TYPE_DISABLED;
 }
 
-
-/*! Enable all nonstall interrupts in dev_ctrl at top level. */
+/*!
+ * @brief Enable all nonstall interrupts in dev_ctrl at top level
+ *
+ * @param[in]   pGpu          OBJGPU pointer
+ * @param[in]   pIntr         Intr pointer
+ * @param[in]   pThreadState  thread state node pointer
+ */
 void
 intrEnableTopNonstall_TU102
 (
@@ -96,32 +115,39 @@ intrEnableTopNonstall_TU102
     THREAD_STATE_NODE *pThreadState
 )
 {
-    NvU64 nonStallMask;
+    NvU32 i;
+    NvU32 val = 0;
+    NvU32 nonStallMask;
 
-    if (IS_VIRTUAL_WITHOUT_SRIOV(pGpu))
-    {
-        return;
-    }
+    //
+    // We're doing an optimization below to write the TOP_EN_CLEAR register once
+    // after the for() loop that loops over the subtrees. It assumes that we
+    // only have one single top level enable register. HW has support for 2 top
+    // level registers, but until we get to using the second top level register,
+    // there's no need for us to write code that uses it (it should be a long
+    // time away, anyway). Use compile-time asserts to catch that this
+    // assumption has not changed.
+    //
+    ct_assert(sizeof(nonStallMask) == sizeof(NvU32));
 
     nonStallMask = intrGetIntrTopNonStallMask_HAL(pGpu, pIntr);
+    FOR_EACH_INDEX_IN_MASK(32, i, nonStallMask)
+    {
+        val |= (NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_EN_SET_SUBTREE_ENABLE << (NV_CTRL_INTR_SUBTREE_TO_TOP_BIT(i)));
+    }
+    FOR_EACH_INDEX_IN_MASK_END;
 
-    if (NvU64_LO32(nonStallMask) != 0)
-    {
-        intrWriteRegTopEnSet_HAL(pGpu, pIntr,
-                                 0,
-                                 NvU64_LO32(nonStallMask),
-                                 pThreadState);
-    }
-    if (NvU64_HI32(nonStallMask) != 0)
-    {
-        intrWriteRegTopEnSet_HAL(pGpu, pIntr,
-                                 1,
-                                 NvU64_HI32(nonStallMask),
-                                 pThreadState);
-    }
+    // This optimization of one single register write
+    intrWriteRegTopEnSet_HAL(pGpu, pIntr, NV_CTRL_INTR_SUBTREE_TO_TOP_IDX(0), val, pThreadState);
 }
 
-/*! Disable all nonstall interrupts in dev_ctrl at top level. */
+/*!
+ * @brief Disable all nonstall interrupts in dev_ctrl at top level
+ *
+ * @param[in]   pGpu          OBJGPU pointer
+ * @param[in]   pIntr         Intr pointer
+ * @param[in]   pThreadState  thread state node pointer
+ */
 void
 intrDisableTopNonstall_TU102
 (
@@ -130,29 +156,29 @@ intrDisableTopNonstall_TU102
     THREAD_STATE_NODE *pThreadState
 )
 {
-    NvU64 nonStallMask;
+    NvU32 i;
+    NvU32 val = 0;
+    NvU32 nonStallMask;
 
-    if (IS_VIRTUAL_WITHOUT_SRIOV(pGpu))
-    {
-        return;
-    }
+    //
+    // We're doing an optimization below to write the TOP_EN_CLEAR register once
+    // after the for() loop that loops over the subtrees. It assumes that we
+    // only have one single top level enable register. HW has support for 2 top
+    // level registers, but until we get to using the second top level register,
+    // there's no need for us to write code that uses it (it should be a long
+    // time away, anyway). Use compile-time asserts to catch that this
+    // assumption has not changed.
+    //
+    ct_assert(sizeof(nonStallMask) == sizeof(NvU32));
 
     nonStallMask = intrGetIntrTopNonStallMask_HAL(pGpu, pIntr);
+    FOR_EACH_INDEX_IN_MASK(32, i, nonStallMask)
+    {
+        val |= (NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_EN_CLEAR_SUBTREE_DISABLE << (NV_CTRL_INTR_SUBTREE_TO_TOP_BIT(i)));
+    }
+    FOR_EACH_INDEX_IN_MASK_END;
 
-    if (NvU64_LO32(nonStallMask) != 0)
-    {
-        intrWriteRegTopEnClear_HAL(pGpu, pIntr,
-                                   0,
-                                   NvU64_LO32(nonStallMask),
-                                   pThreadState);
-    }
-    if (NvU64_HI32(nonStallMask) != 0)
-    {
-        intrWriteRegTopEnClear_HAL(pGpu, pIntr,
-                                   1,
-                                   NvU64_HI32(nonStallMask),
-                                   pThreadState);
-    }
+    intrWriteRegTopEnClear_HAL(pGpu, pIntr, NV_CTRL_INTR_SUBTREE_TO_TOP_IDX(0), val, pThreadState);
 }
 
 void
@@ -165,11 +191,6 @@ intrRestoreNonStall_TU102
 )
 {
     if (!pGpu->getProperty(pGpu, PDB_PROP_GPU_ALTERNATE_TREE_ENABLED))
-    {
-        return;
-    }
-
-    if (IS_VIRTUAL_WITHOUT_SRIOV(pGpu))
     {
         return;
     }
@@ -205,11 +226,12 @@ intrGetPendingNonStall_TU102
     THREAD_STATE_NODE   *pThreadState
 )
 {
-    KernelFifo     *pKernelFifo = GPU_GET_KERNEL_FIFO(pGpu);
-    InterruptTable *pIntrTable;
-    NvU32           i, j;
-    NvU32           pending;
-    NvU32           intrVector;
+    KernelFifo          *pKernelFifo = GPU_GET_KERNEL_FIFO(pGpu);
+    INTR_TABLE_ENTRY    *pIntrTable;
+    NvU32                intrTableSz;
+    NvU32                i, j, k;
+    NvU32                pending;
+    NvU32                intrVector;
 
     NV_ASSERT_OR_RETURN(pEngines != NULL, NV_ERR_INVALID_ARGUMENT);
 
@@ -232,15 +254,14 @@ intrGetPendingNonStall_TU102
 
     if (IS_VIRTUAL_WITHOUT_SRIOV(pGpu))
     {
-        return NV_ERR_NOT_SUPPORTED;
+        return vgpuIsNonStallPending(pGpu, pEngines);
     }
 
-    NV_ASSERT_OK_OR_RETURN(intrGetInterruptTable_HAL(pGpu, pIntr, &pIntrTable));
+    NV_ASSERT_OK_OR_RETURN(intrGetInterruptTable_HAL(pGpu, pIntr, &pIntrTable, &intrTableSz));
 
-    FOR_EACH_INDEX_IN_MASK(64, i, intrGetIntrTopNonStallMask_HAL(pGpu, pIntr))
+    FOR_EACH_INDEX_IN_MASK(32, i, intrGetIntrTopNonStallMask_HAL(pGpu, pIntr))
     {
         j = NV_CTRL_INTR_SUBTREE_TO_TOP_IDX(i);
-        // TODO Bug 3823562: optimize this and don't read on every loop
         pending = intrReadRegTop_HAL(pGpu, pIntr, j, pThreadState);
 
         if ((pending & (NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_SUBTREE_INTR_PENDING << NV_CTRL_INTR_SUBTREE_TO_TOP_BIT(i))) == 0)
@@ -250,7 +271,6 @@ intrGetPendingNonStall_TU102
 
         for (j = NV_CTRL_INTR_SUBTREE_TO_LEAF_IDX_START(i); j <= NV_CTRL_INTR_SUBTREE_TO_LEAF_IDX_END(i); j++)
         {
-            InterruptTableIter iter;
             NvU32 intr = intrReadRegLeaf_HAL(pGpu, pIntr, j, pThreadState) &
                          intrReadRegLeafEnSet_HAL(pGpu, pIntr, j, pThreadState);
             if (intr == 0)
@@ -258,10 +278,9 @@ intrGetPendingNonStall_TU102
                 continue;
             }
 
-            for (iter = vectIterAll(pIntrTable); vectIterNext(&iter);)
+            for (k = 0; k < intrTableSz; k++)
             {
-                INTR_TABLE_ENTRY *pEntry = iter.pValue;
-                NvU32 intrVector = pEntry->intrVectorNonStall;
+                NvU32 intrVector = pIntrTable[k].intrVectorNonStall;
 
                 if (intrVector == NV_INTR_VECTOR_INVALID)
                 {
@@ -277,15 +296,7 @@ intrGetPendingNonStall_TU102
                 }
                 if (intr & NVBIT(NV_CTRL_INTR_GPU_VECTOR_TO_LEAF_BIT(intrVector)))
                 {
-                    bitVectorSet(pEngines, pEntry->mcEngine);
-                    //
-                    // Don't break here. We can have multiple non stall
-                    // interrupts on the same vector in case of MIG
-                    // partitioning.
-                    //
-                    // Although most of them will be GFID filtered to VFs, the
-                    // PF also uses engines assigned to a partition.
-                    //
+                    bitVectorSet(pEngines, pIntrTable[k].mcEngine);
                 }
             }
         }
@@ -336,21 +347,23 @@ _intrServiceNonStallLeaf_TU102
     THREAD_STATE_NODE   *pThreadState
 )
 {
-    InterruptTable    *pIntrTable;
-    NV_STATUS          status = NV_OK;
-    NV_STATUS          tmpStatus;
-    InterruptTableIter iter;
-    NvU16              mcEngineIdx;
+    INTR_TABLE_ENTRY *pIntrTable;
+    NvU32                intrTableSz;
+    NV_STATUS            status = NV_OK;
+    NV_STATUS            tmpStatus;
+    NvU32                i;
+    NvU16                mcEngineIdx;
 
     // Don't clear the bitvector pEngines since caller accumulates
-    NV_ASSERT_OK_OR_RETURN(intrGetInterruptTable_HAL(pGpu, pIntr, &pIntrTable));
 
-    for (iter = vectIterAll(pIntrTable); vectIterNext(&iter);)
+    NV_ASSERT_OK_OR_RETURN(intrGetInterruptTable_HAL(pGpu, pIntr, &pIntrTable, &intrTableSz));
+
+    for (i = 0; i < intrTableSz; i++)
     {
-        INTR_TABLE_ENTRY *pEntry     = iter.pValue;
-        NvU32             intrVector = pEntry->intrVectorNonStall;
-        NvU32             intrPending;
+        NvU32 intrVector;
+        NvU32 intrPending;
 
+        intrVector = pIntrTable[i].intrVectorNonStall;
         if (intrVector == NV_INTR_VECTOR_INVALID)
         {
             // This engine does not have a valid nonstall interrupt vector
@@ -370,7 +383,7 @@ _intrServiceNonStallLeaf_TU102
             continue;
         }
 
-        mcEngineIdx = pEntry->mcEngine;
+        mcEngineIdx = pIntrTable[i].mcEngine;
         bitVectorSet(pEngines, mcEngineIdx);
 
         //
@@ -437,12 +450,12 @@ intrServiceNonStall_TU102
 
     if (IS_VIRTUAL_WITHOUT_SRIOV(pGpu))
     {
-        return NV_ERR_NOT_SUPPORTED;
+        return vgpuServiceNonStall(pGpu, pEngines);
     }
-    FOR_EACH_INDEX_IN_MASK(64, i, intrGetIntrTopNonStallMask_HAL(pGpu, pIntr))
+
+    FOR_EACH_INDEX_IN_MASK(32, i, intrGetIntrTopNonStallMask_HAL(pGpu, pIntr))
     {
         NvU32 j = NV_CTRL_INTR_SUBTREE_TO_TOP_IDX(i);
-        // TODO Bug 3823562: optimize this and don't read on every loop
         pending = intrReadRegTop_HAL(pGpu, pIntr, j, pThreadState);
 
         if ((pending & (NV_VIRTUAL_FUNCTION_PRIV_CPU_INTR_TOP_SUBTREE_INTR_PENDING << NV_CTRL_INTR_SUBTREE_TO_TOP_BIT(i))) == 0)

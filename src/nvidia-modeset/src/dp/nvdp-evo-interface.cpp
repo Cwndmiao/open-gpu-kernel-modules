@@ -29,8 +29,6 @@
 
 #include "nvkms-rmapi.h"
 
-#include "nvdp-connector-event-sink.hpp"
-
 namespace nvkmsDisplayPort {
 
 EvoInterface::EvoInterface(NVConnectorEvoPtr pConnectorEvo)
@@ -87,15 +85,6 @@ NvU32 EvoInterface::getRegkeyValue(const char *key)
 
 bool EvoInterface::isInbandStereoSignalingSupported()
 {
-    NVDispEvoPtr pDispEvo = pConnectorEvo->pDispEvo;
-    NVDpyEvoPtr pDpyEvo;
-
-    FOR_ALL_EVO_DPYS(pDpyEvo, pDispEvo->validDisplays, pDispEvo) {
-        if ((pDpyEvo->pConnectorEvo == pConnectorEvo) &&
-            pDpyEvo->dp.inbandStereoSignaling) {
-            return TRUE;
-        }
-    }
 
     return FALSE;
 }
@@ -112,15 +101,7 @@ NvU32 EvoInterface::getDisplayId()
 
 NvU32 EvoInterface::getSorIndex()
 {
-    if (pConnectorEvo->pDpLibConnector) {
-        if (pConnectorEvo->pDpLibConnector->linkHandoffEnabled) {
-            return DP_INVALID_SOR_INDEX;
-        } else {
-            return pConnectorEvo->or.primary;
-        }
-    } else {
-        return pConnectorEvo->or.primary;
-    }
+    return nvEvoConnectorGetPrimaryOr(pConnectorEvo);
 }
 
 NvU32 EvoInterface::getLinkIndex()

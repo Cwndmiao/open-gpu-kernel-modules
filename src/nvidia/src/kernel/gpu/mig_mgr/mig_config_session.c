@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -32,8 +32,6 @@
  *
  *****************************************************************************/
 
-#define NVOC_MIG_CONFIG_SESSION_H_PRIVATE_ACCESS_ALLOWED
-
 #include "core/core.h"
 #include "gpu/gpu.h"
 #include "kernel/gpu/mig_mgr/mig_config_session.h"
@@ -51,10 +49,9 @@ migconfigsessionConstruct_IMPL
 {
     NVC639_ALLOCATION_PARAMETERS *pUserParams = pRmAllocParams->pAllocParams;
     OBJSYS *pSys = SYS_GET_INSTANCE();
-    RmClient *pRmClient = dynamicCast(pCallContext->pClient, RmClient);
+    NvHandle hClient = pCallContext->pClient->hClient;
     NV_STATUS status;
 
-    NV_ASSERT_OR_RETURN(pRmClient != NULL, NV_ERR_INVALID_CLIENT);
     NV_ASSERT_OR_RETURN(RMCFG_FEATURE_KERNEL_RM, NV_ERR_NOT_SUPPORTED);
 
     osRmCapInitDescriptor(&pMIGConfigSession->dupedCapDescriptor);
@@ -70,7 +67,7 @@ migconfigsessionConstruct_IMPL
     //
     if (status == NV_ERR_NOT_SUPPORTED)
     {
-        if (!rmclientIsAdmin(pRmClient, pCallContext->secInfo.privLevel))
+        if (!rmclientIsAdminByHandle(hClient, pCallContext->secInfo.privLevel))
         {
             NV_PRINTF(LEVEL_ERROR, "insufficient permissions\n");
             return NV_ERR_INSUFFICIENT_PERMISSIONS;

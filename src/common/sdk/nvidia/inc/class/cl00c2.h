@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2022, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2018-2021, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -20,22 +20,26 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#pragma once
+#ifndef _cl00c2_h_
+#define _cl00c2_h_
 
-#include <nvtypes.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-//
-// This file was generated with FINN, an NVIDIA coding tool.
-// Source file:      class/cl00c2.finn
-//
+#include "nvtypes.h"
 
-#define NV01_MEMORY_LOCAL_PHYSICAL (0xc2U) /* finn: Evaluated from "NV_PHYSICAL_MEMORY_ALLOCATION_PARAMS_MESSAGE_ID" */
+#define   NV01_MEMORY_LOCAL_PHYSICAL                               (0x000000c2)
 
-#define NV_PHYSICAL_MEMORY_ALLOCATION_PARAMS_MESSAGE_ID (0x00c2U)
-
-typedef struct NV_PHYSICAL_MEMORY_ALLOCATION_PARAMS {
-    NV_DECLARE_ALIGNED(NvU64 memSize, 8); // [OUT]
+typedef struct
+{
+    NvU64 memSize  NV_ALIGN_BYTES(8); // [OUT] 
     NvU32 format; // [IN] - PTE format to use
-    NV_DECLARE_ALIGNED(NvU64 pageSize, 8); // [IN] - Page size to use
+    NvU32 pageSize; // [IN] - Page size to use
 } NV_PHYSICAL_MEMORY_ALLOCATION_PARAMS;
 
+#ifdef __cplusplus
+};     /* extern "C" */
+#endif
+
+#endif /* _cl00c2_h_ */

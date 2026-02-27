@@ -104,45 +104,35 @@ msgqSetBarrier(msgqHandle handle, msgqFcnBarrier fcn)
 /*
  * Helper functions to access indirect backend.
  */
-// TODO: Make these funcions return NV_STATUS instead of int wherever possible.
-sysSHARED_CODE static int
+
+sysSHARED_CODE static void
 _backendRead32(msgqMetadata *pQueue, volatile const void *pAddr, NvU32 *pVal, unsigned flags)
 {
     if (pQueue->fcnBackendRw != NULL)
     {
-        int status = pQueue->fcnBackendRw(pVal, (const void *)pAddr, sizeof(*pVal),
-                                          flags | FCN_FLAG_BACKEND_ACCESS_READ,
-                                          pQueue->fcnBackendRwArg);
-        if (status != 0)
-        {
-            return -1;
-        }
+        pQueue->fcnBackendRw(pVal, (const void *)pAddr, sizeof(*pVal),
+                             flags | FCN_FLAG_BACKEND_ACCESS_READ,
+                             pQueue->fcnBackendRwArg);
     }
     else
     {
         *pVal = *(volatile const NvU32*)pAddr;
     }
-    return 0;
 }
 
-sysSHARED_CODE static int
+sysSHARED_CODE static void
 _backendWrite32(msgqMetadata *pQueue, volatile void *pAddr, NvU32 *pVal, unsigned flags)
 {
     if (pQueue->fcnBackendRw != NULL)
     {
-        int status = pQueue->fcnBackendRw((void*)pAddr, pVal, sizeof(*pVal),
-                                          flags | FCN_FLAG_BACKEND_ACCESS_WRITE,
-                                          pQueue->fcnBackendRwArg);
-        if (status != 0)
-        {
-            return -1;
-        }
+        pQueue->fcnBackendRw((void*)pAddr, pVal, sizeof(*pVal),
+                             flags | FCN_FLAG_BACKEND_ACCESS_WRITE,
+                             pQueue->fcnBackendRwArg);
     }
     else
     {
         *(volatile NvU32*)pAddr = *pVal;
     }
-    return 0;
 }
 
 /**
@@ -152,7 +142,7 @@ _backendWrite32(msgqMetadata *pQueue, volatile void *pAddr, NvU32 *pVal, unsigne
 sysSHARED_CODE static void
 msgqRiscvDefaultBarrier(void)
 {
-    __asm__ volatile("fence iorw,iorw");
+    asm volatile("fence iorw,iorw");
 }
 #endif
 
@@ -198,7 +188,6 @@ msgqTxCreate
 {
     msgqMetadata *pQueue = (msgqMetadata*)handle;
     msgqTxHeader *pTx;
-    int status;
 
     if ((pQueue == NULL) || pQueue->txLinked)
     {
@@ -293,15 +282,10 @@ msgqTxCreate
     // Indirect access to backend
     if (pQueue->fcnBackendRw != NULL)
     {
-        status = pQueue->fcnBackendRw(pTx, &pQueue->tx, sizeof *pTx,
-                                      FCN_FLAG_BACKEND_ACCESS_WRITE | FCN_FLAG_BACKEND_QUEUE_TX,
-                                      pQueue->fcnBackendRwArg);
-        if (status != 0)
-        {
-            return -1;
-        }
-    } 
-    else
+        pQueue->fcnBackendRw(pTx, &pQueue->tx, sizeof *pTx,
+            FCN_FLAG_BACKEND_ACCESS_WRITE | FCN_FLAG_BACKEND_QUEUE_TX,
+            pQueue->fcnBackendRwArg);
+    } else
     {
         memcpy(pTx, &pQueue->tx, sizeof *pTx);
     }
@@ -331,7 +315,6 @@ sysSHARED_CODE int
 msgqRxLink(msgqHandle handle, const void *pBackingStore, unsigned size, unsigned msgSize)
 {
     msgqMetadata *pQueue = (msgqMetadata*)handle;
-    int status;
 
     if ((pQueue == NULL) || pQueue->rxLinked)
     {
@@ -364,14 +347,10 @@ msgqRxLink(msgqHandle handle, const void *pBackingStore, unsigned size, unsigned
     // copy their metadata
     if (pQueue->fcnBackendRw != NULL)
     {
-        status = pQueue->fcnBackendRw(&pQueue->rx, (const void *)pQueue->pTheirTxHdr,
-                                      sizeof pQueue->rx,
-                                      FCN_FLAG_BACKEND_ACCESS_READ | FCN_FLAG_BACKEND_QUEUE_RX,
-                                      pQueue->fcnBackendRwArg);
-        if (status != 0)
-        {
-            return -11;
-        }
+        pQueue->fcnBackendRw(&pQueue->rx, (const void *)pQueue->pTheirTxHdr,
+            sizeof pQueue->rx,
+            FCN_FLAG_BACKEND_ACCESS_READ | FCN_FLAG_BACKEND_QUEUE_RX,
+            pQueue->fcnBackendRwArg);
     }
     else
     {
@@ -434,13 +413,8 @@ msgqRxLink(msgqHandle handle, const void *pBackingStore, unsigned size, unsigned
     }
 
     pQueue->rxReadPtr = 0;
-    status = _backendWrite32(pQueue, pQueue->pReadOutgoing, &pQueue->rxReadPtr,
-                             pQueue->rxSwapped ? FCN_FLAG_BACKEND_QUEUE_TX : FCN_FLAG_BACKEND_QUEUE_RX);
-    if (status != 0)
-    {
-        return -12;
-    }
-
+    _backendWrite32(pQueue, pQueue->pReadOutgoing, &pQueue->rxReadPtr,
+        pQueue->rxSwapped ? FCN_FLAG_BACKEND_QUEUE_TX : FCN_FLAG_BACKEND_QUEUE_RX);
     if (pQueue->fcnFlush != NULL)
     {
         pQueue->fcnFlush(pQueue->pReadOutgoing, sizeof(NvU32));
@@ -477,12 +451,8 @@ msgqTxGetFreeSpace(msgqHandle handle)
         return 0;
     }
 
-    if (_backendRead32(pQueue, pQueue->pReadIncoming, &pQueue->txReadPtr,
-                       pQueue->rxSwapped ? FCN_FLAG_BACKEND_QUEUE_RX : FCN_FLAG_BACKEND_QUEUE_TX) != 0)
-    {
-        return 0;
-    }
-
+    _backendRead32(pQueue, pQueue->pReadIncoming, &pQueue->txReadPtr,
+        pQueue->rxSwapped ? FCN_FLAG_BACKEND_QUEUE_RX : FCN_FLAG_BACKEND_QUEUE_TX);
     if (pQueue->txReadPtr >= pQueue->tx.msgCount)
     {
         return 0;
@@ -535,7 +505,6 @@ sysSHARED_CODE int
 msgqTxSubmitBuffers(msgqHandle handle, unsigned n)
 {
     msgqMetadata *pQueue = (msgqMetadata*)handle;
-    int status;
 
     if ((pQueue == NULL) || !pQueue->txLinked)
     {
@@ -562,19 +531,8 @@ msgqTxSubmitBuffers(msgqHandle handle, unsigned n)
         pQueue->tx.writePtr -= pQueue->tx.msgCount;
     }
 
-    status = _backendWrite32(pQueue, pQueue->pWriteOutgoing,
-                             &pQueue->tx.writePtr, FCN_FLAG_BACKEND_QUEUE_TX);
-    if (status != 0)
-    {
-        // restore write pointer
-        if (pQueue->tx.writePtr < n)
-        {
-            pQueue->tx.writePtr += pQueue->tx.msgCount;
-        }
-
-        pQueue->tx.writePtr -= n;
-        return -2;
-    }
+    _backendWrite32(pQueue, pQueue->pWriteOutgoing,
+        &pQueue->tx.writePtr, FCN_FLAG_BACKEND_QUEUE_TX);
 
     // Adjust cached value for number of free elements.
     pQueue->txFree -= n;
@@ -619,19 +577,6 @@ msgqTxSync(msgqHandle handle) // "transmit"
     return msgqTxGetFreeSpace(handle);
 }
 
-sysSHARED_CODE unsigned
-msgqTxGetPending(msgqHandle handle)
-{
-    msgqMetadata *pQueue = (msgqMetadata*)handle;
-
-    if ((pQueue == NULL) || !pQueue->txLinked)
-    {
-        return 0;
-    }
-
-    return pQueue->tx.msgCount - msgqTxSync(handle) - 1;
-}
-
 /*
  *
  * Receive code (incoming messages)
@@ -648,11 +593,7 @@ msgqRxGetReadAvailable(msgqHandle handle)
         return 0;
     }
 
-    if (_backendRead32(pQueue, pQueue->pWriteIncoming, &pQueue->rx.writePtr, FCN_FLAG_BACKEND_QUEUE_RX) != 0)
-    {
-        return 0;
-    }
-
+    _backendRead32(pQueue, pQueue->pWriteIncoming, &pQueue->rx.writePtr, FCN_FLAG_BACKEND_QUEUE_RX);
     if (pQueue->rx.writePtr >= pQueue->rx.msgCount)
     {
         return 0;
@@ -705,7 +646,6 @@ sysSHARED_CODE int
 msgqRxMarkConsumed(msgqHandle handle, unsigned n)
 {
     msgqMetadata *pQueue = (msgqMetadata*)handle;
-    int status;
 
     if ((pQueue == NULL) || !pQueue->rxLinked)
     {
@@ -726,19 +666,8 @@ msgqRxMarkConsumed(msgqHandle handle, unsigned n)
     }
 
     // Copy to backend
-    status = _backendWrite32(pQueue, pQueue->pReadOutgoing, &pQueue->rxReadPtr,
-                             pQueue->rxSwapped ? FCN_FLAG_BACKEND_QUEUE_TX : FCN_FLAG_BACKEND_QUEUE_RX);
-    if (status != 0)
-    {
-        // restore read pointer
-        if (pQueue->rxReadPtr < n)
-        {
-            pQueue->rxReadPtr += pQueue->rx.msgCount;
-        }
-
-        pQueue->rxReadPtr -= n;
-        return -2;
-    }
+    _backendWrite32(pQueue, pQueue->pReadOutgoing, &pQueue->rxReadPtr,
+        pQueue->rxSwapped ? FCN_FLAG_BACKEND_QUEUE_TX : FCN_FLAG_BACKEND_QUEUE_RX);
 
     // Adjust cached value for number of available elements.
     pQueue->rxAvail -= n;

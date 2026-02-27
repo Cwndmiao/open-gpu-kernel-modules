@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,21 +21,25 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#pragma once
+#ifndef _clc574_h_
+#define _clc574_h_
 
-#include <nvtypes.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-//
-// This file was generated with FINN, an NVIDIA coding tool.
-// Source file:      class/clc574.finn
-//
+#include "nvtypes.h"
 
-#define UVM_CHANNEL_RETAINER (0xc574U) /* finn: Evaluated from "NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_MESSAGE_ID" */
+#define  UVM_CHANNEL_RETAINER                     (0x0000C574)
 
-#define NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_MESSAGE_ID (0xc574U)
-
-typedef struct NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS {
+typedef struct
+{
     NvHandle hClient;
     NvHandle hChannel;
-} NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS;
+}NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS;
 
+#ifdef __cplusplus
+};     /* extern "C" */
+#endif
+
+#endif /* _clc574_h_ */

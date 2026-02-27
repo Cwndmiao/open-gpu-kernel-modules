@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -34,7 +34,7 @@
 
 #include "rmflcnbl.h"
 
-NV_STATUS
+void
 ksec2ConfigureFalcon_TU102
 (
     OBJGPU *pGpu,
@@ -57,7 +57,6 @@ ksec2ConfigureFalcon_TU102
     falconConfig.addrSpaceList      = memdescAddrSpaceListToU32(ADDRLIST_FBMEM_PREFERRED);
 
     kflcnConfigureEngine(pGpu, staticCast(pKernelSec2, KernelFalcon), &falconConfig);
-    return NV_OK;
 }
 
 NV_STATUS
@@ -68,22 +67,21 @@ ksec2ResetHw_TU102
 )
 {
     GPU_FLD_WR_DRF_DEF(pGpu, _PSEC, _FALCON_ENGINE, _RESET, _TRUE);
-
-    // Reg read cycles needed for signal propagation.
-    for (NvU32 i = 0; i < FLCN_RESET_PROPAGATION_DELAY_COUNT; i++)
-    {
-        GPU_REG_RD32(pGpu, NV_PSEC_FALCON_ENGINE);
-    }
-
     GPU_FLD_WR_DRF_DEF(pGpu, _PSEC, _FALCON_ENGINE, _RESET, _FALSE);
 
-    // Reg read cycles needed for signal propagation.
-    for (NvU32 i = 0; i < FLCN_RESET_PROPAGATION_DELAY_COUNT; i++)
-    {
-        GPU_REG_RD32(pGpu, NV_PSEC_FALCON_ENGINE);
-    }
-
     return NV_OK;
+}
+
+NvBool
+ksec2IsEngineInReset_TU102
+(
+    OBJGPU *pGpu,
+    KernelSec2 *pKernelSec2
+)
+{
+    NvU32 val = GPU_REG_RD32(pGpu, NV_PSEC_FALCON_ENGINE);
+
+    return FLD_TEST_DRF(_PSEC_FALCON, _ENGINE, _RESET, _TRUE, val);
 }
 
 static NV_STATUS
@@ -113,7 +111,7 @@ s_allocateGenericBlUcode
     NV_ASSERT_OR_GOTO(pBinArchive != NULL, out);
 
     // allocate desc
-    pBinDesc = bindataArchiveGetStorage(pBinArchive, BINDATA_LABEL_UCODE_DESC);
+    pBinDesc = bindataArchiveGetStorage(pBinArchive, "ucode_desc");
     NV_ASSERT_OR_GOTO(pBinDesc != NULL, out);
 
     descSizeAligned = RM_ALIGN_UP(bindataGetBufferSize(pBinDesc), FLCN_BLK_ALIGNMENT);
@@ -128,7 +126,7 @@ s_allocateGenericBlUcode
         bindataWriteToBuffer(pBinDesc, (NvU8 *) pGenericBlUcodeDesc, descSizeAligned), out);
 
     // allocate img
-    pBinImg = bindataArchiveGetStorage(pBinArchive, BINDATA_LABEL_UCODE_IMAGE);
+    pBinImg = bindataArchiveGetStorage(pBinArchive, "ucode_image");
     imgSizeAligned = RM_ALIGN_UP(bindataGetBufferSize(pBinImg), FLCN_BLK_ALIGNMENT);
 
     if (pGenericBlUcodeDesc->blImgHeader.blCodeSize > imgSizeAligned)
@@ -144,7 +142,7 @@ s_allocateGenericBlUcode
         goto out;
     }
 
-    NV_ASSERT_OK_OR_GOTO(status,
+    NV_ASSERT_OK_OR_GOTO(status, 
         bindataWriteToBuffer(pBinImg, pGenericBlUcodeImg, imgSizeAligned), out);
 
     *ppDesc = pGenericBlUcodeDesc;

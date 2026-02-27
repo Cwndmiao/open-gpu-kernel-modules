@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1993-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -32,67 +32,61 @@
 
 #include "displayport.h"
 
+#define WAR_AUDIOCLAMPING_FREQ 48000    // Audio freq. more than 48KHz are currently clamped due to bug 925211
+
 namespace DisplayPort
 {
     class LinkConfiguration;
 
-    struct ModesetInfo
+    struct ModesetInfo 
     {
         unsigned twoChannelAudioHz;         // if you need 192khz stereo specify 192000 here
         unsigned eightChannelAudioHz;       // Same setting for multi channel audio.
                                             //  DisplayPort encodes 3-8 channel streams as 8 channel
         NvU64 pixelClockHz;                 // Requested pixel clock for the mode
-        unsigned rasterWidth;
+        unsigned rasterWidth; 
         unsigned rasterHeight;
-        unsigned surfaceWidth;              // RasterBlankStartX - RasterBlankEndX
+        unsigned surfaceWidth;              // RasterBlankStartX - newRasterBlankEndX
         unsigned surfaceHeight;             // Active region height
         unsigned depth;
         unsigned rasterBlankStartX;
         unsigned rasterBlankEndX;
         unsigned bitsPerComponent;          // Bits per component
         bool     bEnableDsc;                // bEnableDsc=1 indicates DSC would be enabled for the mode
-        bool     bEnablePassThroughForPCON;
+        DSC_MODE mode;                      // DSC Mode
 
-        DSC_MODE            mode;           // DSC Mode
-        DP_COLORFORMAT      colorFormat;
-
-        ModesetInfo(): twoChannelAudioHz(0),
-                       eightChannelAudioHz(0),
-                       pixelClockHz(0),
-                       rasterWidth(0),
-                       rasterHeight(0),
-                       surfaceWidth(0),
+        ModesetInfo(): twoChannelAudioHz(0), 
+                       eightChannelAudioHz(0), 
+                       pixelClockHz(0), 
+                       rasterWidth(0), 
+                       rasterHeight(0), 
+                       surfaceWidth(0), 
                        surfaceHeight(0),
                        depth(0),
-                       rasterBlankStartX(0),
+                       rasterBlankStartX(0), 
                        rasterBlankEndX(0),
                        bitsPerComponent(0),
                        bEnableDsc(false),
-                       bEnablePassThroughForPCON(false),
-                       mode(DSC_SINGLE),
-                       colorFormat(dpColorFormat_Unknown)  {}
-
-        ModesetInfo(unsigned newTwoChannelAudioHz, unsigned newEightChannelAudioHz, NvU64 newPixelClockHz,
-                    unsigned newRasterWidth, unsigned newRasterHeight,
+                       mode(DSC_SINGLE) {}
+        
+        ModesetInfo(unsigned newTwoChannelAudioHz, unsigned newEightChannelAudioHz, NvU64 newPixelClockHz, 
+                    unsigned newRasterWidth, unsigned newRasterHeight, 
                     unsigned newSurfaceWidth, unsigned newSurfaceHeight, unsigned newDepth,
                     unsigned newRasterBlankStartX=0, unsigned newRasterBlankEndX=0, bool newBEnableDsc = false,
-                    DSC_MODE newMode = DSC_SINGLE, bool newBEnablePassThroughForPCON = false,
-                    DP_COLORFORMAT dpColorFormat = dpColorFormat_Unknown):
-           twoChannelAudioHz(newTwoChannelAudioHz),
-           eightChannelAudioHz(newEightChannelAudioHz),
-           pixelClockHz(newPixelClockHz),
-           rasterWidth(newRasterWidth),
+                    DSC_MODE newMode = DSC_SINGLE):
+           twoChannelAudioHz(newTwoChannelAudioHz), 
+           eightChannelAudioHz(newEightChannelAudioHz), 
+           pixelClockHz(newPixelClockHz), 
+           rasterWidth(newRasterWidth), 
            rasterHeight(newRasterHeight),
            surfaceWidth(newSurfaceWidth),
            surfaceHeight(newSurfaceHeight),
            depth(newDepth),
-           rasterBlankStartX(newRasterBlankStartX),
+           rasterBlankStartX(newRasterBlankStartX), 
            rasterBlankEndX(newRasterBlankEndX),
            bitsPerComponent(0),
            bEnableDsc(newBEnableDsc),
-           bEnablePassThroughForPCON(newBEnablePassThroughForPCON),
-           mode(newMode),
-           colorFormat(dpColorFormat) {}
+           mode(newMode){}
     };
 
     struct Watermark
@@ -101,41 +95,40 @@ namespace DisplayPort
         unsigned tuSize;
         unsigned hBlankSym;
         unsigned vBlankSym;
-        NvU32    effectiveBpp;
     };
 
     bool isModePossibleSST
     (
-        const LinkConfiguration &linkConfig,
-        const ModesetInfo &modesetInfo,
+        const LinkConfiguration & linkConfig,
+        const ModesetInfo & modesetInfo,
         Watermark  * dpInfo,
         bool bUseIncreasedWatermarkLimits = false
     );
 
     bool isModePossibleMST
     (
-        const LinkConfiguration &linkConfig,
-        const ModesetInfo &modesetInfo,
+        const LinkConfiguration & linkConfig,
+        const ModesetInfo & modesetInfo,
         Watermark  * dpInfo
     );
 
     bool isModePossibleSSTWithFEC
     (
-        const LinkConfiguration &linkConfig,
-        const ModesetInfo &modesetInfo,
+        const LinkConfiguration & linkConfig,
+        const ModesetInfo & modesetInfo,
         Watermark  * dpInfo,
         bool bUseIncreasedWatermarkLimits = false
     );
 
     bool isModePossibleMSTWithFEC
     (
-        const LinkConfiguration &linkConfig,
-        const ModesetInfo &modesetInfo,
+        const LinkConfiguration & linkConfig,
+        const ModesetInfo & modesetInfo,
         Watermark  * dpInfo
     );
 
     // Return Payload Bandwidth Number(PBN)for requested mode
-    unsigned pbnForMode(const ModesetInfo &modesetInfo, bool bAccountSpread = true);
+    unsigned pbnForMode(const ModesetInfo & modesetInfo);
 }
 
 #endif //INCLUDED_DP_WATERMARK_H

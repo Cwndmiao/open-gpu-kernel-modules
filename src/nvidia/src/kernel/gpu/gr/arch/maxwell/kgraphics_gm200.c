@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,9 +21,6 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#define NVOC_KERNEL_GRAPHICS_H_PRIVATE_ACCESS_ALLOWED
-
-#include "gpu_mgr/gpu_mgr.h"
 #include "kernel/gpu/gr/kernel_graphics.h"
 #include "kernel/gpu/mem_mgr/mem_mgr.h"
 
@@ -60,7 +57,6 @@ kgraphicsAllocGrGlobalCtxBuffers_GM200
     MemoryManager                *pMemoryManager = GPU_GET_MEMORY_MANAGER(pGpu);
     CTX_BUF_POOL_INFO            *pCtxBufPool;
     const KGRAPHICS_STATIC_INFO  *pKernelGraphicsStaticInfo;
-	NV_STATUS                     status;
 
     NV_ASSERT_OR_RETURN(!gpumgrGetBcEnabledStatus(pGpu), NV_ERR_INVALID_STATE);
 
@@ -133,7 +129,7 @@ kgraphicsAllocGrGlobalCtxBuffers_GM200
         pCtxAttr = pKernelGraphics->globalCtxBuffersInfo.globalCtxAttr;
         NV_ASSERT_OK_OR_RETURN(
             ctxBufPoolGetGlobalPool(pGpu, CTX_BUF_ID_GR_GLOBAL,
-                                    RM_ENGINE_TYPE_GR(pKernelGraphics->instance),
+                                    NV2080_ENGINE_TYPE_GR(pKernelGraphics->instance),
                                     &pCtxBufPool));
     }
 
@@ -146,8 +142,7 @@ kgraphicsAllocGrGlobalCtxBuffers_GM200
         flags |= MEMDESC_FLAGS_OWNED_BY_CURRENT_DEVICE;
     }
 
-    // Don't use context buffer pool for VF allocations managed by host RM.
-    if (ctxBufPoolIsSupported(pGpu) && (pCtxBufPool != NULL))
+    if (pCtxBufPool != NULL)
     {
         cbAllocFlags |= MEMDESC_FLAGS_OWNED_BY_CTX_BUF_POOL;
         flags |= MEMDESC_FLAGS_OWNED_BY_CTX_BUF_POOL;
@@ -159,10 +154,6 @@ kgraphicsAllocGrGlobalCtxBuffers_GM200
         ppMemDesc = &pCtxBuffers->memDesc[GR_GLOBALCTX_BUFFER_BUNDLE_CB];
         bPhysicallyContiguous = pCtxAttr[GR_GLOBALCTX_BUFFER_BUNDLE_CB].pAllocList == ADDRLIST_FBMEM_ONLY;
 
-        if (pMemoryManager->bug64kPage5123775War) {
-            circularBufferSize = RM_ALIGN_UP(circularBufferSize, 0x10000);
-        }
-
         NV_CHECK_OK_OR_RETURN(LEVEL_ERROR,
             memdescCreate(ppMemDesc, pGpu,
                           circularBufferSize,
@@ -173,14 +164,8 @@ kgraphicsAllocGrGlobalCtxBuffers_GM200
                           cbAllocFlags | MEMDESC_FLAGS_GPU_PRIVILEGED | MEMDESC_FLAGS_HIGH_PRIORITY));
 
         memdescSetGpuCacheAttrib(*ppMemDesc, NV_MEMORY_CACHED);
-        if ((cbAllocFlags & MEMDESC_FLAGS_OWNED_BY_CTX_BUF_POOL) != 0)
-        {
-            memmgrSetMemDescPageSize_HAL(pGpu, pMemoryManager, *ppMemDesc, AT_GPU, RM_ATTR_PAGE_SIZE_4KB);
-            NV_ASSERT_OK_OR_RETURN(memdescSetCtxBufPool(*ppMemDesc, pCtxBufPool));
-        }
-
-        memdescTagAllocList(status, NV_FB_ALLOC_RM_INTERNAL_OWNER_CIRCULAR_BUFFER, *ppMemDesc, pCtxAttr[GR_GLOBALCTX_BUFFER_BUNDLE_CB].pAllocList);
-        NV_CHECK_OK_OR_RETURN(LEVEL_ERROR, status);
+        NV_CHECK_OK_OR_RETURN(LEVEL_ERROR,
+            memdescAllocList(*ppMemDesc, pCtxAttr[GR_GLOBALCTX_BUFFER_BUNDLE_CB].pAllocList));
     }
 
     // Page Pool
@@ -199,14 +184,8 @@ kgraphicsAllocGrGlobalCtxBuffers_GM200
                           cbAllocFlags | MEMDESC_FLAGS_GPU_PRIVILEGED));
 
         memdescSetGpuCacheAttrib(*ppMemDesc, NV_MEMORY_CACHED);
-        if ((cbAllocFlags & MEMDESC_FLAGS_OWNED_BY_CTX_BUF_POOL) != 0)
-        {
-            memmgrSetMemDescPageSize_HAL(pGpu, pMemoryManager, *ppMemDesc, AT_GPU, RM_ATTR_PAGE_SIZE_4KB);
-            NV_ASSERT_OK_OR_RETURN(memdescSetCtxBufPool(*ppMemDesc, pCtxBufPool));
-        }
-
-        memdescTagAllocList(status, NV_FB_ALLOC_RM_INTERNAL_OWNER_PAGE_POOL, *ppMemDesc, pCtxAttr[GR_GLOBALCTX_BUFFER_PAGEPOOL].pAllocList);
-        NV_CHECK_OK_OR_RETURN(LEVEL_ERROR, status);
+        NV_CHECK_OK_OR_RETURN(LEVEL_ERROR,
+            memdescAllocList(*ppMemDesc, pCtxAttr[GR_GLOBALCTX_BUFFER_PAGEPOOL].pAllocList));
     }
 
     // Attribute Buffer
@@ -225,17 +204,8 @@ kgraphicsAllocGrGlobalCtxBuffers_GM200
                           cbAllocFlags | MEMDESC_FLAGS_HIGH_PRIORITY));
 
         memdescSetGpuCacheAttrib(*ppMemDesc, NV_MEMORY_CACHED);
-        if ((cbAllocFlags & MEMDESC_FLAGS_OWNED_BY_CTX_BUF_POOL) != 0)
-        {
-            memmgrSetMemDescPageSize_HAL(pGpu, pMemoryManager, *ppMemDesc, AT_GPU, RM_ATTR_PAGE_SIZE_4KB);
-            NV_ASSERT_OK_OR_RETURN(memdescSetCtxBufPool(*ppMemDesc, pCtxBufPool));
-        }
-
-
-        memdescTagAllocList(status, NV_FB_ALLOC_RM_INTERNAL_OWNER_ATTR_BUFFER, *ppMemDesc, pCtxAttr[GR_GLOBALCTX_BUFFER_ATTRIBUTE_CB].pAllocList);
-        NV_CHECK_OK_OR_RETURN(LEVEL_ERROR, status);
-
-        memdescSetName(pGpu, *ppMemDesc, NV_RM_SURF_NAME_GR_CIRCULAR_BUFFER, NULL);
+        NV_CHECK_OK_OR_RETURN(LEVEL_ERROR,
+            memdescAllocList(*ppMemDesc, pCtxAttr[GR_GLOBALCTX_BUFFER_ATTRIBUTE_CB].pAllocList));
     }
 
     // we do not want/need a priv access map allocated per-channel, so skip allocating
@@ -258,20 +228,15 @@ kgraphicsAllocGrGlobalCtxBuffers_GM200
                                   ADDR_UNKNOWN,
                                   pCtxAttr[GR_GLOBALCTX_BUFFER_PRIV_ACCESS_MAP].cpuAttr,
                                   flags));
-                if (kgraphicsIsOverrideContextBuffersToGpuCached(pGpu, pKernelGraphics))
-                    memdescSetGpuCacheAttrib(*ppMemDesc, NV_MEMORY_CACHED);
 
-                if ((flags & MEMDESC_FLAGS_OWNED_BY_CTX_BUF_POOL) != 0)
-                {
-                    //
-                    // Force page size to 4KB, we can change this later when RM
-                    // access method support 64k pages
-                    //
-                    memmgrSetMemDescPageSize_HAL(pGpu, pMemoryManager, *ppMemDesc, AT_GPU, RM_ATTR_PAGE_SIZE_4KB);
-                    NV_ASSERT_OK_OR_RETURN(memdescSetCtxBufPool(*ppMemDesc, pCtxBufPool));
-                }
-                memdescTagAllocList(status, NV_FB_ALLOC_RM_INTERNAL_OWNER_ACCESS_MAP, *ppMemDesc, pCtxAttr[GR_GLOBALCTX_BUFFER_PRIV_ACCESS_MAP].pAllocList);
-                NV_CHECK_OK_OR_RETURN(LEVEL_ERROR, status);
+                //
+                // Force page size to 4KB, we can change this later when RM
+                // access method support 64k pages
+                //
+                memmgrSetMemDescPageSize_HAL(pGpu, pMemoryManager, *ppMemDesc, AT_GPU, RM_ATTR_PAGE_SIZE_4KB);
+                NV_ASSERT_OK_OR_RETURN(memdescSetCtxBufPool(*ppMemDesc, pCtxBufPool));
+                NV_CHECK_OK_OR_RETURN(LEVEL_ERROR,
+                    memdescAllocList(*ppMemDesc, pCtxAttr[GR_GLOBALCTX_BUFFER_PRIV_ACCESS_MAP].pAllocList));
             }
 
             //
@@ -292,22 +257,16 @@ kgraphicsAllocGrGlobalCtxBuffers_GM200
                                   pCtxAttr[GR_GLOBALCTX_BUFFER_UNRESTRICTED_PRIV_ACCESS_MAP].cpuAttr,
                                   flags));
 
-                if (kgraphicsIsOverrideContextBuffersToGpuCached(pGpu, pKernelGraphics))
-                    memdescSetGpuCacheAttrib(*ppMemDesc, NV_MEMORY_CACHED);
+                //
+                // Force page size to 4KB, we can change this later when RM
+                // access method support 64k pages
+                //
+                memmgrSetMemDescPageSize_HAL(pGpu, pMemoryManager, *ppMemDesc, AT_GPU, RM_ATTR_PAGE_SIZE_4KB);
+                NV_ASSERT_OK_OR_RETURN(memdescSetCtxBufPool(*ppMemDesc, pCtxBufPool));
 
-                if ((flags & MEMDESC_FLAGS_OWNED_BY_CTX_BUF_POOL) != 0)
-                {
-                    //
-                    // Force page size to 4KB, we can change this later when RM
-                    // access method support 64k pages
-                    //
-                    memmgrSetMemDescPageSize_HAL(pGpu, pMemoryManager, *ppMemDesc, AT_GPU, RM_ATTR_PAGE_SIZE_4KB);
-                    NV_ASSERT_OK_OR_RETURN(memdescSetCtxBufPool(*ppMemDesc, pCtxBufPool));
-                }
-
-                memdescTagAllocList(status, NV_FB_ALLOC_RM_INTERNAL_OWNER_ACCESS_MAP, *ppMemDesc,
-                                     pCtxAttr[GR_GLOBALCTX_BUFFER_UNRESTRICTED_PRIV_ACCESS_MAP].pAllocList);
-                NV_CHECK_OK_OR_RETURN(LEVEL_ERROR, status);
+                NV_CHECK_OK_OR_RETURN(LEVEL_ERROR,
+                    memdescAllocList(*ppMemDesc,
+                                     pCtxAttr[GR_GLOBALCTX_BUFFER_UNRESTRICTED_PRIV_ACCESS_MAP].pAllocList));
             }
         }
     }

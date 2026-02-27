@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 1993-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 1993-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -49,9 +49,6 @@
 #define    HDCP_FLAGS_ABORT_DEVICE_INVALID     0x00080000 // Abort due to an invalid device in DP1.2 topology
 #define    HDCP_FLAGS_ABORT_HOP_LIMIT_EXCEEDED 0x80000000 // Abort, number of devices in DP1.2 topology exceeds supported limit
 
-#define    DP_TUNNEL_REQUEST_BW_MAX_TIME_MS          (1000U)
-#define    DP_TUNNEL_REQUEST_BW_POLLING_INTERVAL_MS    (10U)
-
 static inline unsigned getDataClockMultiplier(NvU64 linkRate, NvU64 laneCount)
 {
     //
@@ -79,13 +76,6 @@ namespace DisplayPort
         DP_TRANSPORT_MODE_MULTI_STREAM  = 2,
     } DP_TRANSPORT_MODE;
 
-    // Information required during compound query attach for MST
-    typedef struct _CompoundQueryAttachMSTInfo
-    {
-        ModesetInfo         localModesetInfo;
-        LinkConfiguration   lc;
-    } CompoundQueryAttachMSTInfo;
-
     struct ConnectorImpl : public Connector, DiscoveryManager::DiscoveryManagerEventSink, Timer::TimerCallback, MessageManager::MessageReceiver::MessageReceiverEventSink
     {
         // DPCD HAL Layer - We should use this in place of direct register accesses
@@ -99,18 +89,11 @@ namespace DisplayPort
         Timer * timer;                          // OS provided timer services
         Connector::EventSink * sink;            // Event Sink
 
-        // Cached Source OUI for restoring eDP OUI when powering up
-        unsigned cachedSourceOUI;
-        char     cachedSourceModelName[NV_DPCD_SOURCE_DEV_ID_STRING__SIZE + 1];
-        NvU8     cachedSourceChipRevision;
-        bool     bOuiCached;
+        unsigned ouiId;                                             // Sink ouiId
+        char modelName[NV_DPCD_SOURCE_DEV_ID_STRING__SIZE + 1];     // Device Model-name
+        bool    bIgnoreSrcOuiHandshake;                             // Skip writing source OUI
 
-        unsigned ouiId;                                                   // Sink ouiId
-        unsigned char modelName[NV_DPCD_SOURCE_DEV_ID_STRING__SIZE + 1];  // Device Model-name
-        bool    bIgnoreSrcOuiHandshake;                                   // Skip writing source OUI
-
-        LinkPolicy    linkPolicy;
-
+        LinkPolicy  linkPolicy;
         bool    linkGuessed;                    // True when link was "guessed" during HPD in TMDS mode
         bool    isLinkQuiesced;                 // True when link was set to quiet mode by TMDS modeset
 
@@ -137,7 +120,6 @@ namespace DisplayPort
         bool    bPConConnected;                 // HDMI2.1-Protocol Converter (Support SRC control mode) connected.
         bool    bSkipAssessLinkForPCon;         // Skip assessLink() for PCON. DD will call assessFRLLink later.
         bool    bHdcpAuthOnlyOnDemand;          // True if only initiate Hdcp authentication on demand and MST won't auto-trigger authenticate at device attach.
-        bool    bReassessMaxLink;               // Retry assessLink() if the first assessed link config is lower than the panel max config.
 
         bool    constructorFailed;
 
@@ -188,20 +170,13 @@ namespace DisplayPort
         LinkedList<GroupImpl> addStreamMSTIntransitionGroups;
         List inactiveGroups;
 
-        LinkedList<Device> dscEnabledDevices;
-
         // Compound query
         bool compoundQueryActive;
         bool compoundQueryResult;
         unsigned compoundQueryCount;
         unsigned compoundQueryLocalLinkPBN;
-        NvU64 compoundQueryUsedTunnelingBw;
-        bool compoundQueryForceEnableFEC;
-        bool bDP2XPreferNonDSCForLowPClk;
 
-        unsigned freeSlots;
-        unsigned maximumSlots;
-        int firstFreeSlot;
+        unsigned freeSlots, maximumSlots;
 
         // Multistream messaging
         MessageManager *    messageManager;
@@ -215,7 +190,6 @@ namespace DisplayPort
         // this is the link config requested by a client.
         // can be set and reset by the client for a given operation.
         LinkConfiguration preferredLinkConfig;
-        bool forcePreferredLinkConfig;
 
         //
         // Desired link configuration of single head multiple sst secondary connector.
@@ -259,25 +233,11 @@ namespace DisplayPort
         // Flag to check if the system is UEFI.
         bool        bIsUefiSystem;
 
-        //
-        // Flag to ensure we take into account that
-        // Displayport++ supports HDMI as well.
-        //
-        bool        bHDMIOnDPPlusPlus;
-
-        //
-        // Flag to enable accounting available DP tunnelling BW while generating PPS
-        // for the mode
-        //
-        bool        bOptimizeDscBppForTunnellingBw;
-
-        bool        bSkipResetLinkStateDuringPlug;
-
         // Flag to check if LT should be skipped.
         bool        bSkipLt;
 
         // Flag to make sure that zombie gets triggred when a powerChange event happens
-        bool        bMitigateZombie;
+        bool bMitigateZombie;
 
         //
         // HP Valor QHD+ N15P-Q3 EDP needs 50ms delay after D3
@@ -328,22 +288,8 @@ namespace DisplayPort
         //
         bool        bNoFallbackInPostLQA;
 
-        //
-        // Set to true when we do not want DSC to be limited
-        // to 16 BPP for multitile on Blackwell++
-        //
-        bool        bDisableDscMaxBppLimit;
-
-        //
-        // Set to true when we want to force head shutdown
-        // when DSC mode or bpc is changed but LT is still same
-        //
-        bool        bForceHeadShutdownOnModeTransition;
-
-        // Set to true when we want to skip reset MST_EN before LT
-        bool        bSkipResetMSTMBeforeLt;
-
         bool        bReportDeviceLostBeforeNew;
+        bool        bEnableAudioBeyond48K;
         bool        bDisableSSC;
         bool        bEnableFastLT;
         NvU32       maxLinkRateFromRegkey;
@@ -353,15 +299,6 @@ namespace DisplayPort
         // 2561206.
         //
         NvU32       LT2FecLatencyMs;
-
-        bool        bIgnoreCapsAndForceHighestLc;
-
-        // On eDP, do not cache the source OUI if it reads 0. See bug 4793112
-        bool        bSkipZeroOuiCache;
-
-        bool        bForceHeadShutdownFromRegkey;
-
-        bool        bForceHeadShutdownPerMonitor;
 
         //
         // Dual SST Partner connector object pointer
@@ -379,57 +316,39 @@ namespace DisplayPort
         bool        bDscMstCapBug3143315;
 
         //
+        // Enable DSC Pass through support in driver based on regkey.
+        //
+        bool        bDscMstEnablePassThrough;
+
+        // Reduce number of 2H1OR LTs which fixes bug 3534707
+        bool        bDscOptimizeLTBug3534707;
+
+        //
         // Synaptics branch device doesn't support Virtual Peer Devices so DSC
         // capability of downstream device should be decided based on device's own
         // and its parent's DSC capability
         //
         bool        bDscCapBasedOnParent;
 
-        //
-        // MST device connnected to dock may issue IRQ for link lost.
-        // Send PowerDown path msg to suppress that.
-        //
-        bool        bPowerDownPhyBeforeD3;
-
-        //
-        // Reset the MSTM_CTRL registers on branch device irrespective of
-        // IRQ VECTOR register having stale message. Certain branch devices
-        // need to reset the topology before issuing new discovery commands
-        // as there can be case where previous is still in process and a
-        // possibility that clearPendingMessage() might not be able to catch
-        // the stale messages from previous discovery.
-        //
-        bool        bForceClearPendingMsg;
-        NvU64       allocatedDpTunnelBw;
-        NvU64       allocatedDpTunnelBwShadow;
-        bool        bForceDisableTunnelBwAllocation;
-        bool        bDisableEffBppSST8b10b;
-
-        // Use regkey DP_DSC_DEVID_WAR to toggle this flag.
-        bool        bEnableDevId;
-
-        Group *perHeadAttachedGroup[NV_MAX_HEADS];
-        NvU32 inTransitionHeadMask;
-
         void sharedInit();
         ConnectorImpl(MainLink * main, AuxBus * auxBus, Timer * timer, Connector::EventSink * sink);
+
         void setPolicyModesetOrderMitigation(bool enabled);
         void setPolicyForceLTAtNAB(bool enabled);
         void setPolicyAssessLinkSafely(bool enabled);
 
         void discoveryDetectComplete();
-        void discoveryNewDevice(const DiscoveryManager::Device &device);
-        void discoveryLostDevice(const Address &address);
-        void processNewDevice(const DiscoveryManager::Device &device,
-            const Edid &edid,
+        void discoveryNewDevice(const DiscoveryManager::Device & device);
+        void discoveryLostDevice(const Address & address);
+        void processNewDevice(const DiscoveryManager::Device & device,
+            const Edid & edid,
             bool isMultistream,
             DwnStreamPortType portType,
             DwnStreamPortAttribute portAttribute,
             bool isCompliance = false);
 
-        void applyEdidWARs(Edid &edid, DiscoveryManager::Device &device);
-        virtual void handleEdidWARs(Edid &edid, DiscoveryManager::Device &device){};
-        void applyRegkeyOverrides(const DP_REGKEY_DATABASE &dpRegkeyDatabase);
+        void applyEdidWARs(Edid & edid, DiscoveryManager::Device device);
+        void applyRegkeyOverrides(const DP_REGKEY_DATABASE& dpRegkeyDatabase);
 
         ResStatusNotifyMessage ResStatus;
 
@@ -443,22 +362,18 @@ namespace DisplayPort
         virtual void hardwareWasReset();
         virtual LinkConfiguration getMaxLinkConfig();
         virtual LinkConfiguration getActiveLinkConfig();
-        void powerdownLink(bool bPowerdownPanel = false);
-        LinkConfiguration initMaxLinkConfig();
+        virtual void powerdownLink(bool bPowerdownPanel = false);
 
         GroupImpl * getActiveGroupForSST();
         bool detectSinkCountChange();
-
-        virtual bool handlePhyPatternRequest();
-        virtual bool handleTestLinkTrainRequest();
-        virtual void applyOuiWARs();
+        bool handlePhyPatternRequest();
+        void applyOuiWARs();
         bool linkUseMultistream()
         {
             return (linkState == DP_TRANSPORT_MODE_MULTI_STREAM);
         }
 
-        virtual void populateAllDpConfigs();
-        virtual LinkRates* importDpLinkRates();
+        void populateAllDpConfigs();
 
         //
         //  Suspend resume API
@@ -476,7 +391,7 @@ namespace DisplayPort
         virtual Device * enumDevices(Device * previousDevice) ;
 
 
-        virtual void beginCompoundQuery(const bool bForceEnableFEC = false) ;
+        virtual void beginCompoundQuery() ;
         virtual bool compoundQueryAttach(Group * target,
             unsigned twoChannelAudioHz,         // if you need 192khz stereo specify 192000 here
             unsigned eightChannelAudioHz,       // Same setting for multi channel audio.
@@ -486,66 +401,13 @@ namespace DisplayPort
             unsigned rasterHeight,
             unsigned rasterBlankStartX,
             unsigned rasterBlankEndX,
-            unsigned depth,
-            DP_IMP_ERROR *errorStatus = NULL);
+            unsigned depth);
 
         virtual bool compoundQueryAttach(Group * target,
                                          const DpModesetParams &modesetParams,      // Modeset info
-                                         DscParams *pDscParams = NULL,              // DSC parameters
-                                         DP_IMP_ERROR *pErrorCode = NULL);          // Error Status code
-        virtual bool compoundQueryAttachTunneling(const DpModesetParams &modesetParams,
-                                                  DscParams *pDscParams = NULL,
-                                                  DP_IMP_ERROR *pErrorCode = NULL);
+                                         DscParams *pDscParams = NULL);             // DSC parameters
 
         virtual bool endCompoundQuery();
-
-        virtual bool dpLinkIsModePossible(const DpLinkIsModePossibleParams &params);
-
-        virtual bool compoundQueryAttachMST(Group * target,
-                                            const DpModesetParams &modesetParams,      // Modeset info
-                                            DscParams *pDscParams = NULL,              // DSC parameters
-                                            DP_IMP_ERROR *pErrorCode = NULL);          // Error Status code
-
-        virtual bool compoundQueryAttachMSTIsDscPossible
-        (
-            Group * target,
-            const DpModesetParams &modesetParams,      // Modeset info
-            DscParams *pDscParams = NULL               // DSC parameters
-        );
-
-        // Calculate and Configure SW state based on DSC
-        virtual bool compoundQueryAttachMSTDsc
-        (
-            Group * target,
-            const DpModesetParams &modesetParams,      // Modeset info
-            CompoundQueryAttachMSTInfo * info,         // local info to update for later use
-            DscParams *pDscParams = NULL,              // DSC parameters
-            DP_IMP_ERROR *pErrorCode = NULL            // Error Status code
-        );
-
-        // General part of CQA MST for DSC/non-DSC
-        virtual bool compoundQueryAttachMSTGeneric
-        (
-            Group * target,
-            const DpModesetParams &modesetParams,       // Modeset info
-            CompoundQueryAttachMSTInfo * info,          // local info with updates for DSC
-            DscParams *pDscParams = NULL,               // DSC parameters
-            DP_IMP_ERROR *pErrorCode = NULL             // Error Status code
-        );
-
-        virtual bool compoundQueryAttachSST(Group * target,
-                                            const DpModesetParams &modesetParams,      // Modeset info
-                                            DscParams *pDscParams = NULL,              // DSC parameters
-                                            DP_IMP_ERROR *pErrorCode = NULL);          // Error Status code
-
-        virtual bool compoundQueryAttachSSTIsDscPossible(const DpModesetParams &modesetParams,
-                                                         DscParams *pDscParams = NULL);
-
-        virtual bool compoundQueryAttachSSTDsc(const DpModesetParams &modesetParams,
-                                               LinkConfiguration lc,
-                                               DscParams *pDscParams = NULL,
-                                               DP_IMP_ERROR *pErrorCode = NULL);
-
 
         //
         //  Timer callback tags.
@@ -555,7 +417,6 @@ namespace DisplayPort
         char tagHDCPReauthentication;
         char tagDelayedHdcpCapRead;
         char tagDelayedHDCPCPIrqHandling;
-        char tagDpBwAllocationChanged;
 
         //
         //  Enable disable TMDS mode
@@ -585,11 +446,6 @@ namespace DisplayPort
         virtual bool notifyAttachBegin(Group * target,      // Group of panels we're attaching to this head
             const DpModesetParams &modesetParams);
 
-        bool needToEnableFEC(const DpPreModesetParams &params);
-
-        virtual void dpPreModeset(const DpPreModesetParams &modesetParams);
-        virtual void dpPostModeset(void);
-
         virtual bool isHeadShutDownNeeded(Group * target,   // Group of panels we're attaching to this head
             unsigned headIndex,
             unsigned twoChannelAudioHz,         // if you need 192khz stereo specify 192000 here
@@ -617,21 +473,12 @@ namespace DisplayPort
         virtual void notifyAttachEnd(bool modesetCancelled);
         virtual void notifyDetachBegin(Group * target);
         virtual void notifyDetachEnd(bool bKeepOdAlive = false);
-        virtual bool willLinkSupportModeSST(const LinkConfiguration &linkConfig,
-                                            const ModesetInfo &modesetInfo,
-                                            const DscParams *pDscParams = NULL);
 
         bool performIeeeOuiHandshake();
         void setIgnoreSourceOuiHandshake(bool bIgnore);
         bool getIgnoreSourceOuiHandshake();
+        bool willLinkSupportModeSST(const LinkConfiguration & linkConfig, const ModesetInfo & modesetInfo);
         void forceLinkTraining();
-
-        bool     updateDpTunnelBwAllocation();
-        TriState requestDpTunnelBw(NvU8 requestedBw);
-        bool     allocateDpTunnelBw(NvU64 bandwidth);
-        bool     allocateMaxDpTunnelBw();
-        NvU64    getMaxTunnelBw();
-        void     enableDpTunnelingBwAllocationSupport();
 
         void assessLink(LinkTrainingType trainType = NORMAL_LINK_TRAINING);
 
@@ -654,8 +501,7 @@ namespace DisplayPort
         }
         bool trainLinkOptimized(LinkConfiguration lConfig);
         bool trainLinkOptimizedSingleHeadMultipleSST(GroupImpl * group);
-        virtual bool getValidLowestLinkConfig(LinkConfiguration &lConfig, LinkConfiguration &lowestSelected,
-                                              ModesetInfo queryModesetInfo, const DscParams *pDscParams = NULL);
+        bool getValidLowestLinkConfig(LinkConfiguration & lConfig, LinkConfiguration & lowestSelected, ModesetInfo queryModesetInfo);
         bool postLTAdjustment(const LinkConfiguration &, bool force);
         void populateUpdatedLaneSettings(NvU8* voltageSwingLane, NvU8* preemphasisLane, NvU32 *data);
         void populateDscCaps(DSC_INFO* dscInfo, DeviceImpl * dev, DSC_INFO::FORCED_DSC_PARAMS* forcedParams);
@@ -665,8 +511,8 @@ namespace DisplayPort
         void populateDscBranchCaps(DSC_INFO* dscInfo, DeviceImpl * dev);
         void populateDscModesetInfo(MODESET_INFO * pModesetInfo, const DpModesetParams * pModesetParams);
 
-        virtual bool train(const LinkConfiguration &lConfig, bool force, LinkTrainingType trainType = NORMAL_LINK_TRAINING);
-        virtual bool validateLinkConfiguration(const LinkConfiguration &lConfig);
+        bool train(const LinkConfiguration & lConfig, bool force, LinkTrainingType trainType = NORMAL_LINK_TRAINING);
+        bool validateLinkConfiguration(const LinkConfiguration & lConfig);
 
         virtual bool assessPCONLinkCapability(PCONLinkControl *params);
         bool trainPCONFrlLink(PCONLinkControl *pConControl);
@@ -675,44 +521,39 @@ namespace DisplayPort
         bool setDeviceDscState(Device * dev, bool bEnableDsc);
 
         // the lowest level function(nearest to the hal) for the connector.
-        bool rawTrain(const LinkConfiguration &lConfig, bool force, LinkTrainingType linkTrainingType);
+        bool rawTrain(const LinkConfiguration & lConfig, bool force, LinkTrainingType linkTrainingType);
 
-        virtual bool enableFlush();
-        virtual bool beforeAddStream(GroupImpl * group, bool force=false, bool forFlushMode = false);
-        virtual void afterAddStream(GroupImpl * group);
-        virtual void beforeDeleteStream(GroupImpl * group, bool forFlushMode = false);
-        virtual void afterDeleteStream(GroupImpl * group);
-        virtual void disableFlush(bool test=false);
+        bool enableFlush();
+        bool beforeAddStream(GroupImpl * group, bool force=false, bool forFlushMode = false);
+        void afterAddStream(GroupImpl * group);
+        void beforeDeleteStream(GroupImpl * group, bool forFlushMode = false);
+        void afterDeleteStream(GroupImpl * group);
+        void disableFlush(bool test=false);
 
         bool beforeAddStreamMST(GroupImpl * group, bool force = false, bool forFlushMode = false);
 
-        virtual bool checkIsModePossibleMST(GroupImpl * group);
-
         bool deleteAllVirtualChannels();
         void clearTimeslices();
-        virtual void applyTimeslotWAR(unsigned &slot_count){};
-        virtual bool allocateTimeslice(GroupImpl * targetGroup);
+        bool allocateTimeslice(GroupImpl * targetGroup);
         void freeTimeslice(GroupImpl * targetGroup);
         void flushTimeslotsToHardware();
         bool getHDCPAbortCodesDP12(NvU32 &hdcpAbortCodesDP12);
-        bool getOuiSink(unsigned &ouiId, unsigned char * modelName, size_t modelNameBufferSize, NvU8 &chipRevision);
+        bool getOuiSink(unsigned &ouiId, char * modelName, size_t modelNameBufferSize, NvU8 & chipRevision);
         bool hdcpValidateKsv(const NvU8 *ksv, NvU32 Size);
         void cancelHdcpCallbacks();
         bool handleCPIRQ();
         void handleSSC();
         void handleMCCSIRQ();
-        void handleDpTunnelingIrq();
         void handleHdmiLinkStatusChanged();
         void sortActiveGroups(bool ascending);
-        void handlePanelReplayError();
+        void configInit();
 
-        virtual void configInit();
-        virtual DeviceImpl* findDeviceInList(const Address &address);
+        virtual DeviceImpl* findDeviceInList(const Address & address);
         virtual void disconnectDeviceList();
         void notifyLongPulseInternal(bool statusConnected);
         virtual void notifyLongPulse(bool status);
         virtual void notifyShortPulse();
-        virtual Group * newGroup();
+        virtual Group * newGroup() ;
         virtual void destroy();
         virtual void createFakeMuxDevice(const NvU8 *buffer, NvU32 bufferSize);
         virtual void deleteFakeMuxDevice();
@@ -723,10 +564,7 @@ namespace DisplayPort
         virtual bool isFECSupported();
         virtual bool isFECCapable();
         virtual NvU32 maxLinkRateSupported();
-        bool setPreferredLinkConfig(LinkConfiguration &lc, bool commit,
-                                    bool force = false,
-                                    LinkTrainingType trainType = NORMAL_LINK_TRAINING,
-                                    bool forcePreferredLinkConfig = false);
+        virtual bool setPreferredLinkConfig(LinkConfiguration & lc, bool commit, bool force = false, LinkTrainingType trainType = NORMAL_LINK_TRAINING);
         virtual bool resetPreferredLinkConfig(bool force = false);
         virtual void setAllowMultiStreaming(bool bAllowMST);
         virtual bool getAllowMultiStreaming(void);
@@ -734,42 +572,17 @@ namespace DisplayPort
         virtual void setDp11ProtocolForced();
         virtual void resetDp11ProtocolForced();
         virtual bool isDp11ProtocolForced();
-
         bool isAcpiInitDone();
         virtual void notifyAcpiInitDone();
         Group * createFirmwareGroup();
         virtual void notifyGPUCapabilityChange();
         virtual void notifyHBR2WAREngage();
-        bool dpUpdateDscStream(Group *target, NvU32 dscBpp);
 
         bool getTestPattern(NV0073_CTRL_DP_TESTPATTERN *testPattern);
         bool setTestPattern(NV0073_CTRL_DP_TESTPATTERN testPattern, NvU8 laneMask, NV0073_CTRL_DP_CSTM cstm, NvBool bIsHBR2, NvBool bSkipLaneDataOverride = false);
         bool getLaneConfig(NvU32 *numLanes, NvU32 *data);    // "data" is an array of NV0073_CTRL_MAX_LANES unsigned ints
         bool setLaneConfig(NvU32 numLanes, NvU32 *data);    // "data" is an array of NV0073_CTRL_MAX_LANES unsigned ints
-        // "data" is an array of NV0073_CTRL_MAX_LANES unsigned ints
-        virtual bool getDp2xLaneConfig(NvU32 *numLanes, NvU32 *data)
-        {
-            // The function is only for Connector class 2x (or later) that supports 128b/132b channel coding.
-            return false;
-        }
-        // "data" is an array of NV0073_CTRL_MAX_LANES unsigned ints
-        virtual bool setDp2xLaneConfig(NvU32 numLanes, NvU32 *data)
-        {
-            // The function is only for Connector class 2x (or later) that supports 128b/132b channel coding.
-            return false;
-        }
-
-        virtual void setDisableDownspread(bool _bDisableDownspread)
-        {
-            return;
-        }
-        virtual bool getDownspreadDisabled()
-        {
-            return false;
-        }
-
-        void getCurrentLinkConfig(unsigned &laneCount, NvU64 &linkRate);  // CurrentLink Configuration
-        void getCurrentLinkConfigWithFEC(unsigned &laneCount, NvU64 &linkRate, bool &bFECEnabled);
+        void getCurrentLinkConfig(unsigned & laneCount, NvU64 & linkRate);  // CurrentLink Configuration
         unsigned getPanelDataClockMultiplier();
         unsigned getGpuDataClockMultiplier();
         void configurePowerState(bool bPowerUp);
@@ -782,9 +595,7 @@ namespace DisplayPort
         virtual bool writePsrEvtIndicator(vesaPsrEventIndicator psrErr);
         virtual bool readPsrEvtIndicator(vesaPsrEventIndicator *psrErr);
         virtual bool readPsrState(vesaPsrState *psrState);
-        virtual bool updatePsrLinkState(bool bTurnOnLink);
-
-        virtual bool readPrSinkDebugInfo(panelReplaySinkDebugInfo *prDbgInfo);
+        virtual bool updatePsrLinkState(bool bTrainLink);
 
         // for dp test utility. pBuffer is the request buffer of type DP_STATUS_REQUEST_xxxx
         DP_TESTMESSAGE_STATUS sendDPTestMessage(void *pBuffer,
@@ -807,16 +618,16 @@ namespace DisplayPort
     //
     struct DevicePendingEDIDRead : protected EdidReadMultistream::EdidReadMultistreamEventSink, public ListElement
     {
-        ConnectorImpl *          parent;
-        DiscoveryManager::Device device;
         EdidReadMultistream      reader;
+        DiscoveryManager::Device device;
+        ConnectorImpl *          parent;
 
         void mstEdidCompleted(EdidReadMultistream * from);
         void mstEdidReadFailed(EdidReadMultistream * from);
 
     public:
         DevicePendingEDIDRead(ConnectorImpl *  _parent, MessageManager * manager, DiscoveryManager::Device dev)
-            : parent(_parent), device(dev), reader(_parent->timer, manager, this, dev.address)
+            : reader(_parent->timer, manager, this, dev.address), device(dev), parent(_parent)
         {
         }
     };

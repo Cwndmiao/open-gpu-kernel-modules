@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2015-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,7 +21,6 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#pragma once
 #include "g_rs_client_nvoc.h"
 
 #ifndef _RS_CLIENT_H_
@@ -86,16 +85,6 @@ public:
     NvBool bResourceWarning;
 
     /**
-     * True if client is disabled, awaiting free
-     */
-    NvBool bDisabled;
-
-    /**
-     * True if client's high priority resources were freed
-     */
-    NvBool bHighPriorityFreeDone;
-
-    /**
      * Maps resource handle -> RsResourceRef
      */
     RsRefMap resourceMap;
@@ -150,11 +139,6 @@ public:
      * Information about recursive resource free calls is stored here
      */
     RS_FREE_STACK *pFreeStack;
-
-    /**
-     * Node for a client's disabled client list
-     */
-    ListNode disabledClientNode;
 
     /**
      * Construct a client instance
@@ -223,27 +207,6 @@ public:
     virtual NV_STATUS clientValidate(RsClient *pClient, const API_SECURITY_INFO * pSecInfo);
 
     /**
-     * Validate that current process has the required locks to use this client
-     * @param[in]   pClient This client
-     * @param[in]   pServer Resource Server instance
-     * @param[in]   pClientEntry Client entry of the client
-     */
-    virtual NV_STATUS clientValidateLocks(RsClient *pClient, RsServer *pServer, const CLIENT_ENTRY *pClientEntry);
-
-    /**
-     * Stub virtual function
-     * @param[in] NvHandle hClient
-     */
-    virtual RS_PRIV_LEVEL clientGetCachedPrivilege(RsClient *pClient);
-
-    /**
-     * Stub virtual function
-     * @param[in] NvHandle hClient
-     * @param[in] RS_PRIV_LEVEL privLevel
-     */
-    virtual NvBool clientIsAdmin(RsClient *pClient, RS_PRIV_LEVEL privLevel);
-
-    /**
      * Allocate a resource in RM for this client
      * @param[in]       pClient This client
      * @param[in]       pServer
@@ -275,8 +238,7 @@ public:
      * @param[in] pClient This client
      * @param[in] pResourceRef The reference to free
      */
-    virtual NV_STATUS clientDestructResourceRef(RsClient *pClient, RsServer *pServer, RsResourceRef *pResourceRef,
-                                                RS_LOCK_INFO *pLockInfo, API_SECURITY_INFO *pSecInfo);
+    virtual NV_STATUS clientDestructResourceRef(RsClient *pClient, RsServer *pServer, RsResourceRef *pResourceRef);
 
    /**
      * Unmap a mapping that belongs to a resource reference in this client.
@@ -306,7 +268,7 @@ public:
      * @param[in]  pMapperRef The reference that was was used to create the mapping
      * @param[in]  pParams parameters describing the unmapping
      */
-    virtual NV_STATUS clientInterUnmap(RsClient *pClient, RsResourceRef *pMapperRef, RS_INTER_UNMAP_PARAMS *pParams);
+    virtual void clientInterUnmap(RsClient *pClient, RsResourceRef *pMapperRef, RS_INTER_UNMAP_PARAMS *pParams);
 
     /**
      * Generate an unused handle for a resource. The handle will be generated in the white-listed range that was
@@ -437,7 +399,6 @@ public:
      */
     NV_STATUS clientSetRestrictedRange(RsClient *pClient, NvHandle handleRangeStart, NvU32 handleRangeSize);
 };
-MAKE_INTRUSIVE_LIST(RsDisabledClientList, RsClient, disabledClientNode);
 
 /**
  * Get an iterator to the elements in the client's resource map
@@ -480,14 +441,6 @@ RS_ORDERED_ITERATOR clientRefOrderedIter(RsClient *pClient, RsResourceRef *pScop
  */
 NvBool clientRefOrderedIterNext(RsClient *pClient, RS_ORDERED_ITERATOR *pIt);
 
-/**
- * Release all CPU address mappings for a resource
- *
- * @param[in] pClient Client that owns the resource
- * @param[in] pCallContext Caller information (which includes the resource reference whose mappings will be freed)
- * @param[in] pLockInfo Information about which locks are already held, for recursive calls
- */
-NV_STATUS clientUnmapResourceRefMappings(RsClient *pClient, CALL_CONTEXT *pCallContext, RS_LOCK_INFO *pLockInfo);
 
 /**
  * RsResource interface to a RsClient
@@ -522,7 +475,6 @@ struct RS_CLIENT_FREE_PARAMS_INTERNAL
     NvHandle hDomain;           ///< [in] The parent domain
     NvHandle hClient;           ///< [in] The client handle
     NvBool   bHiPriOnly;        ///< [in] Only free high priority resources
-    NvBool   bDisableOnly;      ///< [in] Only disable the listed clients, do not free them yet
     NvU32    state;             ///< [in] User-defined state
 
     RS_RES_FREE_PARAMS_INTERNAL *pResFreeParams; ///< [in] Necessary for locking state

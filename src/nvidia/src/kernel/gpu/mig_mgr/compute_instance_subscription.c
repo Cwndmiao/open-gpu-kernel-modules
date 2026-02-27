@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2019-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -28,12 +28,11 @@
  *
  *****************************************************************************/
 
-#define NVOC_COMPUTE_INSTANCE_SUBSCRIPTION_H_PRIVATE_ACCESS_ALLOWED
-
 #include "core/core.h"
 #include "gpu/gpu.h"
 #include "core/system.h"
 #include "os/os.h"
+#include "gpu/subdevice/subdevice.h"
 
 #include "kernel/gpu/mig_mgr/gpu_instance_subscription.h"
 #include "kernel/gpu/mig_mgr/compute_instance_subscription.h"
@@ -75,10 +74,10 @@ cisubscriptionConstruct_IMPL
     }
 
     NV_CHECK_OR_RETURN(LEVEL_SILENT, pUserParams->execPartitionId < KMIGMGR_MAX_COMPUTE_INSTANCES, NV_ERR_INVALID_ARGUMENT);
-    NV_CHECK_OR_RETURN(LEVEL_SILENT, gisubscriptionGetMIGGPUInstance(pGPUInstanceSubscription) != NULL, NV_ERR_INVALID_STATE);
-    NV_CHECK_OR_RETURN(LEVEL_SILENT, gisubscriptionGetMIGGPUInstance(pGPUInstanceSubscription)->bValid, NV_ERR_INVALID_STATE);
+    NV_CHECK_OR_RETURN(LEVEL_SILENT, pGPUInstanceSubscription->pKernelMIGGpuInstance != NULL, NV_ERR_INVALID_STATE);
+    NV_CHECK_OR_RETURN(LEVEL_SILENT, pGPUInstanceSubscription->pKernelMIGGpuInstance->bValid, NV_ERR_INVALID_STATE);
 
-    pMIGComputeInstance = &gisubscriptionGetMIGGPUInstance(pGPUInstanceSubscription)->MIGComputeInstance[pUserParams->execPartitionId];
+    pMIGComputeInstance = &pGPUInstanceSubscription->pKernelMIGGpuInstance->MIGComputeInstance[pUserParams->execPartitionId];
     NV_CHECK_OR_RETURN(LEVEL_SILENT, pMIGComputeInstance->bValid, NV_ERR_INVALID_ARGUMENT);
 
     //
@@ -125,7 +124,7 @@ cisubscriptionCopyConstruct_IMPL
     ComputeInstanceSubscription *pComputeInstanceSubscriptionSrc = dynamicCast(pSrcRef->pResource, ComputeInstanceSubscription);
     OBJGPU *pGpu = GPU_RES_GET_GPU(pComputeInstanceSubscription);
 
-    // non kernel clients are not allowed to dup MIG instances
+    // non kernel clients are not allowed to dup MIG instances 
     NV_CHECK_OR_RETURN(LEVEL_SILENT, pCallContext->secInfo.privLevel >= RS_PRIV_LEVEL_KERNEL,
                        NV_ERR_NOT_SUPPORTED);
 
@@ -217,9 +216,8 @@ cisubscriptionCtrlCmdGetUuid_IMPL
     portMemCopy(pParams->uuid, NVC638_UUID_LEN,
                 pComputeInstanceSubscription->pMIGComputeInstance->uuid.uuid, NV_UUID_LEN);
 
-    nvGetUuidString(&pComputeInstanceSubscription->pMIGComputeInstance->uuid,
-                    RM_UUID_PREFIX_MIG,
-                    pParams->uuidStr);
+    nvGetSmcUuidString(&pComputeInstanceSubscription->pMIGComputeInstance->uuid,
+                       pParams->uuidStr);
 
     return NV_OK;
 }

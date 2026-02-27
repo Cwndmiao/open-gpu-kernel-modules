@@ -86,9 +86,8 @@ enum NvKmsSurfaceMemoryFormat {
     NvKmsSurfaceMemoryFormatY12___V12U12_N420 = 32,
     NvKmsSurfaceMemoryFormatY8___U8___V8_N444 = 33,
     NvKmsSurfaceMemoryFormatY8___U8___V8_N420 = 34,
-    NvKmsSurfaceMemoryFormatRF16GF16BF16XF16  = 35,
     NvKmsSurfaceMemoryFormatMin = NvKmsSurfaceMemoryFormatI8,
-    NvKmsSurfaceMemoryFormatMax = NvKmsSurfaceMemoryFormatRF16GF16BF16XF16,
+    NvKmsSurfaceMemoryFormatMax = NvKmsSurfaceMemoryFormatY8___U8___V8_N420,
 };
 
 typedef struct NvKmsSurfaceMemoryFormatInfo {

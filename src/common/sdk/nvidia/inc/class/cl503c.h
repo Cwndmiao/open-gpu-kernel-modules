@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2009-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2009-2014 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,27 +21,29 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+#ifndef _cl503c_h_
+#define _cl503c_h_
 
-#pragma once
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#include <nvtypes.h>
+#include "nvtypes.h"
 
-//
-// This file was generated with FINN, an NVIDIA coding tool.
-// Source file:      class/cl503c.finn
-//
-
-#define NV50_THIRD_PARTY_P2P (0x503cU) /* finn: Evaluated from "NV503C_ALLOC_PARAMETERS_MESSAGE_ID" */
+#define   NV50_THIRD_PARTY_P2P                          (0x0000503c)
 
 /* NvRmAlloc parameters */
-#define NV503C_ALLOC_PARAMETERS_MESSAGE_ID (0x503cU)
-
-typedef struct NV503C_ALLOC_PARAMETERS {
+typedef struct {
     NvU32 flags;
 } NV503C_ALLOC_PARAMETERS;
 
 #define NV503C_ALLOC_PARAMETERS_FLAGS_TYPE                      1:0
-#define NV503C_ALLOC_PARAMETERS_FLAGS_TYPE_PROPRIETARY (0x00000000)
-#define NV503C_ALLOC_PARAMETERS_FLAGS_TYPE_BAR1        (0x00000001)
-#define NV503C_ALLOC_PARAMETERS_FLAGS_TYPE_NVLINK      (0x00000002)
+#define NV503C_ALLOC_PARAMETERS_FLAGS_TYPE_PROPRIETARY  (0x00000000)
+#define NV503C_ALLOC_PARAMETERS_FLAGS_TYPE_BAR1         (0x00000001)
+#define NV503C_ALLOC_PARAMETERS_FLAGS_TYPE_NVLINK       (0x00000002)
 
+#ifdef __cplusplus
+};     /* extern "C" */
+#endif
+
+#endif /* _cl503c_h_ */

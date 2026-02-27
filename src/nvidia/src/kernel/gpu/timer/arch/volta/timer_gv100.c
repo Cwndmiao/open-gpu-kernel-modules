@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -27,7 +27,7 @@
 \***************************************************************************/
 /* ------------------------- Includes --------------------------------------- */
 #include "gpu/gpu.h"
-#include "gpu/timer/objtmr.h"
+#include "objtmr.h"
 #include "published/volta/gv100/dev_timer.h"
 #include "published/volta/gv100/dev_usermode.h"
 /* ------------------------- Datatypes -------------------------------------- */
@@ -59,10 +59,10 @@ tmrSetCurrentTime_GV100
         NvU32 seconds;
         NvU32 useconds;
 
-        osGetSystemTime(&seconds, &useconds);
+        osGetCurrentTime(&seconds, &useconds);
 
         NV_PRINTF(LEVEL_INFO,
-            "osGetSystemTime returns 0x%x seconds, 0x%x useconds\n",
+            "osGetCurrentTime returns 0x%x seconds, 0x%x useconds\n",
             seconds, useconds);
 
         ns = ((NvU64)seconds * 1000000 + useconds) * 1000;
@@ -91,8 +91,8 @@ tmrSetCurrentTime_GV100
 NV_STATUS
 tmrGetGpuPtimerOffset_GV100
 (
-    OBJGPU  *pGpu,
-    OBJTMR  *pTmr,
+    POBJGPU  pGpu,
+    POBJTMR  pTmr,
     NvU32   *pGpuTimestampOffsetLo,
     NvU32   *pGpuTimestampOffsetHi
 )

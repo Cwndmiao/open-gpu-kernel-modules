@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2016-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -29,7 +29,6 @@
 #include "kernel/gpu/fifo/channel_descendant.h"
 #include "kernel/gpu/fifo/kernel_channel.h"
 #include "kernel/gpu/mig_mgr/kernel_mig_manager.h"
-#include "platform/sli/sli.h"
 
 NV_STATUS
 chandesConstruct_IMPL
@@ -47,7 +46,7 @@ chandesConstruct_IMPL
     RsResource       *pParent = NULL;
     KernelChannel    *pKernelChannel;
     CLASSDESCRIPTOR   internalClassDescriptor;
-    CLASSDESCRIPTOR  *pClassDescriptor;
+    PCLASSDESCRIPTOR  pClassDescriptor;
     KernelFifo       *pKernelFifo = GPU_GET_KERNEL_FIFO(pGpu);
     NvBool            bMIGInUse = IS_MIG_IN_USE(pGpu);
 
@@ -61,9 +60,9 @@ chandesConstruct_IMPL
     NV_ASSERT_OR_RETURN(pKernelChannel != NULL, NV_ERR_INVALID_OBJECT_PARENT);
 
     // Bad class creation can happen when GPU is in low power because class DB is invalid
-    NV_ASSERT(IS_VIRTUAL(pGpu) || gpuIsGpuFullPowerForPmResume(pGpu));
+    NV_ASSERT(gpuIsGpuFullPower(pGpu));
 
-    NV_ASSERT(rmapiLockIsOwner() || rmapiInRtd3PmPath());
+    NV_ASSERT(rmApiLockIsOwner() && rmGpuLockIsOwner());
 
     //
     // If debug mode is enabled on this GPU, check if the GPU is occupied by a
@@ -84,7 +83,7 @@ chandesConstruct_IMPL
     // engineType set in channel
     //
     if (kfifoIsPerRunlistChramEnabled(pKernelFifo) &&
-        (!RM_ENGINE_TYPE_IS_VALID(kchannelGetEngineType(pKernelChannel))))
+        (kchannelGetEngineType(pKernelChannel) == NV2080_ENGINE_TYPE_NULL))
     {
         NV_PRINTF(LEVEL_ERROR,
                   "Channel should have engineType associated with it\n");
@@ -96,11 +95,12 @@ chandesConstruct_IMPL
     // so engineType from channel gets first priority while determining class
     // descriptor. For legacy chips, we will fall back to user-allocated params
     // or default engine determination based on classId
+    // TO-DO - Restrict this for MIG and Ampere only however these checks should
+    // be removed once we move to per engine chid management.
     //
     if (kfifoIsHostEngineExpansionSupported(pKernelFifo) &&
-        RM_ENGINE_TYPE_IS_VALID(kchannelGetEngineType(pKernelChannel)) &&
-       ((gpuIsCCorApmFeatureEnabled(pGpu) || bMIGInUse) ||
-        kfifoIsPerRunlistChramEnabled(pKernelFifo)))
+        NV2080_ENGINE_TYPE_IS_VALID(kchannelGetEngineType(pKernelChannel)) &&
+       (gpuIsCCorApmFeatureEnabled(pGpu) || bMIGInUse))
     {
         if (rmapiutilIsExternalClassIdInternalOnly(pParams->externalClassId))
         {
@@ -114,7 +114,7 @@ chandesConstruct_IMPL
             //
             NV_ASSERT_OK_OR_RETURN(
                 kfifoEngineInfoXlate_HAL(pGpu, pKernelFifo,
-                                         ENGINE_INFO_TYPE_RM_ENGINE_TYPE, (NvU32)kchannelGetEngineType(pKernelChannel),
+                                         ENGINE_INFO_TYPE_NV2080, kchannelGetEngineType(pKernelChannel),
                                          ENGINE_INFO_TYPE_ENG_DESC, &engDesc));
             portMemSet(&internalClassDescriptor, 0, sizeof(internalClassDescriptor));
             internalClassDescriptor.externalClassId = pParams->externalClassId;
@@ -128,26 +128,26 @@ chandesConstruct_IMPL
             if ((status != NV_OK) || (pClassDescriptor->engDesc != ENG_SW))
             {
                 NvU32 engDesc;
-                RM_ENGINE_TYPE rmEngineType = kchannelGetEngineType(pKernelChannel);
+                NvU32 engineId = kchannelGetEngineType(pKernelChannel);
                 // detect the GRCE case where we may be allocating a CE object on GR channel
-                if ((status == NV_OK) && IS_CE(pClassDescriptor->engDesc) && RM_ENGINE_TYPE_IS_GR(rmEngineType))
+                if ((status == NV_OK) && IS_CE(pClassDescriptor->engDesc) && NV2080_ENGINE_TYPE_IS_GR(engineId))
                 {
                     //
                     // Get the partner CE of GR engine based on runqueue of this channel
                     // Use this partner CE alongside externalClassId to fetch the correct class descriptor
                     //
                     NV2080_CTRL_GPU_GET_ENGINE_PARTNERLIST_PARAMS partnerParams = {0};
-                    partnerParams.engineType = gpuGetNv2080EngineType(rmEngineType);
+                    partnerParams.engineType = engineId;
                     partnerParams.runqueue = kchannelGetRunqueue(pKernelChannel);
                     NV_ASSERT_OK_OR_RETURN(kfifoGetEnginePartnerList_HAL(pGpu, pKernelFifo, &partnerParams));
                     NV_ASSERT_OR_RETURN(partnerParams.numPartners == 1, NV_ERR_INVALID_STATE);
-                    rmEngineType = gpuGetRmEngineType(partnerParams.partnerList[0]);
+                    engineId = partnerParams.partnerList[0]; 
                 }
 
                 // Get the engDesc from engineType
                 NV_ASSERT_OK_OR_RETURN(kfifoEngineInfoXlate_HAL(pGpu, pKernelFifo,
-                                                                ENGINE_INFO_TYPE_RM_ENGINE_TYPE,
-                                                                (NvU32)rmEngineType,
+                                                                ENGINE_INFO_TYPE_NV2080,
+                                                                engineId,
                                                                 ENGINE_INFO_TYPE_ENG_DESC,
                                                                 &engDesc));
 
@@ -164,7 +164,7 @@ chandesConstruct_IMPL
         //
         ENGDESCRIPTOR engDesc = pParamToEngDescFn(pGpu, pParams->externalClassId,
                                                   pParams->pAllocParams);
-
+        
         if (rmapiutilIsExternalClassIdInternalOnly(pParams->externalClassId))
         {
             //
@@ -213,25 +213,25 @@ chandesConstruct_IMPL
         //
         engDesc = MKENGDESC(classId(KernelGraphics), GET_GR_IDX(engDesc));
     }
-    //
-    // skip checking engstate for CE, engine guaranteed to exist if pParamToEngDescFn is succesful
-    //
-    if (!IS_CE(engDesc))
+    else if (IS_CE(engDesc) && gpuGetEngstate(pGpu, engDesc) == NULL)
     {
-        void *pEngObject = gpuGetEngstate(pGpu, engDesc);
-        //
-        // In a kernel-only config, falcons are represented by KernelFalcons and do not have an
-        // engstate.
-        //
-        if (pEngObject == NULL)
-            pEngObject = kflcnGetKernelFalconForEngine(pGpu, engDesc);
+        // If CE is missing, check for KCE instead
+        engDesc = MKENGDESC(classId(KernelCE), GET_CE_IDX(engDesc));
+    }
 
-        if (pEngObject == NULL)
-        {
-            NV_PRINTF(LEVEL_ERROR, "engine is missing for class 0x%x\n",
-                    pParams->externalClassId);
-            return NV_ERR_INVALID_CLASS;
-        }
+    void *pEngObject = gpuGetEngstate(pGpu, engDesc);
+    //
+    // In a kernel-only config, falcons are represented by KernelFalcons and do not have an
+    // engstate.
+    //
+    if (pEngObject == NULL)
+        pEngObject = kflcnGetKernelFalconForEngine(pGpu, engDesc);
+
+    if (pEngObject == NULL)
+    {
+        NV_PRINTF(LEVEL_ERROR, "engine is missing for class 0x%x\n",
+                  pParams->externalClassId);
+        return NV_ERR_INVALID_CLASS;
     }
 
     pChannelDescendant->pKernelChannel = pKernelChannel;
@@ -245,8 +245,8 @@ chandesConstruct_IMPL
     if (status != NV_OK)
     {
         NV_PRINTF(LEVEL_ERROR,
-            "Invalid object allocation request on " FMT_CHANNEL_DEBUG_TAG "\n",
-            kchannelGetDebugTag(pKernelChannel));
+                  "Invalid object allocation request on channel:0x%08x\n",
+                  kchannelGetDebugTag(pKernelChannel));
         SLI_LOOP_RETURN(status);
     }
     SLI_LOOP_END
@@ -270,7 +270,7 @@ chandesDestruct_IMPL
     NV_STATUS          status;
 
     // scrub event references for this object
-    CliDelObjectEvents(RES_GET_REF(pChannelDescendant));
+    CliDelObjectEvents(RES_GET_CLIENT_HANDLE(pChannelDescendant), RES_GET_HANDLE(pChannelDescendant));
 
     status = kchannelDeregisterChild(pChannelDescendant->pKernelChannel, pChannelDescendant);
     NV_ASSERT(status == NV_OK);
@@ -282,7 +282,7 @@ NV_STATUS
 chandesGetSwMethods_IMPL
 (
     ChannelDescendant *pChannelDescendant,
-    const METHOD     **ppMethods,
+    METHOD           **ppMethods,
     NvU32             *pNumMethods
 )
 {
@@ -301,6 +301,7 @@ NV_STATUS mthdNoOperation
 (
     OBJGPU *pGpu,
     ChannelDescendant *Object,
+    PMETHOD Method,
     NvU32   Offset,
     NvU32   Data
 )

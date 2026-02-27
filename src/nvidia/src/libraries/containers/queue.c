@@ -22,6 +22,9 @@
  */
 #include "containers/queue.h"
 
+#define MEM_RD64(a) ((NvLength) (*(volatile NvU64 *)(a)))
+#define MEM_WR64(a, d) do { *(volatile NvU64 *)(a) = (NvU64)(d); } while (0)
+
 #define MEM_WR(a, d) portMemCopy((a), sizeof(*(a)), &(d), sizeof(d))
 #define MEM_RD(v, a) portMemCopy(&(v), sizeof(v), (a), sizeof(*(a)))
 
@@ -39,10 +42,10 @@ NV_STATUS circularQueueInitCommon
 
     MEM_WR(&pQueue->pData, pData);
     MEM_WR(&pQueue->pAllocator, pAllocator);
-    PORT_MEM_WR64(&pQueue->msgSize, msgSize);
-    PORT_MEM_WR64(&pQueue->capacity, capacity);
-    PORT_MEM_WR64(&pQueue->getIdx, 0);
-    PORT_MEM_WR64(&pQueue->putIdx, 0);
+    MEM_WR64(&pQueue->msgSize, msgSize);
+    MEM_WR64(&pQueue->capacity, capacity);
+    MEM_WR64(&pQueue->getIdx, 0);
+    MEM_WR64(&pQueue->putIdx, 0);
 
     return NV_OK;
 }
@@ -50,8 +53,8 @@ NV_STATUS circularQueueInitCommon
 static
 NvLength queueGetCount(Queue *pQueue)
 {
-    NvLength get = PORT_MEM_RD64(&pQueue->getIdx);
-    NvLength put = PORT_MEM_RD64(&pQueue->putIdx);
+    NvLength get = MEM_RD64(&pQueue->getIdx);
+    NvLength put = MEM_RD64(&pQueue->putIdx);
 
     if (put >= get)
     {
@@ -59,7 +62,7 @@ NvLength queueGetCount(Queue *pQueue)
     }
     else
     {
-        return put + PORT_MEM_RD64(&pQueue->capacity) - get;
+        return put + MEM_RD64(&pQueue->capacity) - get;
     }
 }
 
@@ -120,9 +123,9 @@ void circularQueueDestroy_IMPL(Queue *pQueue)
 
     NV_ASSERT_OR_RETURN_VOID(NULL != pQueue);
 
-    PORT_MEM_WR64(&pQueue->capacity, 1);
-    PORT_MEM_WR64(&pQueue->getIdx, 0);
-    PORT_MEM_WR64(&pQueue->putIdx, 0);
+    MEM_WR64(&pQueue->capacity, 1);
+    MEM_WR64(&pQueue->getIdx, 0);
+    MEM_WR64(&pQueue->putIdx, 0);
     MEM_RD(pAllocator, &pQueue->pAllocator);
 
     if (pAllocator)
@@ -133,7 +136,7 @@ NvLength circularQueueCapacity_IMPL(Queue *pQueue)
 {
     NV_ASSERT_OR_RETURN(NULL != pQueue, 0);
 
-    return PORT_MEM_RD64(&pQueue->capacity) - 1;
+    return MEM_RD64(&pQueue->capacity) - 1;
 }
 
 NvLength circularQueueCount_IMPL(Queue *pQueue)
@@ -167,9 +170,9 @@ NvLength circularQueuePushNonManaged_IMPL
 
     NV_ASSERT_OR_RETURN(NULL != pQueue, 0);
 
-    putIdx = PORT_MEM_RD64(&pQueue->putIdx);
-    msgSize = PORT_MEM_RD64(&pQueue->msgSize);
-    capacity = PORT_MEM_RD64(&pQueue->capacity);
+    putIdx = MEM_RD64(&pQueue->putIdx);
+    msgSize = MEM_RD64(&pQueue->msgSize);
+    capacity = MEM_RD64(&pQueue->capacity);
 
     // Calculate the elements to copy
     cntLimit = capacity - queueGetCount(pQueue) - 1;
@@ -205,7 +208,7 @@ NvLength circularQueuePushNonManaged_IMPL
 
         // The data must land before index update.
         portAtomicMemoryFenceStore();
-        PORT_MEM_WR64(&pQueue->putIdx, (putIdx + remainingElemToCpy) % capacity);
+        MEM_WR64(&pQueue->putIdx, (putIdx + remainingElemToCpy) % capacity);
     }
 
     return numElements;
@@ -248,12 +251,12 @@ void circularQueuePop_IMPL(Queue *pQueue)
 
     NV_ASSERT_OR_RETURN_VOID(NULL != pQueue);
 
-    getIdx = PORT_MEM_RD64(&pQueue->getIdx);
-    capacity = PORT_MEM_RD64(&pQueue->capacity);
+    getIdx = MEM_RD64(&pQueue->getIdx);
+    capacity = MEM_RD64(&pQueue->capacity);
 
     if (queueGetCount(pQueue) > 0)
     {
-        PORT_MEM_WR64(&pQueue->getIdx, (getIdx + 1) % capacity);
+        MEM_WR64(&pQueue->getIdx, (getIdx + 1) % capacity);
     }
 }
 
@@ -264,18 +267,18 @@ NvBool circularQueuePopAndCopyNonManaged_IMPL(Queue *pQueue, QueueContext *pCtx,
 
     NV_ASSERT_OR_RETURN(pQueue != NULL, NV_FALSE);
 
-    capacity = PORT_MEM_RD64(&pQueue->capacity);
-    msgSize = PORT_MEM_RD64(&pQueue->msgSize);
+    capacity = MEM_RD64(&pQueue->capacity);
+    msgSize = MEM_RD64(&pQueue->msgSize);
 
     if (queueGetCount(pQueue) > 0)
     {
-        NvLength getIdx = PORT_MEM_RD64(&pQueue->getIdx);
+        NvLength getIdx = MEM_RD64(&pQueue->getIdx);
         pCtx->pCopyData(msgSize, getIdx, pCtx, pCopyTo, 1, NV_FALSE /*bCopyIn*/);
 
         // Update of index can't happen before we read all the data.
         portAtomicMemoryFenceLoad();
 
-        PORT_MEM_WR64(&pQueue->getIdx, (getIdx + 1) % capacity);
+        MEM_WR64(&pQueue->getIdx, (getIdx + 1) % capacity);
 
         return NV_TRUE;
     }

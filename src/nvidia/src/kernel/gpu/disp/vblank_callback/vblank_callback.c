@@ -29,6 +29,7 @@
 ******************************************************************************/
 
 #include "gpu/disp/vblank_callback/vblank_callback.h"
+#include "os/os.h"
 #include "gpu/disp/kern_disp.h"
 #include "gpu/disp/head/kernel_head.h"
 
@@ -58,11 +59,18 @@ vblcbConstruct_IMPL
     RS_RES_ALLOC_PARAMS_INTERNAL *pParams
 )
 {
+    OBJSYS          *pSys           = SYS_GET_INSTANCE();
+    OBJOS           *pOS            = SYS_GET_OS(pSys);
     OBJGPU          *pGpu           = GPU_RES_GET_GPU(pVblankCallback);
     KernelDisplay   *pKernelDisplay = GPU_GET_KERNEL_DISPLAY(pGpu);
     KernelHead      *pKernelHead    = NULL;
     NV_STATUS        status         = NV_OK;
     NV_VBLANK_CALLBACK_ALLOCATION_PARAMETERS *pAllocParams = pParams->pAllocParams;
+
+    if (pCallContext->secInfo.privLevel < RS_PRIV_LEVEL_KERNEL)
+    {
+        return NV_ERR_INSUFFICIENT_PERMISSIONS;
+    }
 
     if (pKernelDisplay == NULL)
     {
@@ -94,10 +102,8 @@ vblcbConstruct_IMPL
     pVblankCallback->CallBack.bIsVblankNotifyEnable = NV_TRUE;
     pVblankCallback->CallBack.Next = NULL;
 
-    pKernelDisplay->pRgVblankCb = (void *)&pVblankCallback->CallBack;
-
     kheadAddVblankCallback(pGpu, pKernelHead, &pVblankCallback->CallBack);
-    status = kdispSetupVBlank(pGpu, pKernelDisplay, pAllocParams->pProc, pAllocParams->pParm1, pAllocParams->pParm2, pAllocParams->LogicalHead, &pVblankCallback->CallBack);
+    status = pOS->osSetupVBlank(pGpu, pAllocParams->pProc, pAllocParams->pParm1, pAllocParams->pParm2, pAllocParams->LogicalHead, &pVblankCallback->CallBack);
 
     if (status != NV_OK)
     {
@@ -113,12 +119,13 @@ vblcbDestruct_IMPL
     VblankCallback *pVblankCallback
 )
 {
+    OBJSYS  *pSys  = SYS_GET_INSTANCE();
+    OBJOS   *pOS   = SYS_GET_OS(pSys);
     OBJGPU  *pGpu  = GPU_RES_GET_GPU(pVblankCallback);
     KernelDisplay *pKernelDisplay = GPU_GET_KERNEL_DISPLAY(pGpu);
     KernelHead    *pKernelHead    = KDISP_GET_HEAD(pKernelDisplay, pVblankCallback->LogicalHead);
 
-    pKernelDisplay->pRgVblankCb = NULL;
-    kdispSetupVBlank(pGpu, pKernelDisplay, NULL, NULL, NULL, pVblankCallback->LogicalHead, NULL);
+    pOS->osSetupVBlank(pGpu, NULL, NULL, NULL, pVblankCallback->LogicalHead, NULL);
     kheadDeleteVblankCallback(pGpu, pKernelHead, &pVblankCallback->CallBack);
 }
 
@@ -129,31 +136,16 @@ vblcbCtrlSetVBlankNotification_IMPL
     NV9010_CTRL_CMD_SET_VBLANK_NOTIFICATION_PARAMS *pParams
 )
 {
-    OBJGPU        *pGpu           = GPU_RES_GET_GPU(pVblankCallback);
-    KernelDisplay *pKernelDisplay = GPU_GET_KERNEL_DISPLAY(pGpu);
-    KernelHead    *pKernelHead    = KDISP_GET_HEAD(pKernelDisplay, pVblankCallback->LogicalHead);
-    NV_STATUS      status         = NV_ERR_INVALID_ARGUMENT;
-    NvBool         enabled        = NV_FALSE;
+    NV_STATUS status = NV_ERR_INVALID_ARGUMENT;
     if (pVblankCallback->CallBack.Proc != NULL)
     {
         if (pParams->bSetVBlankNotifyEnable)
         {
             pVblankCallback->CallBack.bIsVblankNotifyEnable = NV_TRUE;
-            
-            enabled = kheadReadVblankIntrEnable_HAL(pGpu, pKernelHead);
-            // 
-            // We are assuming list is not empty as DD already done the registration for vsync
-            // So we can enable the _LAST_DATA in case if it is already disable.
-            //
-            if (!enabled)
-            {
-                kheadWriteVblankIntrState(pGpu, pKernelHead, NV_HEAD_VBLANK_INTR_ENABLED);
-            }
         }
         else
         {
             pVblankCallback->CallBack.bIsVblankNotifyEnable = NV_FALSE;
-            kheadPauseVblankCbNotifications(pGpu, pKernelHead, &pVblankCallback->CallBack);
         }
         status = NV_OK;
     }

@@ -24,6 +24,7 @@
 #include "core/prelude.h"
 #include "kernel/gpu/host_eng/host_eng.h"
 #include "core/hal.h"
+#include "core/info_block.h"
 #include "os/os.h"
 
 /*!

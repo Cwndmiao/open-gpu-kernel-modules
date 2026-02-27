@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -21,89 +21,12 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#define NVOC_KERNEL_GRAPHICS_H_PRIVATE_ACCESS_ALLOWED
-
-#include "core/prelude.h"
 #include "kernel/gpu/gr/kernel_graphics.h"
-#include "kernel/gpu/mem_mgr/mem_mgr.h"
 #include "kernel/gpu/mig_mgr/kernel_mig_manager.h"
 #include "kernel/gpu/intr/engine_idx.h"
-#include "kernel/gpu/bus/kern_bus.h"
-#include "nvrm_registry.h"
-
-#include "published/pascal/gp100/dev_ctxsw_prog.h"
-#include "published/pascal/gp100/dev_graphics_nobundle.h"
+#include "nvRmReg.h"
 
 #include "ctrl/ctrl0080/ctrl0080fifo.h"
-
-NvU32
-kgraphicsGetFecsTraceRdOffset_GP100
-(
-    OBJGPU *pGpu,
-    KernelGraphics *pKernelGraphics
-)
-{
-    NV_ASSERT(!IS_VIRTUAL(pGpu));
-
-    NvU32 data = GPU_REG_RD32(pGpu, NV_PGRAPH_PRI_FECS_FALCON_MAILBOX1);
-
-    return DRF_VAL(_CTXSW, _TIMESTAMP_BUFFER, _RD_WR_POINTER, data);
-}
-
-void
-kgraphicsSetFecsTraceRdOffset_GP100
-(
-    OBJGPU *pGpu,
-    KernelGraphics *pKernelGraphics,
-    NvU32 rdOffset
-)
-{
-    NV_ASSERT(!IS_VIRTUAL(pGpu));
-
-    NvU32 data = 0;
-
-    data = FLD_SET_DRF_NUM(_CTXSW, _TIMESTAMP_BUFFER, _RD_WR_POINTER, rdOffset, data);
-
-    if (kgraphicsIsCtxswLoggingEnabled(pGpu, pKernelGraphics))
-        data = FLD_SET_DRF(_CTXSW, _TIMESTAMP_BUFFER, _MAILBOX1_TRACE_FEATURE, _ENABLED, data);
-
-    GPU_REG_WR32(pGpu, NV_PGRAPH_PRI_FECS_FALCON_MAILBOX1, data);
-}
-
-void
-kgraphicsSetFecsTraceWrOffset_GP100
-(
-    OBJGPU *pGpu,
-    KernelGraphics *pKernelGraphics,
-    NvU32 wrOffset
-)
-{
-    NV_ASSERT(!IS_VIRTUAL(pGpu));
-
-    GPU_REG_WR32(pGpu, NV_PGRAPH_PRI_FECS_FALCON_MAILBOX0, wrOffset);
-}
-
-void
-kgraphicsSetFecsTraceHwEnable_GP100
-(
-    OBJGPU *pGpu,
-    KernelGraphics *pKernelGraphics,
-    NvBool bEnable
-)
-{
-    NvU32 data = 0;
-    NvU32 rdOffset = kgraphicsGetFecsTraceRdOffset_HAL(pGpu, pKernelGraphics);
-
-    NV_ASSERT(!IS_VIRTUAL(pGpu));
-
-    data = FLD_SET_DRF_NUM(_CTXSW, _TIMESTAMP_BUFFER, _RD_WR_POINTER, rdOffset, data);
-
-    if (bEnable)
-        data = FLD_SET_DRF(_CTXSW, _TIMESTAMP_BUFFER, _MAILBOX1_TRACE_FEATURE, _ENABLED, data);
-
-    GPU_REG_WR32(pGpu, NV_PGRAPH_PRI_FECS_FALCON_MAILBOX1, data);
-    kgraphicsSetCtxswLoggingEnabled(pGpu, pKernelGraphics, bEnable);
-}
 
 void
 kgraphicsInitFecsRegistryOverrides_GP100
@@ -141,15 +64,6 @@ kgraphicsInitFecsRegistryOverrides_GP100
         kgraphicsSetCtxswLoggingSupported(pGpu, pKernelGraphics, bLog);
     }
 
-    //
-    // CTXSW logging is not supported when HCC prod settings are enabled.
-    // However, the same is supported when HCC is enabled in devtools mode
-    //
-    if (gpuIsCCFeatureEnabled(pGpu) && !gpuIsCCDevToolsModeEnabled(pGpu))
-    {
-        kgraphicsSetCtxswLoggingSupported(pGpu, pKernelGraphics, NV_FALSE);
-    }
-
     fecsSetRecordsPerIntr(pGpu, pKernelGraphics, NV_REG_STR_RM_CTXSW_LOG_RECORDS_PER_INTR_DEFAULT);
     if (osReadRegistryDword(pGpu, NV_REG_STR_RM_CTXSW_LOG_RECORDS_PER_INTR, &data) == NV_OK)
     {
@@ -176,6 +90,7 @@ kgraphicsAllocGrGlobalCtxBuffers_GP100
 {
     extern NV_STATUS kgraphicsAllocGrGlobalCtxBuffers_GM200(OBJGPU *pGpu, KernelGraphics *pKernelGraphics, NvU32 gfid, KernelGraphicsContext *pKernelGraphicsContext);
     GR_GLOBALCTX_BUFFERS         *pCtxBuffers;
+    NvU64                         allocFlags = MEMDESC_FLAGS_NONE;
     NV_STATUS                     status;
     CTX_BUF_POOL_INFO            *pCtxBufPool;
     const KGRAPHICS_STATIC_INFO  *pKernelGraphicsStaticInfo;
@@ -198,12 +113,24 @@ kgraphicsAllocGrGlobalCtxBuffers_GP100
         if (pCtxBuffers->bAllocated)
              return NV_OK;
 
+        // check for allocating local buffers in VPR memory (don't want for global memory)
+        if (
+            pKernelGraphicsContextUnicast->bVprChannel)
+            allocFlags |= MEMDESC_ALLOC_FLAGS_PROTECTED;
+
+        // If allocated per channel, ensure allocations goes into Suballocator if available
+        allocFlags |= MEMDESC_FLAGS_OWNED_BY_CURRENT_DEVICE;
     }
     else
     {
         pCtxBuffers = &pKernelGraphics->globalCtxBuffersInfo.pGlobalCtxBuffers[gfid];
         NV_ASSERT_OK_OR_RETURN(ctxBufPoolGetGlobalPool(pGpu, CTX_BUF_ID_GR_GLOBAL,
-            RM_ENGINE_TYPE_GR(pKernelGraphics->instance), &pCtxBufPool));
+            NV2080_ENGINE_TYPE_GR(pKernelGraphics->instance), &pCtxBufPool));
+    }
+
+    if (pCtxBufPool != NULL)
+    {
+        allocFlags |= MEMDESC_FLAGS_OWNED_BY_CTX_BUF_POOL;
     }
 
     pKernelGraphicsStaticInfo = kgraphicsGetStaticInfo(pGpu, pKernelGraphics);
@@ -229,7 +156,6 @@ kgraphicsAllocGlobalCtxBuffers_GP100
     NvU32 fecsBufferAlign = 0x0;
     GR_GLOBALCTX_BUFFERS *pCtxBuffers;
     GR_BUFFER_ATTR *pCtxAttr;
-    NV_STATUS status;
 
     // SKIP FECS buffer allocation for Virtual context
     if (IS_GFID_VF(gfid))
@@ -244,7 +170,7 @@ kgraphicsAllocGlobalCtxBuffers_GP100
     NV_ASSERT_OK_OR_RETURN(
         ctxBufPoolGetGlobalPool(pGpu,
                                 CTX_BUF_ID_GR_GLOBAL,
-                                RM_ENGINE_TYPE_GR(pKernelGraphics->instance),
+                                NV2080_ENGINE_TYPE_GR(pKernelGraphics->instance),
                                 &pCtxBufPool));
 
     if (pCtxBufPool != NULL)
@@ -288,21 +214,16 @@ kgraphicsAllocGlobalCtxBuffers_GP100
                           pCtxAttr[GR_GLOBALCTX_BUFFER_FECS_EVENT].cpuAttr,
                           allocFlags | MEMDESC_FLAGS_PHYSICALLY_CONTIGUOUS | MEMDESC_FLAGS_GPU_PRIVILEGED));
 
-        if (kgraphicsIsOverrideContextBuffersToGpuCached(pGpu, pKernelGraphics) || (*ppMemDesc)->_addressSpace == ADDR_FBMEM)
+        if ((*ppMemDesc)->_addressSpace == ADDR_FBMEM)
             memdescSetGpuCacheAttrib(*ppMemDesc, NV_MEMORY_CACHED);
 
-        if ((allocFlags & MEMDESC_FLAGS_OWNED_BY_CTX_BUF_POOL) != 0)
-        {
-            MemoryManager *pMemoryManager = GPU_GET_MEMORY_MANAGER(pGpu);
+        NV_ASSERT_OK_OR_RETURN(memdescSetCtxBufPool(*ppMemDesc, pCtxBufPool));
 
-            memmgrSetMemDescPageSize_HAL(pGpu, pMemoryManager, *ppMemDesc, AT_GPU, RM_ATTR_PAGE_SIZE_4KB);
-            NV_ASSERT_OK_OR_RETURN(memdescSetCtxBufPool(*ppMemDesc, pCtxBufPool));
-        }
-
-        memdescTagAllocList(status, NV_FB_ALLOC_RM_INTERNAL_OWNER_UNNAMED_TAG_108,
-                    (*ppMemDesc), (pCtxAttr[GR_GLOBALCTX_BUFFER_FECS_EVENT].pAllocList));
-        NV_CHECK_OK_OR_RETURN(LEVEL_ERROR, status);
+        NV_CHECK_OK_OR_RETURN(LEVEL_ERROR,
+            memdescAllocList(*ppMemDesc, pCtxAttr[GR_GLOBALCTX_BUFFER_FECS_EVENT].pAllocList));
     }
+
+    pCtxBuffers->bFecsBufferAllocated = NV_TRUE;
 
     return NV_OK;
 }
@@ -321,7 +242,6 @@ kgraphicsServiceInterrupt_GP100
 )
 {
     NvU32 grIdx = pKernelGraphics->instance;
-    KernelGraphicsManager *pKernelGraphicsManager = GPU_GET_KERNEL_GRAPHICS_MANAGER(pGpu);
 
     NV_ASSERT_OR_RETURN(pParams != NULL, 0);
     NV_ASSERT_OR_RETURN(pParams->engineIdx == MC_ENGINE_IDX_GRn_FECS_LOG(grIdx), 0);
@@ -333,7 +253,7 @@ kgraphicsServiceInterrupt_GP100
         return 0;
     }
 
-    if ((fecsGetCtxswLogConsumerCount(pGpu, pKernelGraphicsManager) > 0) &&
+    if ((pGpu->fecsCtxswLogConsumerCount > 0) &&
         (kgraphicsIsIntrDrivenCtxswLoggingEnabled(pGpu, pKernelGraphics)))
     {
         if (fecsClearIntrPendingIfPending(pGpu, pKernelGraphics))
@@ -367,3 +287,4 @@ kgraphicsClearInterrupt_GP100
 
     return NV_TRUE;
 }
+

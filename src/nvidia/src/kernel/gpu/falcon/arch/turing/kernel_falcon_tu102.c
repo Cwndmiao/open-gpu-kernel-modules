@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2017-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -26,6 +26,7 @@
  */
 
 #include "gpu/falcon/kernel_falcon.h"
+#include "gpu/mc/kernel_mc.h"
 #include "os/os.h"
 
 #include "published/turing/tu102/dev_riscv_pri.h"
@@ -149,83 +150,104 @@ kflcnIsRiscvActive_TU102
 }
 
 /*!
- * Returns true if the RISC-V core is selected.
+ *  Perform a reset of the Falcon.
  */
-NvBool
-kflcnIsRiscvSelected_TU102
-(
-    OBJGPU *pGpu,
-    KernelFalcon *pKernelFlcn
-)
-{
-    //
-    // There is no explicit core select on TU10x/GA100. Use the "is the RISC-V core active" check,
-    // even though:
-    //  (a) this can theoretically race with the ucode switching into a Falcon mode
-    //  (b) this returns a false negative if the RISC-V core has halted
-    // since there is no need to support either of these cases on TU10x/GA100.
-    //
-    return kflcnIsRiscvActive_HAL(pGpu, pKernelFlcn);
-}
-
-/*!
- * Reset falcon using secure reset.
- * This leaves the falcon in falcon mode after reset.
- */
-NV_STATUS
+void
 kflcnReset_TU102
 (
     OBJGPU *pGpu,
     KernelFalcon *pKernelFlcn
 )
 {
-    NV_STATUS status;
-    NV_ASSERT_OK_OR_RETURN(kflcnPreResetWait_HAL(pGpu, pKernelFlcn));
-    NV_ASSERT_OK(kflcnResetHw(pGpu, pKernelFlcn));
-    status = kflcnWaitForResetToFinish_HAL(pGpu, pKernelFlcn);
-    NV_ASSERT_OR_RETURN((status == NV_OK) || (status == NV_ERR_GPU_IN_FULLCHIP_RESET), status);
-    if (status == NV_ERR_GPU_IN_FULLCHIP_RESET)
-        return status;
-    kflcnSwitchToFalcon_HAL(pGpu, pKernelFlcn);
-    kflcnRegWrite_HAL(pGpu, pKernelFlcn, NV_PFALCON_FALCON_RM,
-                      pGpu->chipId0);
-    return NV_OK;
+    kflcnEnable_HAL(pGpu, pKernelFlcn, NV_FALSE);
+    kflcnEnable_HAL(pGpu, pKernelFlcn, NV_TRUE);
 }
 
 /*!
- * Reset falcon using secure reset, ready to run riscv.
- */
-NV_STATUS
-kflcnResetIntoRiscv_TU102
-(
-    OBJGPU *pGpu,
-    KernelFalcon *pKernelFlcn
-)
-{
-    //
-    // Turing and GA100 do not have an explicit core switch,
-    // the core will be ready to run riscv after reset.
-    //
-    NV_ASSERT_OK_OR_RETURN(kflcnReset_TU102(pGpu, pKernelFlcn));
-    kflcnSetRiscvMode(pKernelFlcn, NV_TRUE);
-    return NV_OK;
-}
-
-/*!
- * Switch the core to FALCON mode.
+ * Does a reset of the Falcon using secure reset and switches to Falcon mode.
  */
 void
-kflcnSwitchToFalcon_TU102
+kflcnSecureReset_TU102
 (
     OBJGPU *pGpu,
     KernelFalcon *pKernelFlcn
 )
 {
-    //
-    // Turing and GA100 do not have an explicit core switch,
-    // so simply update the software state tracking the expected mode.
-    //
-    kflcnSetRiscvMode(pKernelFlcn, NV_FALSE);
+    NV_ASSERT_OR_RETURN_VOID(kflcnPreResetWait(pGpu, pKernelFlcn) == NV_OK);
+    NV_ASSERT_OK(kflcnResetHw(pGpu, pKernelFlcn));
+
+    kflcnWaitForResetToFinish_HAL(pGpu, pKernelFlcn);
+
+    kflcnSwitchToFalcon_HAL(pGpu, pKernelFlcn);
+}
+
+void
+_kflcnClearInterrupts(OBJGPU *pGpu, KernelFalcon *pKernelFlcn)
+{
+    // Delay 1us in case engine is still resetting.
+    osDelayUs(1);
+
+    // Clear Interrupts
+    kflcnRegWrite_HAL(pGpu, pKernelFlcn, NV_PFALCON_FALCON_IRQMCLR, 0xffffffff);
+}
+
+/*!
+ * Enable or disable the Falcon to FALCON mode.
+ */
+void
+kflcnEnable_TU102
+(
+    OBJGPU *pGpu,
+    KernelFalcon *pKernelFlcn,
+    NvBool bEnable
+)
+{
+    KernelMc *pKernelMc = GPU_GET_KERNEL_MC(pGpu);
+
+    if (!bEnable)
+    {
+        // Switch to Falcon to release lockdown
+        kflcnSwitchToFalcon_HAL(pGpu, pKernelFlcn);
+
+        _kflcnClearInterrupts(pGpu, pKernelFlcn);
+
+        // Disable in PMC if engine is present in PMC
+        if (pKernelFlcn->pmcEnableMask > 0)
+        {
+            kmcWritePmcEnableReg_HAL(pGpu, pKernelMc, pKernelFlcn->pmcEnableMask,
+                                     NV_FALSE, pKernelFlcn->bIsPmcDeviceEngine);
+            // Read back to create enough of a delay
+            kmcReadPmcEnableReg_HAL(pGpu, pKernelMc, pKernelFlcn->bIsPmcDeviceEngine);
+            kmcReadPmcEnableReg_HAL(pGpu, pKernelMc, pKernelFlcn->bIsPmcDeviceEngine);
+        }
+        else
+        {
+            kflcnSecureReset(pGpu, pKernelFlcn);
+        }
+    }
+    else
+    {
+        // Enable in PMC if engine is present in PMC
+        if (pKernelFlcn->pmcEnableMask > 0)
+        {
+            kmcWritePmcEnableReg_HAL(pGpu, pKernelMc, pKernelFlcn->pmcEnableMask,
+                                     NV_TRUE, pKernelFlcn->bIsPmcDeviceEngine);
+            // Read back to create enough of a delay
+            kmcReadPmcEnableReg_HAL(pGpu, pKernelMc, pKernelFlcn->bIsPmcDeviceEngine);
+            kmcReadPmcEnableReg_HAL(pGpu, pKernelMc, pKernelFlcn->bIsPmcDeviceEngine);
+        }
+        else
+        {
+            kflcnSecureReset(pGpu, pKernelFlcn);
+        }
+
+        kflcnSwitchToFalcon_HAL(pGpu, pKernelFlcn);
+
+        kflcnWaitForResetToFinish_HAL(pGpu, pKernelFlcn);
+
+        kflcnRegWrite_HAL(pGpu, pKernelFlcn, NV_PFALCON_FALCON_RM,
+                          pGpu->chipId0);
+    }
 }
 
 /*!
@@ -358,7 +380,7 @@ kflcnWaitForHalt_TU102
 }
 
 /*!
- * Read the IRQ status of the Falcon.
+ * Read the IRQ status of the RISCV Falcon.
  *
  * @return IRQ status mask
  */
@@ -369,26 +391,12 @@ kflcnReadIntrStatus_TU102
     KernelFalcon *pKernelFlcn
 )
 {
-    return (kflcnRegRead_HAL(pGpu, pKernelFlcn, NV_PFALCON_FALCON_IRQSTAT) &
-            kflcnRegRead_HAL(pGpu, pKernelFlcn, NV_PFALCON_FALCON_IRQMASK) &
-            kflcnRegRead_HAL(pGpu, pKernelFlcn, NV_PFALCON_FALCON_IRQDEST));
-}
-
-/*!
- * Read the IRQ status of the Falcon in RISC-V mode.
- *
- * @return IRQ status mask
- */
-NvU32
-kflcnRiscvReadIntrStatus_TU102
-(
-    OBJGPU *pGpu,
-    KernelFalcon *pKernelFlcn
-)
-{
-    return (kflcnRegRead_HAL(pGpu, pKernelFlcn, NV_PFALCON_FALCON_IRQSTAT) &
-            kflcnRiscvRegRead_HAL(pGpu, pKernelFlcn, NV_PRISCV_RISCV_IRQMASK) &
-            kflcnRiscvRegRead_HAL(pGpu, pKernelFlcn, NV_PRISCV_RISCV_IRQDEST));
+    return ((kflcnRegRead_HAL(pGpu, pKernelFlcn, NV_PFALCON_FALCON_IRQSTAT) &
+             kflcnRegRead_HAL(pGpu, pKernelFlcn, NV_PFALCON_FALCON_IRQMASK) &
+             kflcnRegRead_HAL(pGpu, pKernelFlcn, NV_PFALCON_FALCON_IRQDEST)) |
+            (kflcnRegRead_HAL(pGpu, pKernelFlcn, NV_PFALCON_FALCON_IRQSTAT) &
+             kflcnRiscvRegRead_HAL(pGpu, pKernelFlcn, NV_PRISCV_RISCV_IRQMASK) &
+             kflcnRiscvRegRead_HAL(pGpu, pKernelFlcn, NV_PRISCV_RISCV_IRQDEST)));
 }
 
 
@@ -425,4 +433,25 @@ kflcnMaskDmemAddr_TU102
 {
     return (addr & (DRF_SHIFTMASK(NV_PFALCON_FALCON_DMEMC_OFFS) |
                     DRF_SHIFTMASK(NV_PFALCON_FALCON_DMEMC_BLK)));
+}
+
+void gkflcnNonstallIntrCheckAndClear_TU102(OBJGPU *pGpu, GenericKernelFalcon *pGKF, THREAD_STATE_NODE *pThreadState)
+{
+    NvU32 registerBase = staticCast(pGKF, KernelFalcon)->registerBase;
+    NvU32 intr, clearBits;
+
+    NV_ASSERT(registerBase != 0);
+
+    intr = GPU_REG_RD32_EX(pGpu, registerBase + NV_PFALCON_FALCON_IRQSTAT,
+                           pThreadState);
+
+    if (DRF_VAL( _PFALCON_FALCON, _IRQSTAT, _SWGEN1, intr))
+    {
+        NV_PRINTF(LEVEL_INFO, "Handling Trap Interrupt\n");
+
+        // Clear interrupt
+        clearBits = DRF_NUM(_PFALCON_FALCON, _IRQSTAT, _SWGEN1, 1);
+        GPU_REG_WR32_EX(pGpu, registerBase + NV_PFALCON_FALCON_IRQSCLR,
+                        clearBits, pThreadState);
+    }
 }

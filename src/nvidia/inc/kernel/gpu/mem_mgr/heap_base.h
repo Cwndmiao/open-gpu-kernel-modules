@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -117,6 +117,7 @@ typedef struct HWRESOURCE_INFO
     NvU32 hwResId;
     NvU32 refCount;
     NvBool isVgpuHostAllocated; // used in vGPU guest RM to indicate if this HW resource is allocated by host RM or not. Used in Windows guest.
+    NvBool isGuestAllocated;    // used in vGPU host RM to indicate if this HW resource is allocated from LIST_OBJECT path on behalf of Linux guest.
 } HWRESOURCE_INFO;
 
 
@@ -124,7 +125,7 @@ typedef struct PMA_ALLOC_INFO
 {
     NvBool bContig;
     NvU32  pageCount;
-    NvU64  pageSize;
+    NvU32  pageSize;
     NvU32  refCount;
     NvU64  allocSize;
     NvU32  flags;

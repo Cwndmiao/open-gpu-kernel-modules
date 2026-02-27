@@ -24,6 +24,7 @@
 #include "rmapi/rmapi.h"
 #include "core/locks.h"
 #include "gpu/device/device.h"
+#include "gpu/subdevice/subdevice.h"
 #include "vgpu/rpc.h"
 #include "kernel/gpu/fifo/kernel_fifo.h"
 
@@ -140,7 +141,7 @@ RmIdleChannels
         GpuResource *pGpuResource;
 
         //
-        // Don't allow other clients' resources to be accessed/modified by this
+        // Don't allow other clients' resources to be accessed/modified by this 
         // control call.
         //
         if (hClient != phClients[chanIdx])
@@ -212,11 +213,6 @@ RmIdleChannels
                                                numChannelsPerGpu[gpuIdx]);
         pPerGpuChannels = portMemAllocNonPaged((sizeof *pPerGpuChannels) *
                                                numChannelsPerGpu[gpuIdx]);
-        NV_CHECK_OR_ELSE(LEVEL_ERROR,
-                         ((pPerGpuClients  != NULL) &&
-                          (pPerGpuDevices  != NULL) &&
-                          (pPerGpuChannels != NULL)),
-                         rmStatus = NV_ERR_NO_MEMORY; goto done);
 
         for (chanIdx = 0;
              chanIdx < numChannels && perGpuIdx < numChannelsPerGpu[gpuIdx];

@@ -74,7 +74,7 @@ portUtilExGetStackTrace
 }
 #endif
 
-NV_NOINLINE NvUPtr portUtilGetIPAddress(void)
+NV_NOINLINE NvUPtr portUtilGetIPAddress()
 {
     return portUtilGetReturnAddress();
 }

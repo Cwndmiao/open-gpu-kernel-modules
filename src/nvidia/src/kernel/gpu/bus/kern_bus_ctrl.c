@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2002-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2002-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -34,12 +34,9 @@
 #include "gpu/mem_mgr/mem_mgr.h"
 #include "gpu/mem_mgr/virt_mem_allocator.h"
 #include "vgpu/rpc.h"
-#include "gpu/device/device.h"
 #include "gpu/subdevice/subdevice.h"
 #include "gpu/subdevice/subdevice_diag.h"
-#include "platform/sli/sli.h"
 
-#include "ctrl/ctrl0080/ctrl0080host.h"
 #include "ctrl/ctrl2080/ctrl2080bus.h"
 #include "ctrl/ctrl208f/ctrl208fbus.h"
 
@@ -52,7 +49,7 @@ kbusControlGetCaps
     NvU32 caps = 0;
 
     // if the Chip is integrated.
-    if (IsTEGRA(pGpu) || pGpu->getProperty(pGpu, PDB_PROP_GPU_ZERO_FB))
+    if ( IsTEGRA(pGpu) )
     {
         caps |= NV2080_CTRL_BUS_INFO_CAPS_CHIP_INTEGRATED;
     }
@@ -86,8 +83,8 @@ _kbusGetHostCaps(OBJGPU *pGpu, NvU8 *pHostCaps)
 static NV_STATUS
 _getAspmL1FlagsSendRpc
 (
-    OBJGPU *pGpu,
-    NvBool *bCyaMaskL1,
+    OBJGPU *pGpu, 
+    NvBool *bCyaMaskL1, 
     NvBool *bEnableAspmDtL1
 )
 {
@@ -170,18 +167,6 @@ deviceCtrlCmdHostGetCapsV2_IMPL
     return rmStatus;
 }
 
-NV_STATUS
-deviceCtrlCmdHostGetCapsV2_SOC
-(
-    Device *pDevice,
-    NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS *pHostCapsParamsV2
-)
-{
-    portMemSet(pHostCapsParamsV2, '\0', sizeof(pHostCapsParamsV2));
-
-    return NV_OK;
-}
-
 //
 // BUS RM SubDevice Controls
 //
@@ -193,8 +178,9 @@ subdeviceCtrlCmdBusGetPciInfo_IMPL
 )
 {
     OBJGPU *pGpu = GPU_RES_GET_GPU(pSubdevice);
+    KernelBif *pKernelBif = GPU_GET_KERNEL_BIF(pGpu);
 
-    if (!gpuIsPciBusFamily(pGpu))
+    if (pKernelBif == NULL || !kbifIsPciBusFamily(pKernelBif))
     {
         return NV_ERR_NOT_SUPPORTED;
     }
@@ -252,32 +238,25 @@ subdeviceCtrlCmdBusGetNvlinkPeerIdMask_IMPL
     NV2080_CTRL_BUS_GET_NVLINK_PEER_ID_MASK_PARAMS *pParams
 )
 {
-    OBJGPU *pGpu = GPU_RES_GET_GPU(pSubdevice);
-    if (IS_VGPU_GSP_PLUGIN_OFFLOAD_ENABLED(pGpu) && RMCFG_FEATURE_PLATFORM_GSP)
+    OBJGPU    *pGpu       = GPU_RES_GET_GPU(pSubdevice);
+    KernelBus *pKernelBus = GPU_GET_KERNEL_BUS(pGpu);
+    NvU32 gfid;
+
+    LOCK_ASSERT_AND_RETURN(rmApiLockIsOwner());
+
+    // This control call should always run in context of a VF.
+    NV_ASSERT_OK_OR_RETURN(vgpuGetCallingContextGfid(pGpu, &gfid));
+    if (IS_GFID_PF(gfid))
     {
         return NV_ERR_NOT_SUPPORTED;
     }
-    else
-    {
-        KernelBus *pKernelBus = GPU_GET_KERNEL_BUS(pGpu);
-        NvU32 gfid;
 
-        NV_ASSERT_OR_RETURN(rmapiLockIsOwner(), NV_ERR_INVALID_LOCK_STATE);
+    portMemCopy((void *)pParams->nvlinkPeerIdMask,
+                 sizeof(pParams->nvlinkPeerIdMask),
+                (void *)pKernelBus->p2p.busNvlinkPeerNumberMask,
+                 sizeof(pParams->nvlinkPeerIdMask));
 
-        // This control call should always run in context of a VF.
-        NV_ASSERT_OK_OR_RETURN(vgpuGetCallingContextGfid(pGpu, &gfid));
-        if (IS_GFID_PF(gfid))
-        {
-            return NV_ERR_NOT_SUPPORTED;
-        }
-
-        portMemCopy((void *)pParams->nvlinkPeerIdMask,
-                    sizeof(pParams->nvlinkPeerIdMask),
-                    (void *)pKernelBus->p2p.busNvlinkPeerNumberMask,
-                    sizeof(pParams->nvlinkPeerIdMask));
-
-        return NV_OK;
-    }
+    return NV_OK;
 }
 
 static NV_STATUS
@@ -338,7 +317,7 @@ getBusInfos(OBJGPU *pGpu, NV2080_CTRL_BUS_INFO *pBusInfos, NvU32 busInfoListSize
         {
             case NV2080_CTRL_BUS_INFO_INDEX_TYPE:
             {
-                pBusInfos[i].data = gpuGetBusIntfType_HAL(pGpu);
+                pBusInfos[i].data = kbifGetBusIntfType_HAL(pKernelBif);
                 break;
             }
             case NV2080_CTRL_BUS_INFO_INDEX_INTLINE:
@@ -353,12 +332,6 @@ getBusInfos(OBJGPU *pGpu, NV2080_CTRL_BUS_INFO *pBusInfos, NvU32 busInfoListSize
             }
             case NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CAPS:
             {
-                if (gpuIsPciBusFamily(pGpu) && IS_VIRTUAL(pGpu))
-                {
-                    VGPU_STATIC_INFO *pVSI = GPU_GET_STATIC_INFO(pGpu);
-                    pBusInfos[i].data = pVSI->pcieGpuLinkCaps;
-                    break;
-                }
             }
             case NV2080_CTRL_BUS_INFO_INDEX_PCIE_ROOT_LINK_CAPS:
             case NV2080_CTRL_BUS_INFO_INDEX_PCIE_UPSTREAM_LINK_CAPS:
@@ -398,7 +371,7 @@ getBusInfos(OBJGPU *pGpu, NV2080_CTRL_BUS_INFO *pBusInfos, NvU32 busInfoListSize
             case NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_UNSUPPORTED_REQUESTS_CLEAR:
             case NV2080_CTRL_BUS_INFO_INDEX_MSI_INFO:
             {
-                if (gpuIsPciBusFamily(pGpu))
+                if (kbifIsPciBusFamily(pKernelBif))
                 {
                     NV_CHECK_OK_OR_RETURN(LEVEL_ERROR, kbifControlGetPCIEInfo(pGpu, pKernelBif, &pBusInfos[i]));
                 }
@@ -495,12 +468,12 @@ getBusInfos(OBJGPU *pGpu, NV2080_CTRL_BUS_INFO *pBusInfos, NvU32 busInfoListSize
             }
             case NV2080_CTRL_BUS_INFO_INDEX_GPU_GART_SIZE:
             {
-                pBusInfos[i].data = (NvU32)(kgmmuGetMaxVASize(pKernelGmmu) >> 20);
+                pBusInfos[i].data = (NvU32)(pKernelGmmu->maxVASize >> 20);
                 break;
             }
             case NV2080_CTRL_BUS_INFO_INDEX_GPU_GART_SIZE_HI:
             {
-                pBusInfos[i].data = (NvU32)((kgmmuGetMaxVASize(pKernelGmmu) >> 20) >> 32);
+                pBusInfos[i].data = (NvU32)((pKernelGmmu->maxVASize >> 20) >> 32);
                 break;
             }
             case NV2080_CTRL_BUS_INFO_INDEX_GPU_GART_FLAGS:
@@ -514,7 +487,7 @@ getBusInfos(OBJGPU *pGpu, NV2080_CTRL_BUS_INFO *pBusInfos, NvU32 busInfoListSize
             }
             case NV2080_CTRL_BUS_INFO_INDEX_BUS_NUMBER:
             {
-                if (gpuIsPciBusFamily(pGpu))
+                if (kbifIsPciBusFamily(pKernelBif))
                 {
                     pBusInfos[i].data = gpuGetBus(pGpu);
                 }
@@ -526,7 +499,7 @@ getBusInfos(OBJGPU *pGpu, NV2080_CTRL_BUS_INFO *pBusInfos, NvU32 busInfoListSize
             }
             case NV2080_CTRL_BUS_INFO_INDEX_DEVICE_NUMBER:
             {
-                if (gpuIsPciBusFamily(pGpu))
+                if (kbifIsPciBusFamily(pKernelBif))
                 {
                     pBusInfos[i].data = gpuGetDevice(pGpu);
                 }
@@ -543,7 +516,7 @@ getBusInfos(OBJGPU *pGpu, NV2080_CTRL_BUS_INFO *pBusInfos, NvU32 busInfoListSize
                 // We no longer support AGP/PCIe bridges so Bus/GPU interface
                 // types are the same
                 //
-                pBusInfos[i].data = gpuGetBusIntfType_HAL(pGpu);
+                pBusInfos[i].data = kbifGetBusIntfType_HAL(pKernelBif);
                 break;
             }
             case NV2080_CTRL_BUS_INFO_INDEX_DOMAIN_NUMBER:
@@ -631,7 +604,7 @@ subdeviceCtrlCmdBusGetPciBarInfo_IMPL
     KernelBus *pKernelBus = GPU_GET_KERNEL_BUS(pGpu);
     NvU32 i;
 
-    if (!gpuIsPciBusFamily(pGpu))
+    if (!kbifIsPciBusFamily(GPU_GET_KERNEL_BIF(pGpu)))
     {
         return NV_ERR_NOT_SUPPORTED;
     }
@@ -674,76 +647,5 @@ diagapiCtrlCmdBusIsBar1Virtual_IMPL
 
     pParams->bIsVirtual = !kbusIsBar1PhysicalModeEnabled(pKernelBus);
     return NV_OK;
-}
-
-NV_STATUS
-subdeviceCtrlCmdBusSysmemAccess_IMPL
-(
-    Subdevice* pSubdevice,
-    NV2080_CTRL_BUS_SYSMEM_ACCESS_PARAMS* pParams
-)
-{
-    OBJGPU      *pGpu       = GPU_RES_GET_GPU(pSubdevice);
-    KernelBif   *pKernelBif = GPU_GET_KERNEL_BIF(pGpu);
-
-    return kbifDisableSysmemAccess_HAL(pGpu, pKernelBif, pParams->bDisable);
-}
-
-NV_STATUS
-subdeviceCtrlCmdBusGetPcieSupportedGpuAtomics_VF
-(
-    Subdevice *pSubdevice,
-    NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS *pParams
-)
-{
-    // Atomics not supported in VF. See bug 3497203.
-    for (NvU32 i = 0; i < NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_COUNT; i++)
-    {
-        pParams->atomicOp[i].bSupported = NV_FALSE;
-        pParams->atomicOp[i].attributes = 0x0;
-    }
-
-    return NV_OK;
-}
-
-NV_STATUS
-subdeviceCtrlCmdBusGetC2CInfo_VF
-(
-    Subdevice *pSubdevice,
-    NV2080_CTRL_CMD_BUS_GET_C2C_INFO_PARAMS *pParams
-)
-{
-    OBJGPU *pGpu = GPU_RES_GET_GPU(pSubdevice);
-    VGPU_STATIC_INFO *pVSI = GPU_GET_STATIC_INFO(pGpu);
-
-    NV_ASSERT_OR_RETURN(pVSI != NULL, NV_ERR_INVALID_STATE);
-
-    pParams->bIsLinkUp = pVSI->c2cInfo.bIsLinkUp;
-    pParams->nrLinks = pVSI->c2cInfo.nrLinks;
-    pParams->linkMask = pVSI->c2cInfo.linkMask;
-    pParams->perLinkBwMBps = pVSI->c2cInfo.perLinkBwMBps;
-    pParams->remoteType = pVSI->c2cInfo.remoteType;
-
-    return NV_OK;
-}
-
-NV_STATUS
-subdeviceCtrlCmdBusGetC2CLpwrStats_VF
-(
-    Subdevice                                      *pSubdevice,
-    NV2080_CTRL_CMD_BUS_GET_C2C_LPWR_STATS_PARAMS  *pParams
-)
-{
-    return NV_ERR_NOT_SUPPORTED;
-}
-
-NV_STATUS
-subdeviceCtrlCmdBusSetC2CLpwrStateVote_VF
-(
-    Subdevice                                           *pSubdevice,
-    NV2080_CTRL_CMD_BUS_SET_C2C_LPWR_STATE_VOTE_PARAMS  *pParams
-)
-{
-    return NV_ERR_NOT_SUPPORTED;
 }
 

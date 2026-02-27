@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2016-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -38,7 +38,7 @@
  *
  * @returns NV_OK on success, specific error code on failure.
  */
-NV_STATUS
+NV_STATUS 
 uvmchanrtnrConstruct_IMPL
 (
     UvmChannelRetainer *pUvmChannelRetainer,
@@ -49,15 +49,11 @@ uvmchanrtnrConstruct_IMPL
     OBJGPU   *pGpu = GPU_RES_GET_GPU(pUvmChannelRetainer);
     KernelFifo  *pKernelFifo = GPU_GET_KERNEL_FIFO(pGpu);
     NV_STATUS rmStatus = NV_OK;
-    RsClient *pChannelClient;
     KernelChannel *pKernelChannel = NULL;
     NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS *pUvmChannelRetainerParams = pParams->pAllocParams;
     CHID_MGR *pChidMgr = NULL;
 
-    NV_ASSERT_OK_OR_RETURN(serverGetClientUnderLock(&g_resServ,
-        pUvmChannelRetainerParams->hClient, &pChannelClient));
-
-    NV_ASSERT_OK_OR_RETURN(CliGetKernelChannel(pChannelClient, pUvmChannelRetainerParams->hChannel, &pKernelChannel));
+    NV_ASSERT_OK_OR_RETURN(CliGetKernelChannel(pUvmChannelRetainerParams->hClient, pUvmChannelRetainerParams->hChannel, &pKernelChannel));
 
     if (!uvmchanrtnrIsAllocationAllowed(pUvmChannelRetainer, pCallContext, pKernelChannel))
     {
@@ -95,7 +91,7 @@ fail:
     return rmStatus;
 }
 
-void
+void 
 uvmchanrtnrDestruct_IMPL
 (
     UvmChannelRetainer *pUvmChannelRetainer
@@ -133,6 +129,8 @@ uvmchanrtnrIsAllocationAllowed_IMPL
 )
 
 {
+    NvBool bIsAllowed = NV_FALSE;
+    RS_PRIV_LEVEL privLevel = pCallContext->secInfo.privLevel;
     OBJGPU *pGpu = GPU_RES_GET_GPU(pUvmChannelRetainer);
 
     NV_ASSERT_OR_RETURN(pKernelChannel != NULL, NV_FALSE);
@@ -143,9 +141,18 @@ uvmchanrtnrIsAllocationAllowed_IMPL
         NV_ASSERT_OR_RETURN(vgpuGetCallingContextGfid(pGpu, &gfid) == NV_OK, NV_FALSE);
         if (IS_GFID_VF(gfid))
         {
-            return (gfid == kchannelGetGfid(pKernelChannel));
+            bIsAllowed = (gfid == kchannelGetGfid(pKernelChannel));
+        }
+        else
+        {
+            NvHandle hClient = pCallContext->pClient->hClient;
+            bIsAllowed = rmclientIsAdminByHandle(hClient, privLevel) || hypervisorCheckForObjectAccess(hClient);
         }
     }
-
-    return NV_TRUE;
+    else
+    {
+        bIsAllowed = ((privLevel >= RS_PRIV_LEVEL_KERNEL) &&
+                      (pCallContext->secInfo.paramLocation == PARAM_LOCATION_KERNEL));
+    }
+    return bIsAllowed;
 }

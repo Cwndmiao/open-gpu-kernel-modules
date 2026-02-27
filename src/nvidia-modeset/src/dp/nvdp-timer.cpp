@@ -124,6 +124,11 @@ namespace nvkmsDisplayPort {
 
 }; // namespace nvkmsDisplayPort
 
+NvBool nvDPTimersPending(void)
+{
+    return FALSE;
+}
+
 NVDPLibTimerPtr nvDPAllocTimer(NVDevEvoPtr pDevEvo)
 {
     NVDPLibTimerPtr pTimer = new _nv_dplibtimer(pDevEvo);

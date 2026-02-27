@@ -25,7 +25,6 @@
 #include "nvkms-flip-workarea.h"
 #include "nvkms-modeset-types.h"
 #include "nvkms-modeset-workarea.h"
-#include "nvkms-setlut-workarea.h"
 #include "nvkms-prealloc.h"
 #include "nvkms-utils.h"
 
@@ -48,25 +47,8 @@ static size_t GetSizeForType(NVDevEvoPtr pDevEvo, enum NVPreallocType type)
     case PREALLOC_TYPE_PROPOSED_MODESET_HW_STATE: /* fallthrough */
     case PREALLOC_TYPE_VALIDATE_PROPOSED_MODESET_HW_STATE:
         return sizeof(NVProposedModeSetHwState);
-    case PREALLOC_TYPE_VALIDATE_MODE_HW_MODE_TIMINGS: /* fallthrough */
-    case PREALLOC_TYPE_HS_INIT_CONFIG_HW_TIMINGS:
+    case PREALLOC_TYPE_VALIDATE_MODE_HW_MODE_TIMINGS:
         return sizeof(NVHwModeTimingsEvo);
-    case PREALLOC_TYPE_VALIDATE_MODE_HDMI_FRL_CONFIG:
-        return sizeof(HDMI_FRL_CONFIG);
-    case PREALLOC_TYPE_VALIDATE_MODE_DSC_INFO:
-        return sizeof(NVDscInfoEvoRec);
-    case PREALLOC_TYPE_HS_PATCHED_MODESET_REQUEST:
-        return sizeof(struct NvKmsSetModeRequest);
-    case PREALLOC_TYPE_MODE_SET_REPLY_TMP_USAGE_BOUNDS:
-        return sizeof(struct NvKmsUsageBounds);
-    case PREALLOC_TYPE_VALIDATE_MODE_IMP_OUT_HW_MODE_TIMINGS:
-        return sizeof(NVHwModeTimingsEvo) * NVKMS_MAX_HEADS_PER_DISP;
-    case PREALLOC_TYPE_VALIDATE_MODE_TMP_USAGE_BOUNDS:
-        return sizeof(struct NvKmsUsageBounds);
-    case PREALLOC_TYPE_DPLIB_IS_MODE_POSSIBLE_PARAMS:
-        return sizeof(NVDpLibIsModePossibleParamsRec);
-    case PREALLOC_TYPE_SET_LUT_WORK_AREA:
-        return sizeof(struct NvKmsSetLutWorkArea);
     case PREALLOC_TYPE_MAX:
         /* Not a real option, but added for -Wswitch-enum */
         break;

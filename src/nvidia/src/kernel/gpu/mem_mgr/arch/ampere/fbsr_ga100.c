@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2021-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -26,12 +26,11 @@
 #include "gpu/mem_sys/kern_mem_sys.h"
 #include "gpu/mem_mgr/fbsr.h"
 
-NV_STATUS
-fbsrSendMemsysProgramRawCompressionMode_GA100
+static NV_STATUS
+fbsrSendMemsysProgramRawCompressionMode
 (
-    OBJGPU  *pGpu,
-    OBJFBSR *pFbsr,
-    NvBool   bRawMode
+    OBJGPU             *pGpu,
+    NvBool              bRawMode
 )
 {
     RM_API *pRmApi = GPU_GET_PHYSICAL_RMAPI(pGpu);
@@ -56,13 +55,10 @@ fbsrSendMemsysProgramRawCompressionMode_GA100
 NV_STATUS
 fbsrBegin_GA100(OBJGPU *pGpu, OBJFBSR *pFbsr, FBSR_OP_TYPE op)
 {
-    KernelMemorySystem *pKernelMemorySystem = GPU_GET_KERNEL_MEMORY_SYSTEM(pGpu);
-
-    if ((op == FBSR_OP_RESTORE) && !IS_VIRTUAL(pGpu) &&
-        pKernelMemorySystem->bPreserveComptagBackingStoreOnSuspend)
+    if (op == FBSR_OP_RESTORE)
     {
         const MEMORY_SYSTEM_STATIC_CONFIG *pMemorySystemConfig =
-                kmemsysGetStaticConfig(pGpu, pKernelMemorySystem);
+                kmemsysGetStaticConfig(pGpu, GPU_GET_KERNEL_MEMORY_SYSTEM(pGpu));
 
         /*
          * Temporarily disable raw mode to prevent FBSR restore operations
@@ -73,7 +69,7 @@ fbsrBegin_GA100(OBJGPU *pGpu, OBJFBSR *pFbsr, FBSR_OP_TYPE op)
 
         if (pMemorySystemConfig->bUseRawModeComptaglineAllocation)
         {
-            NV_ASSERT_OK(fbsrSendMemsysProgramRawCompressionMode_HAL(pGpu, pFbsr, NV_FALSE));
+            NV_ASSERT_OK(fbsrSendMemsysProgramRawCompressionMode(pGpu, NV_FALSE));
             pFbsr->bRawModeWasEnabled = NV_TRUE;
         }
     }
@@ -92,17 +88,15 @@ fbsrBegin_GA100(OBJGPU *pGpu, OBJFBSR *pFbsr, FBSR_OP_TYPE op)
 NV_STATUS
 fbsrEnd_GA100(OBJGPU *pGpu, OBJFBSR *pFbsr)
 {
-    KernelMemorySystem *pKernelMemorySystem = GPU_GET_KERNEL_MEMORY_SYSTEM(pGpu);
     NV_STATUS status = fbsrEnd_GM107(pGpu, pFbsr);
 
-    if ((pFbsr->op == FBSR_OP_RESTORE) && pFbsr->bRawModeWasEnabled &&
-        !IS_VIRTUAL(pGpu) && pKernelMemorySystem->bPreserveComptagBackingStoreOnSuspend)
+    if (pFbsr->op == FBSR_OP_RESTORE &&
+        pFbsr->bRawModeWasEnabled)
     {
         /*
          * Reenable raw mode if it was disabled by fbsrBegin_GA100.
          */
-        NV_ASSERT_OK(fbsrSendMemsysProgramRawCompressionMode_HAL(pGpu, pFbsr, NV_TRUE));
-        pFbsr->bRawModeWasEnabled = NV_FALSE;
+        NV_ASSERT_OK(fbsrSendMemsysProgramRawCompressionMode(pGpu, NV_TRUE));
     }
 
     return status;

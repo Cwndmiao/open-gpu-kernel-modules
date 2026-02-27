@@ -25,9 +25,10 @@
 
 #include "kernel/gpu/disp/head/kernel_head.h"
 #include "kernel/gpu/disp/kern_disp.h"
-#include "kernel/gpu/timer/objtmr.h"
 #include "kernel/gpu/gpu.h"
 #include "kernel/os/os.h"
+
+#include "objtmr.h"
 
 void
 kheadAddVblankCallback_IMPL
@@ -261,45 +262,6 @@ kheadAddVblankCallback_IMPL
 }
 
 void
-kheadPauseVblankCbNotifications_IMPL
-(
-    OBJGPU         *pGpu,
-    KernelHead     *pKernelHead,
-    VBLANKCALLBACK *pCallback
-)
-{
-    VBLANKCALLBACK  *pList   = NULL;
-    NvBool           bShouldDisable = NV_TRUE;
-
-    // Cache the requested queue and its current vblank count
-    if (pCallback->Flags & VBLANK_CALLBACK_FLAG_LOW_LATENCY)
-    {
-        pList = pKernelHead->Vblank.Callback.pListLL;
-    }
-    else
-    {
-        pList = pKernelHead->Vblank.Callback.pListNL;
-    }
-
-
-    VBLANKCALLBACK *pPrev = pList;
-
-    while (pPrev)
-    {
-        if (pPrev->bIsVblankNotifyEnable  == NV_TRUE)
-        {
-            bShouldDisable = NV_FALSE;
-            break;
-        }
-        pPrev = pPrev->Next;
-    }
-
-    if(bShouldDisable)
-    {
-        kheadWriteVblankIntrState(pGpu, pKernelHead, NV_HEAD_VBLANK_INTR_AVAILABLE);
-    }
-}
-void
 kheadDeleteVblankCallback_IMPL
 (
     OBJGPU         *pGpu,
@@ -324,7 +286,7 @@ kheadDeleteVblankCallback_IMPL
     }
 
     // Disable VBlank (if it is even on) while we scan/process the callback list
-    enabled = kheadReadVblankIntrEnable_HAL(pGpu, pKernelHead);
+    enabled = kheadReadVblankIntrEnable(pGpu, pKernelHead);
 
     if (enabled)
     {
@@ -447,13 +409,13 @@ kheadProcessVblankCallbacks_IMPL
     NvU32     state
 )
 {
-    KernelDisplay    *pKernelDisplay = GPU_GET_KERNEL_DISPLAY(pGpu);
     OBJTMR           *pTmr      = GPU_GET_TIMER(pGpu);
     VBLANKCALLBACK   *pCallback = NULL;
     VBLANKCALLBACK   *pNext     = NULL;
     VBLANKCALLBACK  **ppPrev    = NULL;
     NvBool            done      = NV_FALSE;
-    NvBool            bQueueDpc = NV_FALSE;
+    NvBool            removed   = NV_FALSE;
+    NvBool            queueDPC  = NV_FALSE;
     NvU32             newstate;
     NvU32             Count     = 0;
     NvU64             time      = 0;
@@ -504,7 +466,12 @@ kheadProcessVblankCallbacks_IMPL
             {
                 pNext = pCallback->Next;
 
-                if (pCallback->Flags & VBLANK_CALLBACK_FLAG_SPECIFIED_TIMESTAMP)
+                if (  (pCallback->Flags & VBLANK_CALLBACK_FLAG_LOW_LATENCY__ISR_ONLY) && !(state & VBLANK_STATE_PROCESS_CALLED_FROM_ISR)  )
+                {
+                    // someone doesn't want this low-latency callback being processed at DPC time.
+                    ppPrev = &pCallback->Next;
+                }
+                else if (pCallback->Flags & VBLANK_CALLBACK_FLAG_SPECIFIED_TIMESTAMP)
                 {
                     //
                     // Time stamp based call backs don't have a valid vblank count
@@ -532,19 +499,12 @@ kheadProcessVblankCallbacks_IMPL
                         // We better have something to do if we are wasting time reading TS
                         NV_ASSERT(pCallback->Proc);
 
-                        //
-                        // We need to avoid calling the _vblank_callback during Panel Replay
-                        // as it will be taken care during _RG_VBLANK interrupt handling
-                        //
-                        if (pCallback != (VBLANKCALLBACK *)pKernelDisplay->pRgVblankCb && !pKernelDisplay->bIsPanelReplayEnabled)
-                        {
-                            pCallback->Proc(pGpu,
-                                    pCallback->pObject,
-                                    pCallback->Param1,
-                                    pCallback->Param2,
-                                    pCallback->Status);
-                        }
-                        bQueueDpc = NV_TRUE;
+                        pCallback->Proc(pGpu,
+                                        pCallback->pObject,
+                                        pCallback->Param1,
+                                        pCallback->Param2,
+                                        pCallback->Status);
+                        queueDPC = NV_TRUE;
                     }
                     else
                     {
@@ -559,10 +519,18 @@ kheadProcessVblankCallbacks_IMPL
                     {
                         pCallback->VBlankCount = Count;
 
+                        removed = NV_FALSE;
+
                         //
-                        // If this is not a persistent callback, unlink it.
-                        // Otherwise, it may try to add itself again, and wont be able to add.
+                        // If this is not a persistent callback, unlink it before we call it.
+                        // Otherwise, it may try to add itself again, and wont be able to.
                         //
+                        if ( !(pCallback->Flags & VBLANK_CALLBACK_FLAG_PERSISTENT) )
+                        {
+                            pCallback->Next = NULL;
+                            *ppPrev  = pNext;
+                            removed  = NV_TRUE;
+                        }
 
                         // Call the function now
                         if (pCallback->Proc)
@@ -580,7 +548,7 @@ kheadProcessVblankCallbacks_IMPL
                                                 pCallback->Param1,
                                                 pCallback->Param2,
                                                 pCallback->Status);
-                                bQueueDpc = NV_TRUE;
+                                queueDPC = NV_TRUE;
                             }
                             else
                             {
@@ -594,7 +562,7 @@ kheadProcessVblankCallbacks_IMPL
                                                 pCallback->Param1,
                                                 pCallback->Param2,
                                                 pCallback->Status);
-                                bQueueDpc = NV_TRUE;
+                                queueDPC = NV_TRUE;
                             }
                         }
 
@@ -631,13 +599,17 @@ kheadProcessVblankCallbacks_IMPL
                         }
                         else
                         {
-                            //
-                            // Yes, the proper way to terminate a persistent callback from within a callback is
-                            // to make it non-persistant.  This is what the cursor functions do, and so we should
-                            // check again after the callback.
-                            //
-                            pCallback->Next = NULL;
-                            *ppPrev  = pNext;
+                            if (!removed)
+                            {
+                                //
+                                // Yes, the proper way to terminate a persistent callback from within a callback is
+                                // to make it non-persistant.  This is what the cursor functions do, and so we should
+                                // check again after the callback.
+                                //
+                                pCallback->Next = NULL;
+                                *ppPrev  = pNext;
+                                removed = NV_TRUE;
+                            }
                         }
                     }
                        // This condition arises at wrap time which is about every 331 days at 150 Hz
@@ -658,9 +630,8 @@ kheadProcessVblankCallbacks_IMPL
         }
     }
 
-    if (bQueueDpc)
+    if (queueDPC)
     {
-        osQueueDpc(pGpu);
     }
 
     // After all of that, if the callback lists are null and the vblank is ENABLED, move it to AVAILABLE now.

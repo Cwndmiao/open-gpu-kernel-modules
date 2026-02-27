@@ -31,7 +31,6 @@ const NvU32 g_gmmuFmtVersions[GMMU_FMT_MAX_VERSION_COUNT] =
 {
     GMMU_FMT_VERSION_1,
     GMMU_FMT_VERSION_2,
-    GMMU_FMT_VERSION_3,
 };
 
 const NvU32 g_gmmuFmtBigPageShifts[GMMU_FMT_MAX_BIG_PAGE_SIZES] =
@@ -92,12 +91,6 @@ gmmuFmtPdePhysAddrFld
     const GMMU_APERTURE aperture
 )
 {
-    if (pPde->version == GMMU_FMT_VERSION_3)
-    {
-        // GMMU_FMT_VERSION_3 uses a unified PDE field
-        return &pPde->fldAddr;
-    }
-    else
     {
         switch (aperture)
         {
@@ -148,7 +141,7 @@ void gmmuFmtInitPteCompTags
 {
     NvU32                  i, compPageIndex, endCompPageIndex;
     NvU64                  offset           = surfOffset;
-    const NvU64            pageSize         = mmuFmtLevelPageSize(pLevel);
+    const NvU32            pageSize         = NvU64_LO32(mmuFmtLevelPageSize(pLevel));
     const NV_FIELD_DESC32 *pCtlSubIndexFld  = &pFmt->pPte->fldCompTagSubIndex;
     NvU32                  ctlSubIndexMask  = 0;
     NvU32                  ctlSubIndexShift = 0;

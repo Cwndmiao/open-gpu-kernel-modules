@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2020-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -20,8 +20,6 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-
-#define NVOC_KERNEL_NVLINK_H_PRIVATE_ACCESS_ALLOWED
 
 #include "kernel/gpu/nvlink/kernel_nvlink.h"
 #include "kernel/gpu/nvlink/kernel_ioctrl.h"
@@ -86,8 +84,8 @@ _knvlinkFilterDiscoveredLinks
         pKernelNvlink->discoveredLinks &= ~(pKernelNvlink->vbiosDisabledLinkMask);
 
         NV_PRINTF(LEVEL_INFO,
-                  "Links discovered after VBIOS overrides = 0x%llx\n",
-                  KNVLINK_GET_MASK(pKernelNvlink, discoveredLinks, 64));
+                  "Links discovered after VBIOS overrides = 0x%x\n",
+                  pKernelNvlink->discoveredLinks);
     }
 
     // Filter links that are disabled through regkey overrides
@@ -96,8 +94,8 @@ _knvlinkFilterDiscoveredLinks
         pKernelNvlink->discoveredLinks &= ~(pKernelNvlink->regkeyDisabledLinksMask);
 
         NV_PRINTF(LEVEL_INFO,
-                  "Links after applying disable links regkey = 0x%llx\n",
-                  KNVLINK_GET_MASK(pKernelNvlink, discoveredLinks, 64));
+                  "Links after applying disable links regkey = 0x%x\n",
+                  pKernelNvlink->discoveredLinks);
     }
 
     return NV_OK;
@@ -132,15 +130,13 @@ _knvlinkFilterIoctrls
             continue;
         }
 
-        NvU32 localDiscoveredLinks = kioctrlGetLocalDiscoveredLinks(pGpu, pKernelIoctrl);
-
-        localDiscoveredLinks &=
-            kioctrlGetGlobalToLocalMask(pGpu, pKernelIoctrl, KNVLINK_GET_MASK(pKernelNvlink, discoveredLinks, 32));
+        pKernelIoctrl->localDiscoveredLinks &=
+                 KIOCTRL_LINK_GLOBAL_TO_LOCAL_MASK(pKernelNvlink->discoveredLinks);
 
         // No need to handle the IOCTRL if no links are being enabled
-        if (localDiscoveredLinks == 0x0)
+        if (pKernelIoctrl->localDiscoveredLinks == 0x0)
         {
-            pKernelNvlink->ioctrlMask &= ~(NVBIT(kioctrlGetPublicId(pGpu, pKernelIoctrl)));
+            pKernelNvlink->ioctrlMask &= ~(NVBIT(pKernelIoctrl->PublicId));
         }
     }
     FOR_EACH_INDEX_IN_MASK_END;
@@ -198,12 +194,6 @@ knvlinkConstructEngine_IMPL
     }
 
     //
-    // When GSP inform about link error occurs on this GPU
-    // it will updated to NV_TRUE
-    //
-    pKernelNvlink->bIsGpuDegraded = NV_FALSE;
-
-    //
     // Create MAX KernelIoctrl objects.
     // Later in knvlinkStatePreInit_IMPL, we will remove the objects for
     // IOCTRLs that do not exist in the HW.
@@ -217,27 +207,6 @@ knvlinkConstructEngine_IMPL
         {
             _knvlinkCreateIoctrl(pGpu, pKernelNvlink, ioctrlIdx);
         }
-    }
-
-    //
-    // If not Silicon or EMU then GFW boot is not
-    // possible so set the property to false as soon
-    // as possible
-    //
-    if (!(IS_SILICON(pGpu) || IS_EMULATION(pGpu)))
-    {
-        pKernelNvlink->setProperty(pKernelNvlink,
-            PDB_PROP_KNVLINK_MINION_GFW_BOOT, NV_FALSE);
-    }
-
-    {
-        NVLINK_UNCONTAINED_ERROR_RECOVERY_INFO *pInfo = gpumgrGetNvlinkRecoveryInfo(gpuGetDBDF(pGpu));
-
-        NV_ASSERT_OR_RETURN(pInfo != NULL, NV_ERR_INVALID_STATE);
-        // Mark recovery info as valid for use by error recovery workqueues
-        pInfo->bValid = NV_TRUE;
-        pInfo->DomainBusDevice = gpuGetDBDF(pGpu);
-        pInfo->active = 0;
     }
 
     return NV_OK;
@@ -261,10 +230,6 @@ knvlinkIsPresent_IMPL
 )
 {
     NV_STATUS status = NV_OK;
-
-    // Mark NVLINK as absent when HCC SPT is enabled
-    if (gpuIsCCFeatureEnabled(pGpu) && (!gpuIsCCMultiGpuProtectedPcieModeEnabled(pGpu) && !gpuIsCCMultiGpuNvleModeEnabled(pGpu)))
-        return NV_FALSE;
 
     // On GSP clients, retrieve all device discovery info from GSP through RPC
     status = knvlinkCopyNvlinkDeviceInfo(pGpu, pKernelNvlink);
@@ -356,9 +321,8 @@ knvlinkStateLoad_IMPL
     KernelMIGManager *pKernelMIGManager = GPU_GET_KERNEL_MIG_MANAGER(pGpu);
     NvBool            bMIGNvLinkP2PDisabled = ((pKernelMIGManager != NULL) &&
                                                !kmigmgrIsMIGNvlinkP2PSupported(pGpu, pKernelMIGManager));
-    NvU64             preInitializedLinks;
+    NvU32             preInitializedLinks;
     NvU32             i;
-    OBJTMR            *pTmr = GPU_GET_TIMER(pGpu);
 
     //
     // If we are on the resume path, nvlinkIsPresent will not be called,
@@ -403,14 +367,6 @@ knvlinkStateLoad_IMPL
         if (!knvlinkPoweredUpForD3_HAL(pGpu, pKernelNvlink) &&
             !bMIGNvLinkP2PDisabled)
         {
-            // Set the link training mode to be used by the device
-            status = knvlinkIsAliSupported_HAL(pGpu, pKernelNvlink);
-            if (status != NV_OK)
-            {
-                NV_PRINTF(LEVEL_ERROR, "Failed to get ALI status\n");
-                goto knvlinkStateLoad_end;
-            }
-
             // Add the NVGPU device to the nvlink core
             status = knvlinkCoreAddDevice(pGpu, pKernelNvlink);
             if (status != NV_OK)
@@ -441,10 +397,10 @@ knvlinkStateLoad_IMPL
     }
 
     // Remove the init disabled links from the discovered links mask
-    pKernelNvlink->discoveredLinks &= ~((NvU64)pKernelNvlink->initDisabledLinksMask);
+    pKernelNvlink->discoveredLinks &= ~(pKernelNvlink->initDisabledLinksMask);
 
     // Track un-connected links, we assume all discovered links are connected.
-    pKernelNvlink->connectedLinksMask = KNVLINK_GET_MASK(pKernelNvlink, discoveredLinks, 32);
+    pKernelNvlink->connectedLinksMask = pKernelNvlink->discoveredLinks;
 
     // Initialize initializedLinks to 0 (assume no links initialized)
     pKernelNvlink->initializedLinks = 0;
@@ -498,8 +454,8 @@ knvlinkStateLoad_IMPL
     //
     if (pKernelNvlink->bRegistryLinkOverride)
     {
-        pKernelNvlink->enabledLinks = KNVLINK_GET_MASK(pKernelNvlink, discoveredLinks, 64) &
-                                      KNVLINK_GET_MASK(pKernelNvlink, registryLinkMask, 64);
+        pKernelNvlink->enabledLinks = pKernelNvlink->discoveredLinks &
+                                      pKernelNvlink->registryLinkMask;
     }
     else if (bMIGNvLinkP2PDisabled)
     {
@@ -508,21 +464,21 @@ knvlinkStateLoad_IMPL
     }
     else
     {
-        pKernelNvlink->enabledLinks = KNVLINK_GET_MASK(pKernelNvlink, discoveredLinks, 64);
+        pKernelNvlink->enabledLinks = pKernelNvlink->discoveredLinks;
     }
 
     // Sense NVLink bridge presence and remove links on missing bridges.
     knvlinkFilterBridgeLinks_HAL(pGpu, pKernelNvlink);
 
     // Disconnected links mask tracks links whose remote ends are not discovered
-    pKernelNvlink->disconnectedLinkMask = KNVLINK_GET_MASK(pKernelNvlink, enabledLinks, 64);
+    pKernelNvlink->disconnectedLinkMask = pKernelNvlink->enabledLinks;
 
     if (!IS_RTLSIM(pGpu) || pKernelNvlink->bForceEnableCoreLibRtlsims)
     {
         if (!knvlinkPoweredUpForD3_HAL(pGpu, pKernelNvlink))
         {
             // Register links in the nvlink core library
-            FOR_EACH_INDEX_IN_MASK(64, i, KNVLINK_GET_MASK(pKernelNvlink, enabledLinks, 64))
+            FOR_EACH_INDEX_IN_MASK(32, i, pKernelNvlink->enabledLinks)
             {
                 status = knvlinkCoreAddLink(pGpu, pKernelNvlink, i);
                 if (status != NV_OK)
@@ -570,10 +526,6 @@ knvlinkStateLoad_IMPL
         sysEnableExternalFabricMgmt(pSys);
         sysForceInitFabricManagerState(pSys);
     }
-    if (GPU_IS_NVSWITCH_DETECTED(pGpu))
-    {
-        sysEnableExternalFabricMgmt(pSys);
-    }
 
     //
     // WAR Bug# 3261027: Sync-up External Fabric Management status with GSP-RM.
@@ -591,7 +543,6 @@ knvlinkStateLoad_IMPL
     // If we are running on CPU-RM or monolithic, process SYSMEM links, if present
     // on the system.
     //
-
     status = _knvlinkProcessSysmemLinks(pGpu, pKernelNvlink,
                         (preInitializedLinks != pKernelNvlink->initializedLinks));
     if (status != NV_OK)
@@ -608,91 +559,12 @@ knvlinkStateLoad_IMPL
     //
     if (!(flags & GPU_STATE_FLAGS_PRESERVING))
     {
-        if ((status = kbusCheckFlaSupportedAndInit_HAL(pGpu, GPU_GET_KERNEL_BUS(pGpu), 0, 0)) != NV_OK)
+        if ((status = kbusInitFla_HAL(pGpu, GPU_GET_KERNEL_BUS(pGpu), 0, 0)) != NV_OK)
         {
             NV_PRINTF(LEVEL_ERROR, "Init FLA failed, status:0x%x\n", status);
             NV_ASSERT(status == NV_OK);
         }
     }
-
-    //
-    // If ALI or non-ALI training is forced, then shutdown the links and re-train as GFW
-    // will have already trained the links and the intent is for the driver
-    // to train up the links
-    //
-    if ((pKernelNvlink->getProperty(pKernelNvlink,
-                                    PDB_PROP_KNVLINK_MINION_FORCE_ALI_TRAINING)      ||
-         pKernelNvlink->getProperty(pKernelNvlink,
-                                    PDB_PROP_KNVLINK_MINION_FORCE_NON_ALI_TRAINING)) &&
-         pKernelNvlink->getProperty(pKernelNvlink, PDB_PROP_KNVLINK_MINION_GFW_BOOT))
-    {
-        knvlinkCoreShutdownDeviceLinks(pGpu, pKernelNvlink, NV_FALSE);
-    }
-
-    if (!knvlinkIsForcedConfig(pGpu, pKernelNvlink) && pKernelNvlink->bEnableAli &&
-        (pKernelNvlink->ipVerNvlink < NVLINK_VERSION_50) &&
-        (!pKernelNvlink->getProperty(pKernelNvlink, PDB_PROP_KNVLINK_MINION_GFW_BOOT) ||
-          pKernelNvlink->getProperty(pKernelNvlink,
-                                     PDB_PROP_KNVLINK_MINION_FORCE_ALI_TRAINING)))
-    {
-        status = knvlinkPreTrainLinksToActiveAli(pGpu, pKernelNvlink,
-                                                 KNVLINK_GET_MASK(pKernelNvlink, enabledLinks, 32), NV_TRUE);
-        if (status != NV_OK)
-        {
-            goto knvlinkStateLoad_end;
-        }
-
-        //
-        // For each link, request a change to active.
-        // Don't have to wait for the request to finish as links
-        // will be queries via DLSTAT to know their status and training
-        // progression.
-        //
-        FOR_EACH_INDEX_IN_MASK(32, i, KNVLINK_GET_MASK(pKernelNvlink, enabledLinks, 32))
-        {
-            status = knvlinkTrainLinksToActiveAli(pGpu, pKernelNvlink, NVBIT(i), NV_FALSE);
-            if (status != NV_OK)
-            {
-                NV_PRINTF(LEVEL_ERROR,
-                          "Failed to request Link %d to transition to active\n", i);
-            }
-
-            //
-            // Bug 3550098: the sleep has to be removed eventually as it
-            // isn't POR for RM to be waiting on sending these requests.
-            // Bug 3292497 references this as a WAR for EMU in the short term to
-            // help prevent starvation on MINION linkstate requests
-            //
-            if (IS_EMULATION(pGpu))
-            {
-                // Delay the next set of links by 8 seconds
-                osDelayUs(8000000);
-            }
-        }
-        FOR_EACH_INDEX_IN_MASK_END;
-    }
-
-    FOR_EACH_INDEX_IN_MASK(32, i, KNVLINK_GET_MASK(pKernelNvlink, enabledLinks, 32))
-    {
-        status = tmrEventCreate(pTmr, &pKernelNvlink->nvlinkLinks[i].pTmrEvent,
-                            ioctrlFaultUpTmrHandler, NULL,
-                            TMR_FLAGS_NONE);
-        if (status != NV_OK)
-        {
-           NV_PRINTF(LEVEL_ERROR,
-                          "Failed to create TmrEvent for Link %d\n", i);
-        }
-    }
-    FOR_EACH_INDEX_IN_MASK_END;
-
-    listInit(&pKernelNvlink->faultUpLinks, portMemAllocatorGetGlobalNonPaged());
-
-    knvlinkDumpCallbackRegister_HAL(pGpu, pKernelNvlink);
-
-    knvlinkPostSchedulingEnableCallbackRegister_HAL(pGpu, pKernelNvlink);
-
-    // Update list of HSHUB supported RBM modes
-    knvlinkGetHshubSupportedRbmModes_HAL(pGpu, pKernelNvlink);
 
 knvlinkStateLoad_end:
 
@@ -722,13 +594,9 @@ knvlinkStatePostLoad_IMPL
 )
 {
     NV_STATUS  status              = NV_OK;
-    NV_STATUS  trainingStatus      = NV_OK;
     OBJGPU    *pRemoteGpu          = NULL;
-    NvU32      linkTrainingTimeout = 15000000;
     NvU32      gpuInstance;
     NvU32      gpuMask;
-    RMTIMEOUT  timeout;
-
     knvlinkCoreUpdateDeviceUUID(pGpu, pKernelNvlink);
 
     if (!knvlinkIsForcedConfig(pGpu, pKernelNvlink))
@@ -739,7 +607,7 @@ knvlinkStatePostLoad_IMPL
         // done for ALI since topology discovery can only happen after
         // verification training is complete
         //
-        if ((!pKernelNvlink->bEnableAli) &&
+        if (
             (pKernelNvlink->bEnableSafeModeAtLoad || pKernelNvlink->bEnableTrainingAtLoad ||
              pKernelNvlink->bVerifTrainingEnable))
         {
@@ -754,55 +622,15 @@ knvlinkStatePostLoad_IMPL
         //
         if (pKernelNvlink->bEnableTrainingAtLoad || pKernelNvlink->bVerifTrainingEnable)
         {
-            if (pKernelNvlink->bEnableAli &&
-                knvlinkDiscoverPostRxDetLinks_HAL(pGpu, pKernelNvlink, pGpu) == NV_OK)
-            {
-                gpuSetTimeout(pGpu, linkTrainingTimeout, &timeout, IS_SILICON(pGpu) ?
-                    (GPU_TIMEOUT_FLAGS_BYPASS_THREAD_STATE | GPU_TIMEOUT_FLAGS_DEFAULT) : 0);
-                do
-                {
-
-                    status = gpuCheckTimeout(pGpu, &timeout);
-                    trainingStatus = knvlinkCheckTrainingIsComplete(pGpu, pGpu, pKernelNvlink);
-                    if (trainingStatus == NV_OK)
-                    {
-                        break;
-                    }
-                    osSpinLoop();
-                }
-                while (status != NV_ERR_TIMEOUT);
-
-                if (status != NV_OK)
-                {
-                    NV_PRINTF(LEVEL_ERROR,"Timedout while checking to see if training complete!\n");
-                }
-
-                // Need to get the renote Device Info for ALI
-                knvlinkCoreGetRemoteDeviceInfo(pGpu, pKernelNvlink);
-            }
-            else
             {
                 status = gpumgrGetGpuAttachInfo(NULL, &gpuMask);
                 NV_ASSERT_OR_RETURN(status == NV_OK, status);
                 gpuInstance = 0;
                 while ((pRemoteGpu = gpumgrGetNextGpu(gpuMask, &gpuInstance)) != NULL)
                 {
-                    if (gpuIsStateLoaded(pRemoteGpu) || gpuIsStateLoading(pRemoteGpu))
-                    {
-                        knvlinkTrainP2pLinksToActive(pGpu, pRemoteGpu, pKernelNvlink);
-                    }
+                    knvlinkTrainP2pLinksToActive(pGpu, pRemoteGpu, pKernelNvlink);
                 }
             }
-        }
-    }
-
-    // We check for NVLE enablement here for the production/non-MODS case
-    if (pKernelNvlink->bNvleModeRegkey)
-    {
-        if (!knvlinkIsNvleEnabled_HAL(pGpu, pKernelNvlink))
-        {
-            NV_PRINTF(LEVEL_ERROR," NVLE not enabled on GPU%d\n", pGpu->gpuInstance);
-            return NV_ERR_FEATURE_NOT_ENABLED;
         }
     }
 
@@ -811,11 +639,6 @@ knvlinkStatePostLoad_IMPL
     {
         NV_PRINTF(LEVEL_ERROR," failed for GPU 0x%x\n", pGpu->gpuInstance);
         return status;
-    }
-
-    if (!GPU_IS_NVSWITCH_DETECTED(pGpu))
-    {
-        NV_ASSERT_OK_OR_RETURN(knvlinkSetDirectConnectBaseAddress_HAL(pGpu, pKernelNvlink));
     }
 
     return NV_OK;
@@ -847,8 +670,6 @@ knvlinkStateUnload_IMPL
         kbusDestroyFla_HAL(pGpu, GPU_GET_KERNEL_BUS(pGpu));
     }
 
-    knvlinkPostSchedulingEnableCallbackUnregister_HAL(pGpu, pKernelNvlink);
-
     return NV_OK;
 }
 
@@ -870,9 +691,6 @@ knvlinkStatePostUnload_IMPL
 {
     OBJSYS    *pSys   = SYS_GET_INSTANCE();
     NV_STATUS  status = NV_OK;
-#if defined(INCLUDE_NVLINK_LIB)
-    NvU32 linkId = 0;
-#endif
 
     if ((knvlinkGetNumLinksToSystem(pGpu, pKernelNvlink) != 0) &&
         pGpu->getProperty(pGpu, PDB_PROP_GPU_COHERENT_CPU_MAPPING))
@@ -925,8 +743,7 @@ knvlinkStatePostUnload_IMPL
     // platforms (in discussion with ARCH for non-NVSwitch platforms).
     //
     if (pSys->getProperty(pSys, PDB_PROP_SYS_NVSWITCH_IS_PRESENT) ||
-        knvlinkIsNvswitchProxyPresent(pGpu, pKernelNvlink)        ||
-        (GPU_IS_NVSWITCH_DETECTED(pGpu)))
+        knvlinkIsNvswitchProxyPresent(pGpu, pKernelNvlink))
     {
         knvlinkRemoveMapping_HAL(pGpu, pKernelNvlink, NV_FALSE,
                                  ((1 << NVLINK_MAX_PEERS_SW) - 1),
@@ -941,14 +758,14 @@ knvlinkStatePostUnload_IMPL
                         !pSys->getProperty(pSys, PDB_PROP_SYS_FABRIC_IS_EXTERNALLY_MANAGED) &&
                         !API_GPU_IN_RESET_SANITY_CHECK(pGpu))
     {
-        NV2080_CTRL_INTERNAL_NVLINK_DISABLE_DL_INTERRUPTS_PARAMS params;
+        NV2080_CTRL_NVLINK_DISABLE_DL_INTERRUPTS_PARAMS params;
 
         portMemSet(&params, 0, sizeof(params));
-        params.linkMask = KNVLINK_GET_MASK(pKernelNvlink, enabledLinks, 32);
+        params.linkMask = pKernelNvlink->enabledLinks;
 
         // Disable all the DL interrupts
         status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                     NV2080_CTRL_CMD_INTERNAL_NVLINK_DISABLE_DL_INTERRUPTS,
+                                     NV2080_CTRL_CMD_NVLINK_DISABLE_DL_INTERRUPTS,
                                      (void *)&params, sizeof(params));
         if (status != NV_OK)
         {
@@ -957,7 +774,7 @@ knvlinkStatePostUnload_IMPL
         }
 
         // Shutdown all the links through pseudo-clean shutdown
-        status = knvlinkPrepareForXVEReset(pGpu, pKernelNvlink, NV_FALSE);
+        status = knvlinkPrepareForXVEReset(pGpu, pKernelNvlink);
         if (status != NV_OK)
         {
             NV_PRINTF(LEVEL_ERROR,
@@ -966,25 +783,6 @@ knvlinkStatePostUnload_IMPL
             return status;
         }
     }
-
-#if defined(INCLUDE_NVLINK_LIB)
-    FOR_EACH_INDEX_IN_MASK(32, linkId, KNVLINK_GET_MASK(pKernelNvlink, enabledLinks, 32))
-    {
-        // Update remote GPU disconnectedLinkMasks
-        OBJGPU *pRemoteGpu = gpumgrGetGpuFromBusInfo(pKernelNvlink->nvlinkLinks[linkId].remoteEndInfo.domain,
-                                                     pKernelNvlink->nvlinkLinks[linkId].remoteEndInfo.bus,
-                                                     pKernelNvlink->nvlinkLinks[linkId].remoteEndInfo.device);
-        if (!API_GPU_IN_RESET_SANITY_CHECK(pRemoteGpu))
-        {
-            KernelNvlink *pRemoteKernelNvlink = GPU_GET_KERNEL_NVLINK(pRemoteGpu);
-
-            pRemoteKernelNvlink->disconnectedLinkMask |= NVBIT64(pKernelNvlink->nvlinkLinks[linkId].remoteEndInfo.linkNumber);
-        }
-    }
-    FOR_EACH_INDEX_IN_MASK_END;
-#endif
-
-    listDestroy(&pKernelNvlink->faultUpLinks);
 
 knvlinkStatePostUnload_end:
 
@@ -1010,37 +808,15 @@ _knvlinkPurgeState
 {
     KernelIoctrl *pKernelIoctrl = NULL;
     NvU32         ioctrlIdx;
+
 #if defined(INCLUDE_NVLINK_LIB)
 
-    NvU32         linkId;
-    OBJTMR       *pTmr = GPU_GET_TIMER(pGpu);
     KernelMIGManager *pKernelMIGManager = GPU_GET_KERNEL_MIG_MANAGER(pGpu);
     NvBool bMIGNvLinkP2PDisabled = ((pKernelMIGManager != NULL) &&
                           !kmigmgrIsMIGNvlinkP2PSupported(pGpu, pKernelMIGManager));
 
-    FOR_EACH_INDEX_IN_MASK(32, linkId, KNVLINK_GET_MASK(pKernelNvlink, discoveredLinks, 32))
-    {
-        if ((pKernelNvlink->nvlinkLinks[linkId].pTmrEvent != NULL) && (pTmr != NULL))
-        {
-            tmrEventDestroy(pTmr, pKernelNvlink->nvlinkLinks[linkId].pTmrEvent);
-            pKernelNvlink->nvlinkLinks[linkId].pTmrEvent = NULL;
-        }
-    }
-    FOR_EACH_INDEX_IN_MASK_END;
-
-    // RM disables NVLink at runtime in Hopper so device un-registration can't be skipped
-    if (!IsGH100orBetter(pGpu))
-    {
-        // With MIG NvLink registration was skipped with core-lib
-        if (bMIGNvLinkP2PDisabled)
-        {
-            NV_PRINTF(LEVEL_INFO,
-                      "Skipping device/link un-registration in MIG enabled path\n");
-            goto _knvlinkPurgeState_end;
-        }
-    }
-
-    if (knvlinkPoweredUpForD3_HAL(pGpu, pKernelNvlink))
+    // With MIG NvLink registration was skipped with core-lib
+    if (knvlinkPoweredUpForD3_HAL(pGpu, pKernelNvlink) || bMIGNvLinkP2PDisabled)
     {
         NV_PRINTF(LEVEL_INFO,
                   "Skipping device/link un-registration in RTD3 GC6 entry path\n");
@@ -1051,8 +827,10 @@ _knvlinkPurgeState
     {
         if (pKernelNvlink->pNvlinkDev)
         {
+            NvU32 linkId;
+
             // Un-register the links from nvlink core library
-            FOR_EACH_INDEX_IN_MASK(32, linkId, KNVLINK_GET_MASK(pKernelNvlink, enabledLinks, 32))
+            FOR_EACH_INDEX_IN_MASK(32, linkId, pKernelNvlink->enabledLinks)
             {
                 knvlinkCoreRemoveLink(pGpu, pKernelNvlink, linkId);
             }
@@ -1061,18 +839,6 @@ _knvlinkPurgeState
             // Un-register the nvgpu device from nvlink core library
             knvlinkCoreRemoveDevice(pGpu, pKernelNvlink);
         }
-    }
-
-    //
-    // pGidString is allocated within knvlinkStatePostLoad -> knvlinkCoreUpdateDeviceUUID
-    // so need to free it during destruct
-    // Freeing it within knvlinkCoreRemoveDevice could create problems if
-    // AddDevice/RemoveDevice are used outside StateLoad/StatePostUnload/StateDestroy in the future
-    //
-    if (pKernelNvlink->pGidString)
-    {
-        portMemFree(pKernelNvlink->pGidString);
-        pKernelNvlink->pGidString = NULL;
     }
 
 _knvlinkPurgeState_end:
@@ -1098,123 +864,13 @@ _knvlinkPurgeState_end:
     }
 
     // Destroy the chiplib configuration memory
-    portMemFree(pKernelNvlink->pLinkConnection);
-    pKernelNvlink->pLinkConnection = NULL;
+    if (pKernelNvlink->pLinkConnection)
+    {
+        portMemFree(pKernelNvlink->pLinkConnection);
+        pKernelNvlink->pLinkConnection = NULL;
+    }
 
     return NV_OK;
-}
-
-/*!
- * @brief Workitem to shutdown links async to any error
- * paths that were taken
- *
- * @param[in] pGpu           OBJGPU pointer
- * @param[in] pKernelNvlink  KernelNvlink pointer
- *
- */
-void
-knvlinkShutdownLinks_WORKITEM
-(
-    NvU32 gpuInstance,
-    void *pData
-)
-{
-    OBJGPU *pGpu                = gpumgrGetGpu(gpuInstance);
-    KernelNvlink *pKernelNvlink = GPU_GET_KERNEL_NVLINK(pGpu);
-
-    // Sanity Checks
-    NV_CHECK_OR_RETURN_VOID(LEVEL_INFO,
-            (pGpu != NULL &&
-             pKernelNvlink != NULL));
-
-    NV_ASSERT_OR_RETURN_VOID(
-        knvlinkCoreShutdownDeviceLinks(pGpu, pKernelNvlink, NV_TRUE) == NV_OK);
-}
-
-/*!
- * @brief Degraded Mode will be set if other end of the linkId
- *        is not degraded.
- *        Once degraded destroy the RM NVLink SW state
- *
- * @param[in] pGpu           OBJGPU pointer
- * @param[in] pKernelNvlink  KernelNvlink pointer
- * @param[in] linkId         linkId of the error link
- *
- */
-void
-knvlinkSetDegradedMode_IMPL
-(
-    OBJGPU       *pGpu,
-    KernelNvlink *pKernelNvlink,
-    NvS32         linkId
-)
-{
-    NV_STATUS status = NV_OK;
-
-    // Prevent invalid shift later
-    NV_ASSERT_OR_RETURN_VOID((linkId == -1) || ((linkId >= 0) && (linkId < 32)));
-
-    if (pKernelNvlink == NULL)
-    {
-        NV_PRINTF(LEVEL_ERROR,
-                "Failed to get Local Nvlink info for linkId %d to update Degraded GPU%d status\n",
-                linkId, pGpu->gpuInstance);
-
-        return;
-    }
-
-    if (pKernelNvlink->bIsGpuDegraded)
-    {
-        return;
-    }
-
-    pKernelNvlink->bIsGpuDegraded = NV_TRUE;
-    NV_PRINTF(LEVEL_ERROR,
-            "GPU%d marked Degraded. Error originated on linkId %d!\n",
-            pGpu->gpuInstance, linkId);
-
-    // Queue a workitem to handle rest of the degraded mode handling
-
-    NV_CHECK_OK_OR_ELSE(status,
-        LEVEL_ERROR,
-        osQueueWorkItem(pGpu,
-                        knvlinkShutdownLinks_WORKITEM,
-                        NULL,
-                        (OS_QUEUE_WORKITEM_FLAGS_LOCK_API_RO |
-                         OS_QUEUE_WORKITEM_FLAGS_LOCK_GPU_GROUP_SUBDEVICE)),
-        return;);
-}
-
-/*!
- * @brief Gets degraded mode for current GPU
- *
- * @param[in] pGpu           OBJGPU pointer
- * @param[in] pKernelNvlink  KernelNvlink pointer
- *
- * @return Current NVLink degraded mode
- */
-NvBool
-knvlinkGetDegradedMode_IMPL
-(
-    OBJGPU       *pGpu,
-    KernelNvlink *pKernelNvlink
-)
-{
-    return pKernelNvlink->bIsGpuDegraded;
-}
-
-/*!
- * @brief Is NVLINK Uncontained error recovery active?
- */
-NvBool
-knvlinkIsUncontainedErrorRecoveryActive_IMPL
-(
-    OBJGPU       *pGpu,
-    KernelNvlink *pKernelNvlink
-)
-{
-    NVLINK_UNCONTAINED_ERROR_RECOVERY_INFO *pInfo = gpumgrGetNvlinkRecoveryInfo(gpuGetDBDF(pGpu));
-    return ((pInfo != NULL) && pInfo->bValid && (portAtomicOrU32(&pInfo->active, 0) != 0));
 }
 
 void
@@ -1229,7 +885,7 @@ knvlinkDestruct_IMPL
 
     // Destroy the RM NVLink state
     _knvlinkPurgeState(pGpu, pKernelNvlink);
-
+  
     // Free Ioctrls
     for (ioctrlIdx = 0; ioctrlIdx < NVLINK_MAX_IOCTRLS_SW; ioctrlIdx++)
     {
@@ -1265,26 +921,26 @@ _knvlinkProcessSysmemLinks
 {
     NV_STATUS status = NV_OK;
 
-#if defined(NVCPU_AARCH64)
+#if defined(NVCPU_PPC64LE) || defined(NVCPU_AARCH64)
     if (pKernelNvlink->getProperty(pKernelNvlink, PDB_PROP_KNVLINK_SYSMEM_SUPPORT_ENABLED))
     {
         //
-        // In case of Tegra, the sysmem links will already have
+        // In case of IBM or Tegra, the sysmem links will already have
         // been registered in nvlink core library. In order to trigger
         // topology detection, call knvlinkCoreGetRemoteDeviceInfo
         //
         if (!knvlinkIsForcedConfig(pGpu, pKernelNvlink) && !pKernelNvlink->pLinkConnection)
         {
             //
-            // Establish the current link topology and enable SYSMEM links.
-            // If any of the discovered links are SYSMEM, they will be trained,
+            // Establish the current link topology and enable IBM CPU/SYSMEM links.
+            // If any of the discovered links are CPU/SYSMEM, they will be trained,
             // post-enabled, and then enabled in HSHUB when the call has completed.
             //
             status = knvlinkCoreGetRemoteDeviceInfo(pGpu, pKernelNvlink);
             if (status != NV_OK)
             {
                 NV_PRINTF(LEVEL_ERROR,
-                          "Failed call to get remote device info during SYSMEM links "
+                          "Failed call to get remote device info during IBM CPU/SYSMEM links "
                           "setup, failing NVLink StateLoad on GPU%d!!!\n\n",
                           pGpu->gpuInstance);
 
@@ -1304,37 +960,16 @@ _knvlinkProcessSysmemLinks
         knvlinkUpdateCurrentConfig(pGpu, pKernelNvlink);
     }
 #endif
-
-    if (knvlinkIsForcedConfig(pGpu, pKernelNvlink) || pKernelNvlink->pLinkConnection)
-    {
-        //
-        // On Hopper+ chips we enable programming of MUX registers. However,
-        // we need to follow a strict sequence between updating the MUX registers,
-        // the CONFIG0 registers and setting buffer_rdy for the enabled links.
-        // BUFFER_RDY should always be set only after *all* HSHUB registers needed
-        // for traffic are programmed. Since we did not support this on pre-Hopper,
-        // we need to change the sequence of where we set BUFFER_RDY relative to
-        // the other HSHUB programming.
-        //
-        status = knvlinkPostSetupNvlinkPeer_HAL(pGpu, pKernelNvlink);
-        if (status != NV_OK)
-        {
-            NV_PRINTF(LEVEL_ERROR,
-                      "Failed to perform NvLink post setup!\n");
-            return status;
-        }
-    }
-
     // Set Buffer ready for the sysmem links
-    NV2080_CTRL_INTERNAL_NVLINK_PROGRAM_BUFFERREADY_PARAMS programBufferRdyParams;
+    NV2080_CTRL_NVLINK_PROGRAM_BUFFERREADY_PARAMS programBufferRdyParams;
 
     portMemSet(&programBufferRdyParams, 0, sizeof(programBufferRdyParams));
-    programBufferRdyParams.flags        = NV2080_CTRL_INTERNAL_NVLINK_PROGRAM_BUFFERREADY_FLAGS_SET;
+    programBufferRdyParams.flags        = NV2080_CTRL_NVLINK_PROGRAM_BUFFERREADY_FLAGS_SET;
     programBufferRdyParams.bSysmem      = NV_TRUE;
     programBufferRdyParams.peerLinkMask = 0;
 
     status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                 NV2080_CTRL_CMD_INTERNAL_NVLINK_PROGRAM_BUFFERREADY,
+                                 NV2080_CTRL_CMD_NVLINK_PROGRAM_BUFFERREADY,
                                  (void *)&programBufferRdyParams,
                                  sizeof(programBufferRdyParams));
     if (status != NV_OK)
@@ -1359,11 +994,11 @@ _knvlinkProcessSysmemLinks
         // PPC+GV100.
         //
 
-        NV2080_CTRL_INTERNAL_NVLINK_ENABLE_SYSMEM_NVLINK_ATS_PARAMS sysmemNvlinkAtsParams;
+        NV2080_CTRL_NVLINK_ENABLE_SYSMEM_NVLINK_ATS_PARAMS sysmemNvlinkAtsParams;
         portMemSet(&sysmemNvlinkAtsParams, 0, sizeof(sysmemNvlinkAtsParams));
 
         status = knvlinkExecGspRmRpc(pGpu, pKernelNvlink,
-                                     NV2080_CTRL_CMD_INTERNAL_NVLINK_ENABLE_SYSMEM_NVLINK_ATS,
+                                     NV2080_CTRL_CMD_NVLINK_ENABLE_SYSMEM_NVLINK_ATS,
                                      (void *)&sysmemNvlinkAtsParams,
                                      sizeof(sysmemNvlinkAtsParams));
         if (status != NV_OK)
@@ -1374,6 +1009,8 @@ _knvlinkProcessSysmemLinks
 
         status = kmemsysSetupCoherentCpuLink(pGpu, GPU_GET_KERNEL_MEMORY_SYSTEM(pGpu), bFlush);
         NV_ASSERT_OR_RETURN(status == NV_OK, status);
+
+        osSetNVLinkSysmemLinkState(pGpu, NV_TRUE);
     }
 
     return status;

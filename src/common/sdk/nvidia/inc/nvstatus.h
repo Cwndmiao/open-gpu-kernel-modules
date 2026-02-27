@@ -24,6 +24,11 @@
 #ifndef SDK_NVSTATUS_H
 #define SDK_NVSTATUS_H
 
+/* XAPIGEN - this file is not suitable for (nor needed by) xapigen.         */
+/*           Rather than #ifdef out every such include in every sdk         */
+/*           file, punt here.                                               */
+#if !defined(XAPIGEN)        /* rest of file */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -119,5 +124,7 @@ const char *nvstatusToString(NV_STATUS nvStatusIn);
 #ifdef __cplusplus
 }
 #endif
+
+#endif // XAPIGEN
 
 #endif /* SDK_NVSTATUS_H */

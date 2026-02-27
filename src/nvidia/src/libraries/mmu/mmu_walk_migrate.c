@@ -22,6 +22,9 @@
  */
 
 /*--------------------------------Includes------------------------------------*/
+#if defined(SRT_BUILD)
+#include "shrdebug.h"
+#endif
 #include "mmu_walk_private.h"
 #include "gpu/mem_mgr/mem_desc.h"
 
@@ -55,7 +58,7 @@ mmuWalkModifyLevelInstance
     NV_ASSERT_OR_RETURN(NULL != pLevel, NV_ERR_INVALID_ARGUMENT);
 
     // Lookup level instance.
-    NV_CHECK_OK_OR_RETURN(LEVEL_ERROR, btreeSearch(vaBase, (NODE**)&pLevelInst, &pLevel->pInstances->node));
+    btreeSearch(vaBase, (NODE**)&pLevelInst, &pLevel->pInstances->node);
     NV_ASSERT_OR_RETURN(NULL != pLevelInst, NV_ERR_INVALID_ARGUMENT);
 
     // Temp old memory.
@@ -125,7 +128,7 @@ mmuWalkModifyLevelInstance
         const NvU32             entryIndex = mmuFmtVirtAddrToEntryIndex(pParent->pFmt, vaBase);
 
         // Lookup parent instance.
-        NV_CHECK_OK_OR_RETURN(LEVEL_ERROR, btreeSearch(vaBase, (NODE**)&pParentInst, &pParent->pInstances->node));
+        btreeSearch(vaBase, (NODE**)&pParentInst, &pParent->pInstances->node);
         NV_ASSERT(NULL != pParentInst);
 
         // Collect sub-level memory.
@@ -142,7 +145,7 @@ mmuWalkModifyLevelInstance
             else
             {
                 MMU_WALK_LEVEL_INST *pOtherInst = NULL;
-                NV_CHECK_OK_OR_RETURN(LEVEL_ERROR, btreeSearch(vaBase, (NODE**)&pOtherInst, &pSubLevel->pInstances->node));
+                btreeSearch(vaBase, (NODE**)&pOtherInst, &pSubLevel->pInstances->node);
                 if (NULL != pOtherInst)
                 {
                     pSubMemDescs[i] = pOtherInst->pMemDesc;

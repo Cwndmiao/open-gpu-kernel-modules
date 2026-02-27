@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2012-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2012-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: MIT
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -71,10 +71,9 @@ osCreateMemFromOsDescriptor
     NV_STATUS rmStatus;
     void *pPrivate;
 
-    pClient = serverutilGetClientUnderLock(hClient);
     if ((pDescriptor == NvP64_NULL) ||
         (*pLimit == 0) ||
-        (pClient == NULL))
+        (serverutilGetClientUnderLock(hClient, &pClient) != NV_OK))
     {
         return NV_ERR_INVALID_PARAM_STRUCT;
     }
@@ -82,12 +81,13 @@ osCreateMemFromOsDescriptor
     //
     // For the sake of simplicity, unmatched RM and OS page
     // sizes are not currently supported in this path, except for
-    // aarch64.
+    // PPC64LE and aarch64.
     //
     // Also, the nvmap handle is sent which can be any random number so
     // the virtual address alignment sanity check can't be done here.
     //
-    if (!NVCPU_IS_AARCH64 &&
+    if (!NVCPU_IS_PPC64LE &&
+        !NVCPU_IS_AARCH64 &&
         (NV_RM_PAGE_SIZE != os_page_size))
     {
         return NV_ERR_NOT_SUPPORTED;
@@ -184,32 +184,14 @@ osCreateMemdescFromPages
     void **ppPrivate
 )
 {
-    NV_STATUS rmStatus = NV_OK;
+    NV_STATUS rmStatus;
     MEMORY_DESCRIPTOR *pMemDesc;
     NvU64 memdescFlags = MEMDESC_FLAGS_NONE;
     NvU32 gpuCachedFlags;
-    NvBool bUnprotected = NV_FALSE;
-    NvU64 osPageCount;
-
-    //
-    // Align size up to os page size. This is important in
-    // order to support submemdesc mappings at native page size.
-    // Once dynamic tracking is enabled this will not be needed
-    // as all submemory will get tracked at its native page size.
-    //
-    size = NV_ALIGN_UP64(size, os_page_size);
-
-    osPageCount = size >> os_page_shift;
 
     if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_NISO_DISPLAY, _YES, flags))
     {
         memdescFlags |= MEMDESC_FLAGS_MEMORY_TYPE_DISPLAY_NISO;
-    }
-
-    if (FLD_TEST_DRF(OS02, _FLAGS, _MEMORY_PROTECTION, _UNPROTECTED, flags))
-    {
-        memdescFlags |= MEMDESC_FLAGS_ALLOC_IN_UNPROTECTED_MEMORY;
-        bUnprotected = NV_TRUE;
     }
 
     rmStatus = memdescCreate(ppMemDesc, pGpu, size, 0,
@@ -227,9 +209,9 @@ osCreateMemdescFromPages
 
     pMemDesc = *ppMemDesc;
     rmStatus = nv_register_user_pages(NV_GET_NV_STATE(pGpu),
-            osPageCount,
+            NV_RM_PAGES_TO_OS_PAGES(pMemDesc->PageCount),
             memdescGetPteArray(pMemDesc, AT_CPU), pImportPriv,
-            ppPrivate, bUnprotected);
+            ppPrivate);
     if (rmStatus != NV_OK)
     {
         memdescDestroy(pMemDesc);
@@ -241,15 +223,6 @@ osCreateMemdescFromPages
     memdescSetFlag(pMemDesc, MEMDESC_FLAGS_KERNEL_MODE, NV_FALSE);
     memdescSetFlag(pMemDesc, MEMDESC_FLAGS_EXT_PAGE_ARRAY_MEM, NV_TRUE);
 
-    if (!NV_IS_ALIGNED64(memdescGetPhysAddr(pMemDesc, AT_CPU, 0), os_page_size))
-    {
-        rmStatus = NV_ERR_INVALID_ARGUMENT;
-        NV_ASSERT_OR_GOTO(0, cleanup);
-    }
-
-    NV_ASSERT_OK_OR_GOTO(rmStatus, memdescSetAllocSizeFields(pMemDesc, size, NV_RM_PAGE_SIZE), cleanup);
-
-
     //
     // If the OS layer doesn't think in RM page size, we need to inflate the
     // PTE array into RM pages.
@@ -257,7 +230,8 @@ osCreateMemdescFromPages
     if ((NV_RM_PAGE_SIZE < os_page_size) &&
         !memdescGetContiguity(pMemDesc, AT_CPU))
     {
-        RmInflateOsToRmPageArray(memdescGetPteArray(pMemDesc, AT_CPU), pMemDesc->PageCount);
+        RmInflateOsToRmPageArray(memdescGetPteArray(pMemDesc, AT_CPU),
+                                 pMemDesc->PageCount);
     }
 
     //
@@ -271,7 +245,6 @@ osCreateMemdescFromPages
     memdescSetMemData(pMemDesc, *ppPrivate, NULL);
 
     rmStatus = memdescMapIommu(pMemDesc, pGpu->busInfo.iovaspaceId);
-cleanup:
     if (rmStatus != NV_OK)
     {
         if ((NV_RM_PAGE_SIZE < os_page_size) &&
@@ -282,7 +255,7 @@ cleanup:
         }
 
         nv_unregister_user_pages(NV_GET_NV_STATE(pGpu),
-                                 osPageCount,
+                                 NV_RM_PAGES_TO_OS_PAGES(pMemDesc->PageCount),
                                  NULL /* import_priv */, ppPrivate);
         memdescDestroy(pMemDesc);
         return rmStatus;
@@ -368,11 +341,6 @@ osCheckGpuBarsOverlapAddrRange
     gpuInstance = 0;
     while ((pGpu = gpumgrGetNextGpu(gpuMask, &gpuInstance)) != NULL)
     {
-        if (pGpu->getProperty(pGpu, PDB_PROP_GPU_ZERO_FB))
-        {
-            continue;
-        }
-
         NV_INIT_RANGE(gpuPhysFbAddrRange, gpumgrGetGpuPhysFbAddr(pGpu),
             gpumgrGetGpuPhysFbAddr(pGpu) + pGpu->fbLength -1);
 
@@ -391,23 +359,6 @@ osCheckGpuBarsOverlapAddrRange
     }
 
     return NV_OK;
-}
-
-static NvU64
-_doWarBug4040336
-(
-    OBJGPU *pGpu,
-    NvU64 addr
-)
-{
-    if (gpuIsWarBug4040336Enabled(pGpu))
-    {
-        if ((addr & 0xffffffff00000000ULL) == 0x7fff00000000ULL)
-        {
-            addr = addr & 0xffffffffULL;
-        }
-    }
-    return addr;
 }
 
 static NV_STATUS
@@ -429,7 +380,6 @@ osCreateOsDescriptorFromIoMemory
     NvRangeU64 physAddrRange;
     NvU64 *base = 0;
     NvBool bAllowMmap;
-    NvU64 size;
 
     //
     // Unlike the page array path, this one deals exclusively
@@ -489,17 +439,7 @@ osCreateOsDescriptorFromIoMemory
         return rmStatus;
     }
 
-    //
-    // BF3's PCIe MMIO bus address at 0x800000000000(CPU PA 0x7fff00000000) is
-    // too high for Ampere to address. As a result, BF3's bus address is
-    // moved to < 4GB. Now, the CPU PA and the bus address are no longer 1:1
-    // and needs to be adjusted.
-    //
-    *base = _doWarBug4040336(pGpu, *base);
-
-    size = NV_ALIGN_UP64(*pLimit + 1, os_page_size);
-
-    rmStatus = memdescCreate(ppMemDesc, pGpu, size, 0,
+    rmStatus = memdescCreate(ppMemDesc, pGpu, (*pLimit + 1), 0,
                              NV_MEMORY_CONTIGUOUS, ADDR_SYSMEM,
                              NV_MEMORY_UNCACHED, MEMDESC_FLAGS_NONE);
     if (rmStatus != NV_OK)
@@ -528,13 +468,6 @@ osCreateOsDescriptorFromIoMemory
 
     *ppPrivate = NULL;
 
-    if (!NV_IS_ALIGNED64(pPteArray[0], os_page_size))
-    {
-        rmStatus = NV_ERR_INVALID_ARGUMENT;
-        NV_ASSERT_OR_GOTO(0, cleanup);
-    }
-    NV_ASSERT_OK_OR_GOTO(rmStatus, memdescSetAllocSizeFields(pMemDesc, size, NV_RM_PAGE_SIZE), cleanup);
-
     if (bAllowMmap)
     {
         rmStatus = nv_register_peer_io_mem(NV_GET_NV_STATE(pGpu), pPteArray,
@@ -558,7 +491,6 @@ osCreateOsDescriptorFromIoMemory
     // this call will succeed.
     //
     rmStatus = memdescMapIommu(pMemDesc, pGpu->busInfo.iovaspaceId);
-cleanup:
     if (rmStatus != NV_OK)
     {
         if (*ppPrivate != NULL)
@@ -589,16 +521,11 @@ osCreateOsDescriptorFromPhysAddr
 )
 {
     NV_STATUS rmStatus;
-    nv_state_t *nv = NV_GET_NV_STATE(pGpu);
     MEMORY_DESCRIPTOR *pMemDesc;
     NvU64 *pPteArray;
     NvU64  base = 0;
     NvU32  cache_type = NV_MEMORY_CACHED;
     NvU64  memdescFlags = MEMDESC_FLAGS_NONE;
-    NvU64 *pPhys_addrs;
-    NvU64  num_os_pages;
-    NvU32  idx;
-    NvU64  size;
 
     // Currently only work with contiguous sysmem allocations
     if (!FLD_TEST_DRF(OS02, _FLAGS, _PHYSICALITY, _CONTIGUOUS, flags))
@@ -610,15 +537,6 @@ osCreateOsDescriptorFromPhysAddr
     {
         // Syncpoint memory is uncached, DMA mapping needs to skip CPU sync.
         cache_type = NV_MEMORY_UNCACHED;
-
-        //
-        // Syncpoint memory is NISO. Don't attempt to IOMMU map if the NISO
-        // IOMMU isn't enabled.
-        //
-        if (!NV_SOC_IS_NISO_IOMMU_PRESENT(nv))
-        {
-            memdescFlags |= MEMDESC_FLAGS_SKIP_IOMMU_MAPPING;
-        }
     }
 
     if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_NISO_DISPLAY, _YES, flags))
@@ -627,11 +545,7 @@ osCreateOsDescriptorFromPhysAddr
     }
 
     base = (NvU64)pDescriptor;
-    size = NV_ALIGN_UP64((*pLimit + 1), os_page_size);
-
-    NV_ASSERT_OR_RETURN(NV_IS_ALIGNED64(base, os_page_size), NV_ERR_INVALID_ARGUMENT);
-
-    rmStatus = memdescCreate(ppMemDesc, pGpu, size, 0,
+    rmStatus = memdescCreate(ppMemDesc, pGpu, (*pLimit + 1), 0,
                              NV_MEMORY_CONTIGUOUS, ADDR_SYSMEM,
                              cache_type, memdescFlags);
     if (rmStatus != NV_OK)
@@ -651,63 +565,21 @@ osCreateOsDescriptorFromPhysAddr
     pPteArray = memdescGetPteArray(pMemDesc, AT_CPU);
     pPteArray[0] = base;
 
-    num_os_pages = size >> os_page_shift;
-    pPhys_addrs  = portMemAllocNonPaged(sizeof(NvU64) * num_os_pages);
-    if (pPhys_addrs == NULL)
-        goto cleanup_memdesc;
-
-    for (idx = 0; idx < num_os_pages; idx++) 
-    {
-        pPhys_addrs[idx] =  base + (idx * os_page_size); 
-    }
-
     *ppPrivate = NULL;
-    rmStatus = nv_register_phys_pages(nv, pPhys_addrs, num_os_pages,
+    rmStatus = nv_register_phys_pages(NV_GET_NV_STATE(pGpu), pPteArray,
+                                      NV_RM_PAGES_TO_OS_PAGES(pMemDesc->PageCount),
                                       memdescGetCpuCacheAttrib(pMemDesc),
                                       ppPrivate);
     if (rmStatus != NV_OK)
-        goto cleanup_memdesc;
-
-    NV_ASSERT_OK_OR_RETURN(memdescSetAllocSizeFields(pMemDesc, size, NV_RM_PAGE_SIZE));
-
-    // If IOMMU skip flag wasn't set earlier, create IOVA mapping.
-    if (!memdescGetFlag(pMemDesc, MEMDESC_FLAGS_SKIP_IOMMU_MAPPING))
     {
-        //
-        // memdescMapIommu() requires the OS-private data to be set on the memory
-        // descriptor, but we don't want to wire up the teardown callback just yet:
-        // that callback needs to unpin the pages, but that will already be done
-        // as part of failure handling further up the stack if memdescMapIommu()
-        // fails. So we only set up the priv-data cleanup callback once we're sure
-        // this call will succeed.
-        //
-        memdescSetMemData(pMemDesc, *ppPrivate, NULL);
-
-        rmStatus = memdescMapIommu(pMemDesc, pGpu->busInfo.iovaspaceId);
-        if (rmStatus != NV_OK)
-            goto cleanup_pages;
+        memdescDestroy(pMemDesc);
+        return rmStatus;
     }
 
-    // All is well - wire up the cleanup callback now
     memdescSetMemData(pMemDesc, *ppPrivate,
         osDestroyOsDescriptorFromPhysAddr);
 
-    portMemFree(pPhys_addrs);
-
     return NV_OK;
-
-cleanup_pages:
-    if (*ppPrivate != NULL)
-    {
-        nv_unregister_phys_pages(NV_GET_NV_STATE(pGpu), *ppPrivate);
-    }
-
-cleanup_memdesc:
-    memdescDestroy(pMemDesc);
-
-    portMemFree(pPhys_addrs);
-
-    return rmStatus;
 }
 
 static NV_STATUS
@@ -728,18 +600,6 @@ _createMemdescFromDmaBufSgtHelper
     MEMORY_DESCRIPTOR *pMemDesc;
     NvU64 memdescFlags = MEMDESC_FLAGS_NONE;
     NvU32 gpuCachedFlags;
-    NvBool isPeerMmio = NV_FALSE;
-    NvU64 osPageCount;
-
-    //
-    // Align size up to os page size. This is important in
-    // order to support submemdesc mappings at native page size.
-    // Once dynamic tracking is enabled this will not be needed
-    // as all submemor
-    //
-    size = NV_ALIGN_UP64(size, os_page_size);
-
-    osPageCount = size >> os_page_shift;
 
     NV_ASSERT((pMemDataReleaseCallback == osDestroyOsDescriptorFromDmaBuf) ||
               (pMemDataReleaseCallback == osDestroyOsDescriptorFromSgt));
@@ -753,46 +613,9 @@ _createMemdescFromDmaBufSgtHelper
         cacheType = NV_MEMORY_CACHED;
     }
 
-    if (FLD_TEST_DRF(OS02, _FLAGS, _GPU_CACHEABLE, _YES, flags))
-    {
-        gpuCachedFlags = NV_MEMORY_CACHED;
-    }
-    else
-    {
-        gpuCachedFlags = NV_MEMORY_UNCACHED;
-    }
-
-    if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_TYPE_SYNCPOINT, _APERTURE, flags))
-    {
-        // Syncpoint memory is uncached.
-        if ((cacheType      != NV_MEMORY_UNCACHED) ||
-            (gpuCachedFlags != NV_MEMORY_UNCACHED))
-        {
-            NV_PRINTF(LEVEL_ERROR,
-                      "%s(): Error: Syncpoint memory region should be uncached!!!\n",
-                      __FUNCTION__);
-            return NV_ERR_INVALID_FLAGS;
-        }
-
-        isPeerMmio           = NV_TRUE;
-
-        NV_PRINTF(LEVEL_INFO,
-                  "%s(): Syncpoint type sgt!\n", __FUNCTION__);
-    }
-
     if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_NISO_DISPLAY, _YES, flags))
     {
         memdescFlags |= MEMDESC_FLAGS_MEMORY_TYPE_DISPLAY_NISO;
-    }
-
-    if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_USER_READ_ONLY, _YES, flags))
-    {
-        memdescFlags |= MEMDESC_FLAGS_USER_READ_ONLY;
-    }
-
-    if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_DEVICE_READ_ONLY, _YES, flags))
-    {
-        memdescFlags |= MEMDESC_FLAGS_DEVICE_READ_ONLY;
     }
 
     rmStatus = memdescCreate(ppMemDesc, pGpu, size, 0,
@@ -801,6 +624,15 @@ _createMemdescFromDmaBufSgtHelper
     if (rmStatus != NV_OK)
     {
         return rmStatus;
+    }
+
+    if (FLD_TEST_DRF(OS02, _FLAGS, _GPU_CACHEABLE, _YES, flags))
+    {
+        gpuCachedFlags = NV_MEMORY_CACHED;
+    }
+    else
+    {
+        gpuCachedFlags = NV_MEMORY_UNCACHED;
     }
 
     pMemDesc = *ppMemDesc;
@@ -814,26 +646,16 @@ _createMemdescFromDmaBufSgtHelper
     *ppPrivate = NULL;
     rmStatus = nv_register_sgt(NV_GET_NV_STATE(pGpu),
                                memdescGetPteArray(pMemDesc, AT_CPU),
-                               osPageCount,
+                               NV_RM_PAGES_TO_OS_PAGES(pMemDesc->PageCount),
                                memdescGetCpuCacheAttrib(pMemDesc),
                                ppPrivate,
                                pImportSgt,
-                               pImportPriv,
-                               isPeerMmio);
+                               pImportPriv);
     if (rmStatus != NV_OK)
     {
         memdescDestroy(pMemDesc);
         return rmStatus;
     }
-
-
-    if (!NV_IS_ALIGNED64(memdescGetPhysAddr(pMemDesc, AT_CPU, 0), os_page_size))
-    {
-        rmStatus = NV_ERR_INVALID_ARGUMENT;
-        NV_ASSERT_OR_GOTO(0, cleanup);
-    }
-
-    NV_ASSERT_OK_OR_GOTO(rmStatus, memdescSetAllocSizeFields(pMemDesc, size, NV_RM_PAGE_SIZE), cleanup);
 
     //
     // If the OS layer doesn't think in RM page size, we need to inflate the
@@ -842,7 +664,8 @@ _createMemdescFromDmaBufSgtHelper
     if ((NV_RM_PAGE_SIZE < os_page_size) &&
         !memdescGetContiguity(pMemDesc, AT_CPU))
     {
-        RmInflateOsToRmPageArray(memdescGetPteArray(pMemDesc, AT_CPU), pMemDesc->PageCount);
+        RmInflateOsToRmPageArray(memdescGetPteArray(pMemDesc, AT_CPU),
+                                 pMemDesc->PageCount);
     }
 
     memdescSetMemData(*ppMemDesc, *ppPrivate, NULL);
@@ -856,7 +679,6 @@ _createMemdescFromDmaBufSgtHelper
     // succeed.
     //
     rmStatus = memdescMapIommu(*ppMemDesc, pGpu->busInfo.iovaspaceId);
-cleanup:
     if (rmStatus != NV_OK)
     {
         if ((NV_RM_PAGE_SIZE < os_page_size) &&
@@ -886,6 +708,7 @@ _createMemdescFromDmaBuf
     OBJGPU  *pGpu,
     NvU32    flags,
     nv_dma_buf_t *pImportPriv,
+    void *pUserPages,
     struct sg_table *pImportSgt,
     NvU32 size,
     MEMORY_DESCRIPTOR **ppMemDesc,
@@ -896,9 +719,12 @@ _createMemdescFromDmaBuf
         _createMemdescFromDmaBufSgtHelper(pGpu, flags, pImportPriv, pImportSgt,
                                           size, ppMemDesc, ppPrivate,
                                           osDestroyOsDescriptorFromDmaBuf);
+
+    NV_ASSERT(pUserPages == NULL);
+
     if (rmStatus != NV_OK)
     {
-        nv_dma_release_dma_buf(pImportPriv);
+        nv_dma_release_dma_buf(NULL, pImportPriv);
     }
 
     return rmStatus;
@@ -929,23 +755,6 @@ _createMemdescFromSgt
     return rmStatus;
 }
 
-static nv_dma_device_t *GetDmaDeviceForImport
-(
-    nv_state_t *nv,
-    NvU32 flags
-)
-{
-    if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_NISO_DISPLAY, _YES, flags) &&
-        (nv->niso_dma_dev != NULL))
-    {
-        return nv->niso_dma_dev;
-    }
-    else
-    {
-        return nv->dma_dev;
-    }
-}
-
 static NV_STATUS
 osCreateOsDescriptorFromFileHandle
 (
@@ -960,11 +769,10 @@ osCreateOsDescriptorFromFileHandle
 {
     NV_STATUS rmStatus = NV_OK;
     nv_state_t *nv = NV_GET_NV_STATE(pGpu);
-    nv_dma_device_t *dma_dev = NULL;
     NvU32 size = 0;
+    void *pUserPages = NULL;
     nv_dma_buf_t *pImportPriv = NULL;
     struct sg_table *pImportSgt = NULL;
-    NvBool bRoDeviceMap = NV_FALSE;
     NvS32 fd;
 
     fd = (NvS32)((NvU64)pDescriptor);
@@ -976,18 +784,8 @@ osCreateOsDescriptorFromFileHandle
         return NV_ERR_INVALID_ARGUMENT;
     }
 
-    dma_dev = GetDmaDeviceForImport(nv, flags);
-
-    if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_DEVICE_READ_ONLY, _YES, flags))
-    {
-        bRoDeviceMap = NV_TRUE;
-        NV_PRINTF(LEVEL_INFO,
-                  "%s(): RO DMA Mapping - flags [%x]!\n",
-                  __FUNCTION__, flags);
-    }
-
-    rmStatus = nv_dma_import_from_fd(dma_dev, fd, bRoDeviceMap, &size,
-                                     &pImportSgt, &pImportPriv);
+    rmStatus = nv_dma_import_from_fd(nv->dma_dev, fd, &size,
+                                     &pUserPages, &pImportSgt, &pImportPriv);
     if (rmStatus != NV_OK)
     {
         NV_PRINTF(LEVEL_ERROR,
@@ -997,7 +795,7 @@ osCreateOsDescriptorFromFileHandle
     }
 
     return _createMemdescFromDmaBuf(pGpu, flags, pImportPriv,
-                                    pImportSgt,
+                                    pUserPages, pImportSgt,
                                     size, ppMemDesc, ppPrivate);
 }
 
@@ -1048,34 +846,24 @@ osCreateOsDescriptorFromDmaBufPtr
 {
     NV_STATUS rmStatus = NV_OK;
     nv_state_t *nv = NV_GET_NV_STATE(pGpu);
-    nv_dma_device_t *dma_dev = NULL;
     NvU32 size = 0;
+    void *pUserPages = NULL;
     nv_dma_buf_t *pImportPriv = NULL;
     struct sg_table *pImportSgt = NULL;
     void *dmaBuf = (void*)((NvUPtr)pDescriptor);
-    NvBool bRoDeviceMap = NV_FALSE;
 
-    dma_dev = GetDmaDeviceForImport(nv, flags);
-
-    if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_DEVICE_READ_ONLY, _YES, flags))
-    {
-        bRoDeviceMap = NV_TRUE;
-        NV_PRINTF(LEVEL_INFO,
-                  "%s(): RO DMA Mapping - flags [%x]!\n",
-                  __FUNCTION__, flags);
-    }
-
-    rmStatus = nv_dma_import_dma_buf(dma_dev, dmaBuf, bRoDeviceMap, &size,
-                                     &pImportSgt, &pImportPriv);
+    rmStatus = nv_dma_import_dma_buf(nv->dma_dev, dmaBuf, &size,
+                                     &pUserPages, &pImportSgt, &pImportPriv);
     if (rmStatus != NV_OK)
     {
-        NV_PRINTF_COND(rmStatus == NV_ERR_NOT_SUPPORTED, LEVEL_INFO, LEVEL_ERROR,
-                       "Error (%d) while trying to import dma_buf!\n", rmStatus);
+        NV_PRINTF(LEVEL_ERROR,
+                  "%s(): Error (%d) while trying to import dma_buf!\n",
+                  __FUNCTION__, rmStatus);
         return rmStatus;
     }
 
     return _createMemdescFromDmaBuf(pGpu, flags, pImportPriv,
-                                    pImportSgt,
+                                    pUserPages, pImportSgt,
                                     size, ppMemDesc, ppPrivate);
 }
 
@@ -1090,9 +878,6 @@ osDestroyOsDescriptorFromPhysAddr
 
     pPrivate = memdescGetMemData(pMemDesc);
     NV_ASSERT(pPrivate != NULL);
-
-    if (!memdescGetFlag(pMemDesc, MEMDESC_FLAGS_SKIP_IOMMU_MAPPING))
-        memdescUnmapIommu(pMemDesc, pGpu->busInfo.iovaspaceId);
 
     nv_unregister_phys_pages(NV_GET_NV_STATE(pGpu), pPrivate);
 }
@@ -1148,22 +933,14 @@ osDestroyOsDescriptorPageArray
     nv_unregister_user_pages(NV_GET_NV_STATE(pGpu), osPageCount,
                              NULL /* import_priv */, &pPrivate);
 
-    if (memdescGetFlag(pMemDesc, MEMDESC_FLAGS_FOREIGN_PAGE))
+    if (memdescGetFlag(pMemDesc, MEMDESC_FLAGS_FOREIGN_PAGE) == NV_FALSE)
     {
-        os_free_mem(pPrivate);
+        status = os_unlock_user_pages(osPageCount, pPrivate);
+        NV_ASSERT(status == NV_OK);
     }
     else
     {
-        //
-        // We use MEMDESC_FLAGS_USER_READ_ONLY because this reflects the
-        // NVOS02_FLAGS_ALLOC_USER_READ_ONLY flag value passed into
-        // os_lock_user_pages(). That flag also results in
-        // MEMDESC_FLAGS_DEVICE_READ_ONLY being set.
-        //
-        NvBool writable = !memdescGetFlag(pMemDesc, MEMDESC_FLAGS_USER_READ_ONLY);
-        NvU32 flags = DRF_NUM(_LOCK_USER_PAGES, _FLAGS, _WRITE, writable);
-        status = os_unlock_user_pages(osPageCount, pPrivate, flags);
-        NV_ASSERT(status == NV_OK);
+        os_free_mem(pPrivate);
     }
 }
 
@@ -1201,7 +978,7 @@ osDestroyOsDescriptorFromDmaBuf
      * SGT.
      */
 
-    nv_dma_release_dma_buf(pImportPriv);
+    nv_dma_release_dma_buf(NULL, pImportPriv);
 }
 
 static void
