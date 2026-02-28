@@ -223,6 +223,12 @@ NV_STATUS nvGpuOpsGetExternalAllocPtes(struct gpuAddressSpace *vaSpace,
                                        NvU64 size,
                                        gpuExternalMappingInfo *pGpuExternalMappingInfo);
 
+NV_STATUS nvGpuOpsGetExternalAllocPhysAddrs(struct gpuAddressSpace *vaSpace,
+                                            NvHandle hDupedMemory,
+                                            NvU64 offset,
+                                            NvU64 size,
+                                            gpuExternalPhysAddrInfo *pGpuExternalPhysAddrInfo);
+
 NV_STATUS nvGpuOpsRetainChannel(struct gpuAddressSpace *vaSpace,
                                 NvHandle hClient,
                                 NvHandle hChannel,

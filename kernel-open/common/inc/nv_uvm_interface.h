@@ -329,19 +329,26 @@ NV_STATUS nvUvmInterfaceGetPmaObject(uvmGpuDeviceHandle device,
                                      const UvmPmaStatistics **pPmaPubStats);
 
 // Mirrors pmaEvictPagesCb_t, see its documentation in pma.h.
+//typedef NV_STATUS (*uvmPmaEvictPagesCallback)(void *callbackData,
+//                                              NvU64 pageSize,
+//                                              NvU64 *pPages,
+//                                              NvU32 count,
+//                                              NvU64 physBegin,
+//                                              NvU64 physEnd,
+//                                              UVM_PMA_GPU_MEMORY_TYPE mem_type);
 typedef NV_STATUS (*uvmPmaEvictPagesCallback)(void *callbackData,
-                                              NvU64 pageSize,
+                                              NvU32 pageSize,
                                               NvU64 *pPages,
                                               NvU32 count,
                                               NvU64 physBegin,
-                                              NvU64 physEnd,
-                                              UVM_PMA_GPU_MEMORY_TYPE mem_type);
+                                              NvU64 physEnd);
 
 // Mirrors pmaEvictRangeCb_t, see its documentation in pma.h.
-typedef NV_STATUS (*uvmPmaEvictRangeCallback)(void *callbackData,
-                                              NvU64 physBegin,
-                                              NvU64 physEnd,
-                                              UVM_PMA_GPU_MEMORY_TYPE mem_type);
+//typedef NV_STATUS (*uvmPmaEvictRangeCallback)(void *callbackData,
+//                                              NvU64 physBegin,
+//                                              NvU64 physEnd,
+//                                              UVM_PMA_GPU_MEMORY_TYPE mem_type);
+typedef NV_STATUS (*uvmPmaEvictRangeCallback)(void *callbackData, NvU64 physBegin, NvU64 physEnd);
 
 /*******************************************************************************
     nvUvmInterfacePmaRegisterEvictionCallbacks
@@ -566,7 +573,7 @@ void nvUvmInterfaceTsgDestroy(uvmGpuTsgHandle tsg);
       NV_ERR_NO_MEMORY
       NV_ERR_NOT_SUPPORTED
 */
-NV_STATUS nvUvmInterfaceChannelAllocate(const uvmGpuTsgHandle tsg,
+NV_STATUS nvUvmInterfaceChannelAllocate(uvmGpuAddressSpaceHandle vaSpace,
                                         const UvmGpuChannelAllocParams *allocParams,
                                         uvmGpuChannelHandle *channel,
                                         UvmGpuChannelInfo *channelInfo);

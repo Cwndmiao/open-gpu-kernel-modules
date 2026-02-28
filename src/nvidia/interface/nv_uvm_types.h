@@ -534,6 +534,36 @@ typedef struct UvmGpuExternalMappingInfo_tag
     NvU32 pteSize;
 } UvmGpuExternalMappingInfo;
 
+typedef struct UvmGpuExternalPhysAddrInfo_tag
+{
+    // In: Virtual permissions. Returns
+    // NV_ERR_INVALID_ACCESS_TYPE if input is
+    // inaccurate
+    UvmRmGpuMappingType mappingType;
+
+    // In: Size of the buffer to store PhysAddrs (in bytes).
+    NvU64 physAddrBufferSize;
+
+    // In: Page size for mapping
+    //     If this field is passed as 0, the page size
+    //     of the allocation is used for mapping.
+    //     nvUvmInterfaceGetExternalAllocPtes must pass
+    //     this field as zero.
+    NvU64 mappingPageSize;
+
+    // In: Pointer to a buffer to store PhysAddrs.
+    // Out: The interface will fill the buffer with PhysAddrs
+    NvU64 *physAddrBuffer;
+
+    // Out: Number of PhysAddrs filled in to the buffer.
+    NvU64 numWrittenPhysAddrs;
+
+    // Out: Number of PhysAddrs remaining to be filled
+    //      if the buffer is not sufficient to accommodate
+    //      requested PhysAddrs.
+    NvU64 numRemainingPhysAddrs;
+} UvmGpuExternalPhysAddrInfo;
+
 typedef struct UvmGpuP2PCapsParams_tag
 {
     // Out: peerId[i] contains gpu[i]'s peer id of gpu[1 - i]. Only defined if
@@ -662,6 +692,15 @@ typedef struct UvmGpuEccInfo_tag
     NvBool  *eccErrorNotifier;
     NvBool   bEccEnabled;
 } UvmGpuEccInfo;
+
+typedef struct UvmGpuNvlinkInfo_tag
+{
+    unsigned nvlinkMask;
+    unsigned nvlinkOffset;
+    void    *nvlinkReadLocation;
+    NvBool  *nvlinkErrorNotifier;
+    NvBool   bNvlinkRecoveryEnabled;
+} UvmGpuNvlinkInfo;
 
 typedef struct UvmPmaAllocationOptions_tag
 {
@@ -883,11 +922,13 @@ typedef UvmGpuAccessCntrConfig gpuAccessCntrConfig;
 typedef UvmGpuFaultInfo gpuFaultInfo;
 typedef UvmGpuMemoryInfo gpuMemoryInfo;
 typedef UvmGpuExternalMappingInfo gpuExternalMappingInfo;
+typedef UvmGpuExternalPhysAddrInfo gpuExternalPhysAddrInfo;
 typedef UvmGpuChannelResourceInfo gpuChannelResourceInfo;
 typedef UvmGpuChannelInstanceInfo gpuChannelInstanceInfo;
 typedef UvmGpuChannelResourceBindParams gpuChannelResourceBindParams;
 typedef UvmGpuFbInfo gpuFbInfo;
 typedef UvmGpuEccInfo gpuEccInfo;
+typedef UvmGpuNvlinkInfo gpuNvlinkInfo;
 typedef UvmGpuPagingChannel *gpuPagingChannelHandle;
 typedef UvmGpuPagingChannelInfo gpuPagingChannelInfo;
 typedef UvmGpuPagingChannelAllocParams gpuPagingChannelAllocParams;

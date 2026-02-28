@@ -31,9 +31,10 @@ typedef struct nv_dma_buf_mem_handle
     NvHandle                 h_memory;
     NvU64                    offset;
     NvU64                    size;
+    NvU64    bar1_va;
 
     // RM memdesc specific data
-    void                    *mem_info;
+    //void                    *mem_info;
 
     //
     // Refcount for phys addresses
@@ -42,7 +43,7 @@ typedef struct nv_dma_buf_mem_handle
     NvU64                    phys_refcount;
 
     // Scatterlist of all the memory ranges associated with the buf
-    MemoryArea               memArea;
+    //MemoryArea               memArea;
 } nv_dma_buf_mem_handle_t;
 
 typedef struct nv_dma_buf_file_private
@@ -384,11 +385,11 @@ nv_dma_buf_dup_mem_handles(
     for (i = 0; i < params->numObjects; i++)
     {
         NvHandle h_memory_duped = 0;
-        void *mem_info = NULL;
-        nv_memory_type_t memory_type = NV_MEMORY_TYPE_SYSTEM;
-        NvBool can_mmap;
-        NvU32 cache_type;
-        NvBool read_only_mem;
+        //void *mem_info = NULL;
+        //nv_memory_type_t memory_type = NV_MEMORY_TYPE_SYSTEM;
+        //NvBool can_mmap;
+        //NvU32 cache_type;
+        //NvBool read_only_mem;
 
         if (priv->handles[index].h_memory != 0)
         {
@@ -411,44 +412,45 @@ nv_dma_buf_dup_mem_handles(
                                            params->handles[i],
                                            params->offsets[i],
                                            params->sizes[i],
-                                           &h_memory_duped,
-                                           &mem_info,
-                                           &can_mmap,
-                                           &cache_type,
-                                           &read_only_mem,
-                                           &memory_type);
+                                           &h_memory_duped//,
+                                           //&mem_info,
+                                           //&can_mmap,
+                                           //&cache_type,
+                                           //&read_only_mem,
+                                           //&memory_type
+                                           );
         if (status != NV_OK)
         {
             goto failed;
         }
 
-        if (priv->map_attrs.cached)
-        {
-            if ((can_mmap      != priv->map_attrs.can_mmap) ||
-                (cache_type    != priv->map_attrs.cache_type) ||
-                (read_only_mem != priv->map_attrs.read_only_mem) ||
-                (memory_type   != priv->map_attrs.memory_type))
-            {
-                // Creating mixed dma_buf is not supported.
-                status = NV_ERR_INVALID_ARGUMENT;
-                goto failed;
-            }
-        }
-        else
-        {
-            // Store the handle's mmap, RO and cache type info.
-            priv->map_attrs.can_mmap      = can_mmap;
-            priv->map_attrs.cache_type    = cache_type;
-            priv->map_attrs.read_only_mem = read_only_mem;
-            priv->map_attrs.memory_type   = memory_type;
-            priv->map_attrs.cached        = NV_TRUE;
-        }
+        //if (priv->map_attrs.cached)
+        //{
+        //    if ((can_mmap      != priv->map_attrs.can_mmap) ||
+        //        (cache_type    != priv->map_attrs.cache_type) ||
+        //        (read_only_mem != priv->map_attrs.read_only_mem) ||
+        //        (memory_type   != priv->map_attrs.memory_type))
+        //    {
+        //        // Creating mixed dma_buf is not supported.
+        //        status = NV_ERR_INVALID_ARGUMENT;
+        //        goto failed;
+        //    }
+        //}
+        //else
+        //{
+        //    // Store the handle's mmap, RO and cache type info.
+        //    priv->map_attrs.can_mmap      = can_mmap;
+        //    priv->map_attrs.cache_type    = cache_type;
+        //    priv->map_attrs.read_only_mem = read_only_mem;
+        //    priv->map_attrs.memory_type   = memory_type;
+        //    priv->map_attrs.cached        = NV_TRUE;
+        //}
 
         priv->attached_size += params->sizes[i];
         priv->handles[index].h_memory = h_memory_duped;
         priv->handles[index].offset = params->offsets[i];
         priv->handles[index].size = params->sizes[i];
-        priv->handles[index].mem_info = mem_info;
+        //priv->handles[index].mem_info = mem_info;
         priv->num_objects++;
         index++;
         count++;
@@ -888,7 +890,8 @@ nv_dma_buf_map_pfns (
 
                 if (!priv->skip_iommu)
                 {
-                    if (priv->nv->coherent)
+                    //if (priv->nv->coherent)
+                    if (1)
                     {
                         status = nv_dma_map_non_pci_peer(&peer_dma_dev,
                                                          (sg_len >> PAGE_SHIFT),
@@ -984,8 +987,9 @@ nv_dma_buf_attach(
 
 #if defined(NV_DMA_BUF_ATTACHMENT_HAS_PEER2PEER)
     if ((attachment->importer_ops != NULL) &&
-        (!attachment->peer2peer) &&
-        (!priv->nv->mem_has_struct_page))
+        (!attachment->peer2peer) //&&
+        //(!priv->nv->mem_has_struct_page)
+        )
     {
         nv_printf(NV_DBG_ERRORS,
                   "NVRM: dma-buf attach failed: "
@@ -1032,8 +1036,9 @@ nv_dma_buf_map(
     // For MAPPING_TYPE_FORCE_PCIE on coherent platforms,
     // get the BAR1 PFN scatterlist instead of C2C pages.
     //
-    if (priv->nv->mem_has_struct_page &&
-        (priv->mapping_type == NV_DMABUF_EXPORT_MAPPING_TYPE_DEFAULT))
+    //if (priv->nv->mem_has_struct_page &&
+    //    (priv->mapping_type == NV_DMABUF_EXPORT_MAPPING_TYPE_DEFAULT))
+    if (0)
     {
         sgt = nv_dma_buf_map_pages(attachment->dev, priv);
     }
@@ -1074,8 +1079,9 @@ nv_dma_buf_unmap(
 
     mutex_lock(&priv->lock);
 
-    if (priv->nv->mem_has_struct_page &&
-        (priv->mapping_type == NV_DMABUF_EXPORT_MAPPING_TYPE_DEFAULT))
+    //if (priv->nv->mem_has_struct_page &&
+    //    (priv->mapping_type == NV_DMABUF_EXPORT_MAPPING_TYPE_DEFAULT))
+    if (0)
     {
         nv_dma_buf_unmap_pages(attachment->dev, sgt, priv);
     }

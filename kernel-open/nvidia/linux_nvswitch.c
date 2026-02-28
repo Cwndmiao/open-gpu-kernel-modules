@@ -269,7 +269,7 @@ nvswitch_is_device_blacklisted
     NVSWITCH_DEVICE_FABRIC_STATE device_fabric_state = 0;
     NvlStatus status;
 
-    status = nvswitch_lib_read_fabric_state(nvswitch_dev->lib_device, 
+    status = nvswitch_lib_read_fabric_state(nvswitch_dev->lib_device,
                                             &device_fabric_state, NULL, NULL);
 
     if (status != NVL_SUCCESS)
@@ -1005,7 +1005,8 @@ nvswitch_ctl_get_devices_v2(NVSWITCH_GET_DEVICES_V2_PARAMS *p)
                                                  &p->info[index].deviceReason,
                                                  &p->info[index].driverState);
 
-            p->info[index].bTnvlEnabled = nvswitch_lib_is_tnvl_enabled(nvswitch_dev->lib_device);
+            //p->info[index].bTnvlEnabled = nvswitch_lib_is_tnvl_enabled(nvswitch_dev->lib_device);
+            p->info[index].bTnvlEnabled = NV_FALSE;
             mutex_unlock(&nvswitch_dev->device_mutex);
         }
         index++;
@@ -2736,6 +2737,6 @@ nvswitch_os_get_pid
     {
         *pPid = task_pid_nr(current);
     }
-    
+
     return NVL_SUCCESS;
 }

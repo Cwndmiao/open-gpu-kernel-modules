@@ -2479,12 +2479,13 @@ static bool uvm_pmm_should_inject_pma_eviction_error(uvm_pmm_gpu_t *pmm)
 // See the documentation of pmaEvictPagesCb_t in pma.h for details of the
 // expected semantics.
 static NV_STATUS uvm_pmm_gpu_pma_evict_pages(void *void_pmm,
-                                             NvU64 page_size,
+                                             NvU32 page_size,
                                              NvU64 *pages,
                                              NvU32 num_pages_to_evict,
                                              NvU64 phys_start,
-                                             NvU64 phys_end,
-                                             UVM_PMA_GPU_MEMORY_TYPE mem_type)
+                                             NvU64 phys_end//,
+                                             //UVM_PMA_GPU_MEMORY_TYPE mem_type
+                                             )
 {
     NV_STATUS status;
     uvm_pmm_gpu_t *pmm = (uvm_pmm_gpu_t *)void_pmm;
@@ -2503,8 +2504,8 @@ static NV_STATUS uvm_pmm_gpu_pma_evict_pages(void *void_pmm,
     // TODO: Bug 4287430: there shouldn't be any memory type argument, because
     // the callback can only relate to protected vidmem. This check can be
     // removed alongside the parameter.
-    if (g_uvm_global.conf_computing_enabled && (mem_type != UVM_PMA_GPU_MEMORY_TYPE_PROTECTED))
-        return NV_ERR_INVALID_ARGUMENT;
+    //if (g_uvm_global.conf_computing_enabled && (mem_type != UVM_PMA_GPU_MEMORY_TYPE_PROTECTED))
+    //    return NV_ERR_INVALID_ARGUMENT;
 
     while (num_pages_left_to_evict > 0) {
         uvm_gpu_root_chunk_t *root_chunk;
@@ -2588,46 +2589,50 @@ error:
 }
 
 static NV_STATUS uvm_pmm_gpu_pma_evict_pages_wrapper(void *void_pmm,
-                                                     NvU64 page_size,
+                                                     NvU32 page_size,
                                                      NvU64 *pages,
                                                      NvU32 num_pages_to_evict,
                                                      NvU64 phys_start,
-                                                     NvU64 phys_end,
-                                                     UVM_PMA_GPU_MEMORY_TYPE mem_type)
+                                                     NvU64 phys_end//,
+                                                     //UVM_PMA_GPU_MEMORY_TYPE mem_type
+                                                     )
 {
     NV_STATUS status;
 
     // RM invokes the eviction callbacks with its API lock held, but not its GPU
     // lock.
     uvm_record_lock_rm_api();
-    status = uvm_pmm_gpu_pma_evict_pages(void_pmm, page_size, pages, num_pages_to_evict, phys_start, phys_end, mem_type);
+    status = uvm_pmm_gpu_pma_evict_pages(void_pmm, page_size, pages, num_pages_to_evict, phys_start, phys_end/*, mem_type*/);
     uvm_record_unlock_rm_api();
     return status;
 }
 
 static NV_STATUS uvm_pmm_gpu_pma_evict_pages_wrapper_entry(void *void_pmm,
-                                                           NvU64 page_size,
+                                                           NvU32 page_size,
                                                            NvU64 *pages,
                                                            NvU32 num_pages_to_evict,
                                                            NvU64 phys_start,
-                                                           NvU64 phys_end,
-                                                           UVM_PMA_GPU_MEMORY_TYPE mem_type)
+                                                           NvU64 phys_end//,
+                                                           //UVM_PMA_GPU_MEMORY_TYPE mem_type
+                                                           )
 {
     UVM_ENTRY_RET(uvm_pmm_gpu_pma_evict_pages_wrapper(void_pmm,
                                                       page_size,
                                                       pages,
                                                       num_pages_to_evict,
                                                       phys_start,
-                                                      phys_end,
-                                                      mem_type));
+                                                      phys_end//,
+                                                      //mem_type
+                                                      ));
 }
 
 // See the documentation of pmaEvictRangeCb_t in pma.h for details of the
 // expected semantics.
 static NV_STATUS uvm_pmm_gpu_pma_evict_range(void *void_pmm,
                                              NvU64 phys_begin,
-                                             NvU64 phys_end,
-                                             UVM_PMA_GPU_MEMORY_TYPE mem_type)
+                                             NvU64 phys_end//,
+                                             //UVM_PMA_GPU_MEMORY_TYPE mem_type
+                                             )
 {
     NV_STATUS status;
     uvm_pmm_gpu_t *pmm = (uvm_pmm_gpu_t *)void_pmm;
@@ -2646,8 +2651,8 @@ static NV_STATUS uvm_pmm_gpu_pma_evict_range(void *void_pmm,
     // TODO: Bug 4287430: there shouldn't be any memory type argument, because
     // the callback can only relate to protected vidmem. This check can be
     // removed alongside the parameter.
-    if (g_uvm_global.conf_computing_enabled && (mem_type != UVM_PMA_GPU_MEMORY_TYPE_PROTECTED))
-        return NV_ERR_INVALID_ARGUMENT;
+    //if (g_uvm_global.conf_computing_enabled && (mem_type != UVM_PMA_GPU_MEMORY_TYPE_PROTECTED))
+    //    return NV_ERR_INVALID_ARGUMENT;
 
     // Make sure that all pending allocations, that could have started before
     // the eviction callback was called, are done. This is required to guarantee
@@ -2727,25 +2732,27 @@ static NV_STATUS uvm_pmm_gpu_pma_evict_range(void *void_pmm,
 
 static NV_STATUS uvm_pmm_gpu_pma_evict_range_wrapper(void *void_pmm,
                                                      NvU64 phys_begin,
-                                                     NvU64 phys_end,
-                                                     UVM_PMA_GPU_MEMORY_TYPE mem_type)
+                                                     NvU64 phys_end//,
+                                                     //UVM_PMA_GPU_MEMORY_TYPE mem_type
+                                                     )
 {
     NV_STATUS status;
 
     // RM invokes the eviction callbacks with its API lock held, but not its GPU
     // lock.
     uvm_record_lock_rm_api();
-    status = uvm_pmm_gpu_pma_evict_range(void_pmm, phys_begin, phys_end, mem_type);
+    status = uvm_pmm_gpu_pma_evict_range(void_pmm, phys_begin, phys_end/*, mem_type*/);
     uvm_record_unlock_rm_api();
     return status;
 }
 
 static NV_STATUS uvm_pmm_gpu_pma_evict_range_wrapper_entry(void *void_pmm,
                                                            NvU64 phys_begin,
-                                                           NvU64 phys_end,
-                                                           UVM_PMA_GPU_MEMORY_TYPE mem_type)
+                                                           NvU64 phys_end//,
+                                                           //UVM_PMA_GPU_MEMORY_TYPE mem_type
+                                                           )
 {
-    UVM_ENTRY_RET(uvm_pmm_gpu_pma_evict_range_wrapper(void_pmm, phys_begin, phys_end, mem_type));
+    UVM_ENTRY_RET(uvm_pmm_gpu_pma_evict_range_wrapper(void_pmm, phys_begin, phys_end/*, mem_type*/));
 }
 
 static void deinit_chunk_split_cache(uvm_pmm_gpu_t *pmm)

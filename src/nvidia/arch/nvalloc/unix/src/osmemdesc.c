@@ -94,9 +94,9 @@ osCreateMemFromOsDescriptor
     }
 
     //
-    // The two checks below use cached privilege because they 
+    // The two checks below use cached privilege because they
     // concern the privilege level of the client, and not the
-    // privilege level of the calling context which may be 
+    // privilege level of the calling context which may be
     // overridden to KERNEL at some internal callsites.
     //
 
@@ -188,6 +188,7 @@ osCreateMemdescFromPages
     MEMORY_DESCRIPTOR *pMemDesc;
     NvU64 memdescFlags = MEMDESC_FLAGS_NONE;
     NvU32 gpuCachedFlags;
+    NvBool bUnprotected = NV_FALSE;
 
     if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_NISO_DISPLAY, _YES, flags))
     {
@@ -211,7 +212,7 @@ osCreateMemdescFromPages
     rmStatus = nv_register_user_pages(NV_GET_NV_STATE(pGpu),
             NV_RM_PAGES_TO_OS_PAGES(pMemDesc->PageCount),
             memdescGetPteArray(pMemDesc, AT_CPU), pImportPriv,
-            ppPrivate);
+            ppPrivate, bUnprotected);
     if (rmStatus != NV_OK)
     {
         memdescDestroy(pMemDesc);
@@ -600,6 +601,7 @@ _createMemdescFromDmaBufSgtHelper
     MEMORY_DESCRIPTOR *pMemDesc;
     NvU64 memdescFlags = MEMDESC_FLAGS_NONE;
     NvU32 gpuCachedFlags;
+    NvBool isPeerMmio = NV_FALSE;
 
     NV_ASSERT((pMemDataReleaseCallback == osDestroyOsDescriptorFromDmaBuf) ||
               (pMemDataReleaseCallback == osDestroyOsDescriptorFromSgt));
@@ -650,7 +652,8 @@ _createMemdescFromDmaBufSgtHelper
                                memdescGetCpuCacheAttrib(pMemDesc),
                                ppPrivate,
                                pImportSgt,
-                               pImportPriv);
+                               pImportPriv,
+                               isPeerMmio);
     if (rmStatus != NV_OK)
     {
         memdescDestroy(pMemDesc);
@@ -708,7 +711,6 @@ _createMemdescFromDmaBuf
     OBJGPU  *pGpu,
     NvU32    flags,
     nv_dma_buf_t *pImportPriv,
-    void *pUserPages,
     struct sg_table *pImportSgt,
     NvU32 size,
     MEMORY_DESCRIPTOR **ppMemDesc,
@@ -719,12 +721,9 @@ _createMemdescFromDmaBuf
         _createMemdescFromDmaBufSgtHelper(pGpu, flags, pImportPriv, pImportSgt,
                                           size, ppMemDesc, ppPrivate,
                                           osDestroyOsDescriptorFromDmaBuf);
-
-    NV_ASSERT(pUserPages == NULL);
-
     if (rmStatus != NV_OK)
     {
-        nv_dma_release_dma_buf(NULL, pImportPriv);
+        nv_dma_release_dma_buf(pImportPriv);
     }
 
     return rmStatus;
@@ -755,6 +754,23 @@ _createMemdescFromSgt
     return rmStatus;
 }
 
+static nv_dma_device_t *GetDmaDeviceForImport
+(
+    nv_state_t *nv,
+    NvU32 flags
+)
+{
+    if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_NISO_DISPLAY, _YES, flags) &&
+        (nv->niso_dma_dev != NULL))
+    {
+        return nv->niso_dma_dev;
+    }
+    else
+    {
+        return nv->dma_dev;
+    }
+}
+
 static NV_STATUS
 osCreateOsDescriptorFromFileHandle
 (
@@ -769,10 +785,11 @@ osCreateOsDescriptorFromFileHandle
 {
     NV_STATUS rmStatus = NV_OK;
     nv_state_t *nv = NV_GET_NV_STATE(pGpu);
+    nv_dma_device_t *dma_dev = NULL;
     NvU32 size = 0;
-    void *pUserPages = NULL;
     nv_dma_buf_t *pImportPriv = NULL;
     struct sg_table *pImportSgt = NULL;
+    NvBool bRoDeviceMap = NV_FALSE;
     NvS32 fd;
 
     fd = (NvS32)((NvU64)pDescriptor);
@@ -784,8 +801,18 @@ osCreateOsDescriptorFromFileHandle
         return NV_ERR_INVALID_ARGUMENT;
     }
 
-    rmStatus = nv_dma_import_from_fd(nv->dma_dev, fd, &size,
-                                     &pUserPages, &pImportSgt, &pImportPriv);
+    dma_dev = GetDmaDeviceForImport(nv, flags);
+
+    if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_DEVICE_READ_ONLY, _YES, flags))
+    {
+        bRoDeviceMap = NV_TRUE;
+        NV_PRINTF(LEVEL_INFO,
+                  "%s(): RO DMA Mapping - flags [%x]!\n",
+                  __FUNCTION__, flags);
+    }
+
+    rmStatus = nv_dma_import_from_fd(dma_dev, fd, bRoDeviceMap, &size,
+                                     &pImportSgt, &pImportPriv);
     if (rmStatus != NV_OK)
     {
         NV_PRINTF(LEVEL_ERROR,
@@ -795,7 +822,7 @@ osCreateOsDescriptorFromFileHandle
     }
 
     return _createMemdescFromDmaBuf(pGpu, flags, pImportPriv,
-                                    pUserPages, pImportSgt,
+                                    pImportSgt,
                                     size, ppMemDesc, ppPrivate);
 }
 
@@ -846,24 +873,34 @@ osCreateOsDescriptorFromDmaBufPtr
 {
     NV_STATUS rmStatus = NV_OK;
     nv_state_t *nv = NV_GET_NV_STATE(pGpu);
+    nv_dma_device_t *dma_dev = NULL;
     NvU32 size = 0;
-    void *pUserPages = NULL;
     nv_dma_buf_t *pImportPriv = NULL;
     struct sg_table *pImportSgt = NULL;
     void *dmaBuf = (void*)((NvUPtr)pDescriptor);
+    NvBool bRoDeviceMap = NV_FALSE;
 
-    rmStatus = nv_dma_import_dma_buf(nv->dma_dev, dmaBuf, &size,
-                                     &pUserPages, &pImportSgt, &pImportPriv);
+    dma_dev = GetDmaDeviceForImport(nv, flags);
+
+    if (FLD_TEST_DRF(OS02, _FLAGS, _ALLOC_DEVICE_READ_ONLY, _YES, flags))
+    {
+        bRoDeviceMap = NV_TRUE;
+        NV_PRINTF(LEVEL_INFO,
+                  "%s(): RO DMA Mapping - flags [%x]!\n",
+                  __FUNCTION__, flags);
+    }
+
+    rmStatus = nv_dma_import_dma_buf(dma_dev, dmaBuf, bRoDeviceMap, &size,
+                                     &pImportSgt, &pImportPriv);
     if (rmStatus != NV_OK)
     {
-        NV_PRINTF(LEVEL_ERROR,
-                  "%s(): Error (%d) while trying to import dma_buf!\n",
-                  __FUNCTION__, rmStatus);
+        NV_PRINTF_COND(rmStatus == NV_ERR_NOT_SUPPORTED, LEVEL_INFO, LEVEL_ERROR,
+                       "Error (%d) while trying to import dma_buf!\n", rmStatus);
         return rmStatus;
     }
 
     return _createMemdescFromDmaBuf(pGpu, flags, pImportPriv,
-                                    pUserPages, pImportSgt,
+                                    pImportSgt,
                                     size, ppMemDesc, ppPrivate);
 }
 
@@ -978,7 +1015,7 @@ osDestroyOsDescriptorFromDmaBuf
      * SGT.
      */
 
-    nv_dma_release_dma_buf(NULL, pImportPriv);
+    nv_dma_release_dma_buf(pImportPriv);
 }
 
 static void

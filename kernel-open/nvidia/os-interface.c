@@ -380,6 +380,16 @@ NvBool NV_API_CALL os_is_administrator(void)
     return NV_IS_SUSER();
 }
 
+NvBool NV_API_CALL os_allow_priority_override(void)
+{
+    return capable(CAP_SYS_NICE);
+}
+
+NvU64 NV_API_CALL os_get_num_phys_pages(void)
+{
+    return (NvU64)NV_NUM_PHYSPAGES;
+}
+
 NvBool NV_API_CALL os_check_access(RsAccessRight accessRight)
 {
     switch (accessRight)
@@ -674,6 +684,21 @@ void NV_API_CALL os_free_mem(void *address)
 *
 *****************************************************************************/
 
+NV_STATUS NV_API_CALL os_get_current_time(
+    NvU32 *seconds,
+    NvU32 *useconds
+)
+{
+    struct timespec64 tm;
+
+    ktime_get_real_ts64(&tm);
+
+    *seconds = tm.tv_sec;
+    *useconds = tm.tv_nsec / NSEC_PER_USEC;
+
+    return NV_OK;
+}
+
 NV_STATUS NV_API_CALL os_get_system_time(
     NvU32 *seconds,
     NvU32 *useconds
@@ -692,6 +717,13 @@ NV_STATUS NV_API_CALL os_get_system_time(
 //
 // Get the High resolution tick count of the system uptime
 //
+NvU64 NV_API_CALL os_get_current_tick_hr(void)
+{
+    struct timespec64 tm;
+    ktime_get_raw_ts64(&tm);
+    return (NvU64) timespec64_to_ns(&tm);
+}
+
 NvU64 NV_API_CALL os_get_monotonic_time_ns_hr(void)
 {
     struct timespec64 tm;
@@ -710,6 +742,24 @@ NvU64 NV_API_CALL os_get_monotonic_time_ns(void)
     jiffies_to_timespec64(jiffies, &ts);
     return (NvU64) timespec64_to_ns(&ts);
 #endif
+}
+
+NvU64 NV_API_CALL os_get_current_tick(void)
+{
+#if defined(NV_JIFFIES_TO_TIMESPEC_PRESENT)
+    struct timespec ts;
+    jiffies_to_timespec(jiffies, &ts);
+    return (NvU64) timespec_to_ns(&ts);
+#else
+    struct timespec64 ts;
+    jiffies_to_timespec64(jiffies, &ts);
+    return (NvU64) timespec64_to_ns(&ts);
+#endif
+}
+
+NvU64 NV_API_CALL os_get_tick_resolution(void)
+{
+    return (NvU64)jiffies_to_usecs(1) * NSEC_PER_USEC;
 }
 
 NvU64 NV_API_CALL os_get_monotonic_tick_resolution_ns(void)
@@ -778,22 +828,22 @@ NV_STATUS NV_API_CALL os_iommu_sva_bind(void *arg, void **handle, NvU32 *pasid)
     *pasid = 0;
     *handle = NULL;
 
-    if (nv->ats_support && current && current->mm)
-    {
-#if defined(NV_IOMMU_SVA_BIND_DEVICE_HAS_DRVDATA_ARG)
-        sva_handle = iommu_sva_bind_device(nvl->dev, current->mm, NULL);
-#else
-        sva_handle = iommu_sva_bind_device(nvl->dev, current->mm);
-#endif
-        if (!IS_ERR(sva_handle))
-        {
-            *pasid = iommu_sva_get_pasid(sva_handle);
-            *handle = sva_handle;
-            NV_DEV_PRINTF(NV_DBG_INFO, nv, "PASID: %u\n", *pasid);
-
-            return NV_OK;
-        }
-    }
+//    if (nv->ats_support && current && current->mm)
+//    {
+//#if defined(NV_IOMMU_SVA_BIND_DEVICE_HAS_DRVDATA_ARG)
+//        sva_handle = iommu_sva_bind_device(nvl->dev, current->mm, NULL);
+//#else
+//        sva_handle = iommu_sva_bind_device(nvl->dev, current->mm);
+//#endif
+//        if (!IS_ERR(sva_handle))
+//        {
+//            *pasid = iommu_sva_get_pasid(sva_handle);
+//            *handle = sva_handle;
+//            NV_DEV_PRINTF(NV_DBG_INFO, nv, "PASID: %u\n", *pasid);
+//
+//            return NV_OK;
+//        }
+//    }
 #endif
     NV_DEV_PRINTF(NV_DBG_ERRORS, nv, "IOMMU SVA bind failed\n");
 
@@ -1275,6 +1325,44 @@ NvBool NV_API_CALL os_is_efi_enabled(void)
     return efi_enabled(EFI_BOOT);
 }
 
+void NV_API_CALL os_get_screen_info(
+    NvU64 *pPhysicalAddress,
+    NvU16 *pFbWidth,
+    NvU16 *pFbHeight,
+    NvU16 *pFbDepth,
+    NvU16 *pFbPitch,
+    NvU64 consoleBar1Address,
+    NvU64 consoleBar2Address
+)
+{
+#if defined(CONFIG_FB)
+    //int i;
+    *pPhysicalAddress = 0;
+    *pFbWidth = *pFbHeight = *pFbDepth = *pFbPitch = 0;
+
+    //for (i = 0; i < num_registered_fb; i++)
+    //{
+    //    if (!registered_fb[i])
+    //        continue;
+
+    //    /* Make sure base address is mapped to GPU BAR */
+    //    if ((registered_fb[i]->fix.smem_start == consoleBar1Address) ||
+    //        (registered_fb[i]->fix.smem_start == consoleBar2Address))
+    //    {
+    //        *pPhysicalAddress = registered_fb[i]->fix.smem_start;
+    //        *pFbWidth = registered_fb[i]->var.xres;
+    //        *pFbHeight = registered_fb[i]->var.yres;
+    //        *pFbDepth = registered_fb[i]->var.bits_per_pixel;
+    //        *pFbPitch = registered_fb[i]->fix.line_length;
+    //        break;
+    //    }
+    //}
+#else
+    *pPhysicalAddress = 0;
+    *pFbWidth = *pFbHeight = *pFbDepth = *pFbPitch = 0;
+#endif
+}
+
 void NV_API_CALL os_dump_stack(void)
 {
     dump_stack();
@@ -1706,16 +1794,16 @@ NV_STATUS NV_API_CALL os_alloc_pages_node
 
     gfp_mask = __GFP_THISNODE | GFP_HIGHUSER_MOVABLE | __GFP_COMP |
                __GFP_NOWARN;
-    
+
 #if defined(__GFP_RETRY_MAYFAIL)
 
     /*
      * __GFP_RETRY_MAYFAIL :  Used to avoid the Linux kernel OOM killer.
      *                        To help PMA on paths where UVM might be
-     *                        in memory over subscription. This gives UVM 
-     *                        a chance to free memory before invoking any 
+     *                        in memory over subscription. This gives UVM
+     *                        a chance to free memory before invoking any
      *                        action from the OOM killer.
-     *                        Freeing non-essential memory will also benefit 
+     *                        Freeing non-essential memory will also benefit
      *                        the system as a whole.
      */
 

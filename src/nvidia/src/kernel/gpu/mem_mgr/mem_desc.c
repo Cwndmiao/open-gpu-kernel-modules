@@ -1290,8 +1290,8 @@ _memdescFreeInternal
                     SLI_LOOP_START(SLI_LOOP_FLAGS_BC_ONLY)
                     {
                         KernelMemorySystem *pKernelMemorySystem = GPU_GET_KERNEL_MEMORY_SYSTEM(pGpu);
-                        NV_ASSERT_OK(kmemsysCacheOp_HAL(pGpu, pKernelMemorySystem, pMemDesc, 
-                                                                  FB_CACHE_SYSTEM_MEMORY, 
+                        NV_ASSERT_OK(kmemsysCacheOp_HAL(pGpu, pKernelMemorySystem, pMemDesc,
+                                                                  FB_CACHE_SYSTEM_MEMORY,
                                                                   FB_CACHE_INVALIDATE));
                     }
                     SLI_LOOP_END
@@ -1399,7 +1399,7 @@ memdescFree
             // The memdesc is being freed so destroy all of its IOMMU mappings.
             _memdescFreeIommuMappings(pMemDesc);
         }
-        
+
         if (pMemDesc->_addressSpace != ADDR_FBMEM &&
             pMemDesc->_addressSpace != ADDR_SYSMEM)
         {
@@ -4336,4 +4336,31 @@ memdescDeregisterFromGSP
     }
 
     return status;
+}
+
+NvU64 memdescGetAdjustedPageSize(
+    MEMORY_DESCRIPTOR *pMemDesc
+)
+{
+    NvU64 pageSize  = osGetPageSize();
+    //
+    // Only non-contig memory needs to specify order. For contig memory the OS layer
+    // calculates it within nv_alias_pages and picks the largest order based on the
+    // allocation size.
+    //
+    if (!memdescGetContiguity(pMemDesc, AT_CPU))
+    {
+        pageSize = memdescGetPageSize(pMemDesc, AT_GPU);
+        //
+        // pageSize == 0 indicates the caller did not specify a physical page size
+        // for the allocation. Default to allocating at OS page size granularity.
+        //
+        if (pageSize == 0)
+        {
+            pageSize = osGetPageSize();
+            memdescSetPageSize(pMemDesc, AT_GPU, pageSize);
+        }
+    }
+
+    return pageSize;
 }

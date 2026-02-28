@@ -128,6 +128,7 @@ nvidia_vma_access(
     void *kernel_mapping;
     const nv_alloc_mapping_context_t *mmap_context = &nvlfp->mmap_context;
     NvU64 offsInVma = addr - vma->vm_start;
+    NvU64 offset;
 
     pageIndex = (offsInVma >> PAGE_SHIFT);
     pageOffset = (offsInVma & ~PAGE_MASK);
@@ -142,6 +143,8 @@ nvidia_vma_access(
         nv_printf(NV_DBG_ERRORS, "NVRM: VM: invalid mmap context\n");
         return -EINVAL;
     }
+
+    offset = mmap_context->mmap_start;
 
     if (write && !(mmap_context->prot & NV_PROTECT_WRITEABLE))
     {
@@ -166,21 +169,22 @@ nvidia_vma_access(
     }
     else
     {
-        NvU64 idx = 0;
-        NvU64 curOffs = 0;
-        for(; idx < mmap_context->memArea.numRanges; idx++)
-        {
-            NvU64 nextOffs = mmap_context->memArea.pRanges[idx].size + curOffs;
-            if (curOffs <= offsInVma && nextOffs > offsInVma)
-            {
-                NvU64 realAddr = offsInVma - curOffs + mmap_context->memArea.pRanges[idx].start;
-                addr = realAddr & PAGE_MASK;
-                goto found;
-            }
-            curOffs = nextOffs;
-        }
-        return -EINVAL;
-found:
+//        NvU64 idx = 0;
+//        NvU64 curOffs = 0;
+//        for(; idx < mmap_context->memArea.numRanges; idx++)
+//        {
+//            NvU64 nextOffs = mmap_context->memArea.pRanges[idx].size + curOffs;
+//            if (curOffs <= offsInVma && nextOffs > offsInVma)
+//            {
+//                NvU64 realAddr = offsInVma - curOffs + mmap_context->memArea.pRanges[idx].start;
+//                addr = realAddr & PAGE_MASK;
+//                goto found;
+//            }
+//            curOffs = nextOffs;
+//        }
+//        return -EINVAL;
+//found:
+        addr = (offset & PAGE_MASK);
         kernel_mapping = os_map_kernel_space(addr, PAGE_SIZE, NV_MEMORY_UNCACHED);
         if (kernel_mapping == NULL)
             return -ENOMEM;
@@ -213,6 +217,11 @@ static vm_fault_t nvidia_fault(
     nv_linux_state_t *nvl = nvlfp->nvptr;
     nv_state_t *nv = NV_STATE_PTR(nvl);
     vm_fault_t ret = VM_FAULT_NOPAGE;
+
+    NvU64 page;
+    NvU64 num_pages = NV_VMA_SIZE(vma) >> PAGE_SHIFT;
+    NvU64 pfn_start =
+        (nvlfp->mmap_context.mmap_start >> PAGE_SHIFT) + vma->vm_pgoff;
 
     if (vma->vm_pgoff != 0)
     {
@@ -267,34 +276,49 @@ static vm_fault_t nvidia_fault(
         up_read(&nv_system_pm_lock);
         return VM_FAULT_NOPAGE;
     }
+//    {
+//        NvU64 idx;
+//        NvU64 curOffs = 0;
+//        NvBool bRevoked = NV_TRUE;
+//        nv_alloc_mapping_context_t *mmap_context = &nvlfp->mmap_context;
+//        for(idx = 0; idx < mmap_context->memArea.numRanges; idx++)
+//        {
+//            NvU64 nextOffs = curOffs + mmap_context->memArea.pRanges[idx].size;
+//            NvU64 pfn = mmap_context->memArea.pRanges[idx].start >> PAGE_SHIFT;
+//            NvU64 numPages = mmap_context->memArea.pRanges[idx].size >> PAGE_SHIFT;
+//            while (numPages != 0)
+//            {
+//                ret = nv_insert_pfn(vma, curOffs + vma->vm_start, pfn);
+//                if (ret != VM_FAULT_NOPAGE)
+//                {
+//                    goto err;
+//                }
+//                bRevoked = NV_FALSE;
+//                curOffs += PAGE_SIZE;
+//                pfn++;
+//                numPages--;
+//            }
+//            curOffs = nextOffs;
+//        }
+//err:
+//        nvl->all_mappings_revoked &= bRevoked;
+//    }
+    // Safe to mmap, map all pages in this VMA.
+    for (page = 0; page < num_pages; page++)
     {
-        NvU64 idx;
-        NvU64 curOffs = 0;
-        NvBool bRevoked = NV_TRUE;
-        nv_alloc_mapping_context_t *mmap_context = &nvlfp->mmap_context;
-        for(idx = 0; idx < mmap_context->memArea.numRanges; idx++)
-        {
-            NvU64 nextOffs = curOffs + mmap_context->memArea.pRanges[idx].size;
-            NvU64 pfn = mmap_context->memArea.pRanges[idx].start >> PAGE_SHIFT;
-            NvU64 numPages = mmap_context->memArea.pRanges[idx].size >> PAGE_SHIFT;
-            while (numPages != 0)
-            {
-                ret = nv_insert_pfn(vma, curOffs + vma->vm_start, pfn);
-                if (ret != VM_FAULT_NOPAGE)
-                {
-                    goto err;
-                }
-                bRevoked = NV_FALSE;
-                curOffs += PAGE_SIZE;
-                pfn++;
-                numPages--;
-            }
-            curOffs = nextOffs;
-        }
-err:
-        nvl->all_mappings_revoked &= bRevoked;
-    }
+        NvU64 virt_addr = vma->vm_start + (page << PAGE_SHIFT);
+        NvU64 pfn = pfn_start + page;
 
+        ret = nv_insert_pfn(vma, virt_addr, pfn);
+        if (ret != VM_FAULT_NOPAGE)
+        {
+            nv_printf(NV_DBG_ERRORS,
+                      "NVRM: VM: nv_insert_pfn failed: %x\n", ret);
+            break;
+        }
+
+        nvl->all_mappings_revoked = NV_FALSE;
+    }
     up(&nvl->mmap_lock);
     up_read(&nv_system_pm_lock);
 
@@ -538,14 +562,17 @@ int nvidia_mmap_helper(
      */
     if (!NV_IS_CTL_DEVICE(nv))
     {
+        NvU32 remap_prot_extra = mmap_context->remap_prot_extra;
+        NvU64 mmap_start = mmap_context->mmap_start;
+        NvU64 mmap_length = mmap_context->mmap_size;
         NvU64 access_start = mmap_context->access_start;
         NvU64 access_len = mmap_context->access_size;
 
         // Ensure size is correct.
-        if (NV_VMA_SIZE(vma) != memareaSize(mmap_context->memArea))
-        {
-            return -ENXIO;
-        }
+        //if (NV_VMA_SIZE(vma) != memareaSize(mmap_context->memArea))
+        //{
+        //    return -ENXIO;
+        //}
 
         if (IS_REG_OFFSET(nv, access_start, access_len))
         {
@@ -568,7 +595,7 @@ int nvidia_mmap_helper(
             else
             {
                 if (nv_encode_caching(&vma->vm_page_prot,
-                        rm_disable_iomap_wc() ? NV_MEMORY_UNCACHED : mmap_context->caching, 
+                        rm_disable_iomap_wc() ? NV_MEMORY_UNCACHED : NV_MEMORY_WRITECOMBINED,
                         NV_MEMORY_TYPE_FRAMEBUFFER))
                 {
                     if (nv_encode_caching(&vma->vm_page_prot,
@@ -602,20 +629,26 @@ int nvidia_mmap_helper(
             }
             else
             {
-                NvU64 idx = 0;
-                NvU64 curOffs = 0;
-                for(; idx < mmap_context->memArea.numRanges; idx++)
+                //NvU64 idx = 0;
+                //NvU64 curOffs = 0;
+                //for(; idx < mmap_context->memArea.numRanges; idx++)
+                //{
+                //    NvU64 nextOffs = curOffs + mmap_context->memArea.pRanges[idx].size;
+                //    if (nv_io_remap_page_range(vma,
+                //            mmap_context->memArea.pRanges[idx].start,
+                //            mmap_context->memArea.pRanges[idx].size,
+                //            vma->vm_start + curOffs) != 0)
+                //    {
+                //        up(&nvl->mmap_lock);
+                //        return -EAGAIN;
+                //    }
+                //    curOffs = nextOffs;
+                //}
+                if (nv_io_remap_page_range(vma, mmap_start, mmap_length,
+                        remap_prot_extra) != 0)
                 {
-                    NvU64 nextOffs = curOffs + mmap_context->memArea.pRanges[idx].size;
-                    if (nv_io_remap_page_range(vma,
-                            mmap_context->memArea.pRanges[idx].start,
-                            mmap_context->memArea.pRanges[idx].size,
-                            vma->vm_start + curOffs) != 0)
-                    {
-                        up(&nvl->mmap_lock);
-                        return -EAGAIN;
-                    }
-                    curOffs = nextOffs;
+                    up(&nvl->mmap_lock);
+                    return -EAGAIN;
                 }
             }
         }

@@ -630,6 +630,7 @@ void  memdescSetPageSize(MEMORY_DESCRIPTOR *pMemDesc, ADDRESS_TRANSLATION addres
 PMEMORY_DESCRIPTOR memdescGetRootMemDesc(PMEMORY_DESCRIPTOR pMemDesc, NvU64 *pRootOffset);
 void memdescSetCustomHeap(PMEMORY_DESCRIPTOR);
 NvBool memdescGetCustomHeap(PMEMORY_DESCRIPTOR);
+NvU64 memdescGetAdjustedPageSize(MEMORY_DESCRIPTOR *pMemDesc);
 
 /*!
  *  @brief Get PTE kind

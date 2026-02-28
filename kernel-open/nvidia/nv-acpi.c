@@ -149,7 +149,7 @@ static void nv_acpi_powersource_hotplug_event(acpi_handle handle, u32 event_type
         if (nv_acpi_get_powersource(&ac_plugged) != NV_OK)
             return;
 
-        rm_power_source_change_event(pNvAcpiObject->sp, !ac_plugged);
+        //rm_power_source_change_event(pNvAcpiObject->sp, !ac_plugged);
     }
 }
 
@@ -159,7 +159,7 @@ static void nv_acpi_nvpcf_event(acpi_handle handle, u32 event_type, void *data)
 
     if (event_type == ACPI_NVPCF_EVENT_CHANGE)
     {
-        rm_acpi_nvpcf_notify(pNvAcpiObject->sp);
+        //rm_acpi_nvpcf_notify(pNvAcpiObject->sp);
     }
     else
     {
@@ -1349,7 +1349,7 @@ static acpi_status nv_acpi_find_battery_info(
      * reason.
      * Hence just cheking if battery technology of slot is rechargable or not.
      */
-    
+
     if ((object_package->package.elements[battery_technology_offset].type != ACPI_TYPE_INTEGER) ||
         (object_package->package.elements[battery_technology_offset].integer.value != BATTERY_RECHARGABLE))
     {

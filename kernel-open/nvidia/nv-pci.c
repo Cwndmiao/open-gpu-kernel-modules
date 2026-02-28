@@ -338,7 +338,7 @@ static NvU32 find_gpu_numa_nodes_in_srat(nv_linux_state_t *nvl)
             // Device and function should be zero enforced by above check
             gi_dbdf = *((NvU16 *)(&gi->device_handle[0])) << 16 |
                 (busAtByte2 != 0 ? busAtByte2 : busAtByte3) << 8;
-            
+
             if (gi_dbdf == dev_dbdf) {
                 numa_node = pxm_to_node(gi->proximity_domain);
                 if (numa_node < MAX_NUMNODES) {
@@ -434,7 +434,7 @@ nv_init_coherent_link_info
             /* Fail for the baremetal case */
             goto failed;
         }
-        
+
         /*
          * For the virtualization usecase on SHH, the coherent GPU memory
          * PA is exposed as BAR2 to the VM and the "nvidia,gpu-mem-base-pa"
@@ -486,7 +486,7 @@ nv_init_coherent_link_info
         //
         // Unset nv->bars[2] for all self-hosted systems as BAR2 in the virtualization case
         // is used only to convey the coherent GPU memory information and doesn't contain
-        // the traditional GPU BAR2. This is to ensure the coherent FB addresses don't 
+        // the traditional GPU BAR2. This is to ensure the coherent FB addresses don't
         // inadvertently pass the IS_FB_OFFSET or IS_IMEM_OFFSET checks.
         //
         memset(&nv->bars[2], 0, sizeof(nv->bars[2]));
@@ -736,8 +736,8 @@ nv_pci_tegra_devfreq_get_dev_status(struct device *dev,
     // devfreq core will scale the underlying clock to Fmax to prevent any
     // performance drop.
     //
-    status = rm_pmu_perfmon_get_load(sp, nv, &load, tdev->devfreq_clk);
-    if (status != NV_OK)
+    //status = rm_pmu_perfmon_get_load(sp, nv, &load, tdev->devfreq_clk);
+    //if (status != NV_OK)
     {
         load = 100;
     }
@@ -1230,7 +1230,7 @@ static void nv_init_dynamic_power_management
     }
 
     // Support dynamic power management if device is a tegra PCI iGPU
-    rm_init_tegra_dynamic_power_management(sp, nv);
+    //rm_init_tegra_dynamic_power_management(sp, nv);
 
     rm_init_dynamic_power_management(sp, nv, pr3_acpi_method_present);
 }
@@ -1320,7 +1320,7 @@ nv_pci_probe
     {
 #if defined(NV_VGPU_KVM_BUILD)
 #if defined(NV_BUS_TYPE_HAS_IOMMU_OPS)
-        if (pci_dev->dev.bus->iommu_ops == NULL) 
+        if (pci_dev->dev.bus->iommu_ops == NULL)
 #else
         if ((pci_dev->dev.iommu != NULL) && (pci_dev->dev.iommu->iommu_dev != NULL) &&
             (pci_dev->dev.iommu->iommu_dev->ops == NULL))
@@ -1458,10 +1458,10 @@ nv_pci_probe
         goto err_zero_dev;
     }
 
-    if (!nv->is_tegra_pci_igpu &&
-        !pci_devid_is_self_hosted(pci_dev->device) &&
-        !nv_pci_validate_bars(pci_dev, /* only_bar0 = */ NV_FALSE))
-        goto err_zero_dev;
+    //if (!nv->is_tegra_pci_igpu &&
+    //    !pci_devid_is_self_hosted(pci_dev->device) &&
+    //    !nv_pci_validate_bars(pci_dev, /* only_bar0 = */ NV_FALSE))
+    //    goto err_zero_dev;
 
     if (nv_resize_pcie_bars(pci_dev)) {
         nv_printf(NV_DBG_ERRORS,
@@ -1474,7 +1474,7 @@ nv_pci_probe
     nvl->gpu_wakeup_callback_needed = NV_TRUE;
     INIT_LIST_HEAD(&nvl->open_files);
 
-    if (!nv->is_tegra_pci_igpu)
+    //if (!nv->is_tegra_pci_igpu)
     {
         for (i = 0, j = 0; i < NVRM_PCICFG_NUM_BARS && j < NV_GPU_NUM_BARS; i++)
         {
@@ -1502,46 +1502,46 @@ nv_pci_probe
     NV_ATOMIC_SET(nvl->numa_info.status, NV_IOCTL_NUMA_STATUS_DISABLED);
     nvl->numa_info.node_id = NUMA_NO_NODE;
 
-#if NV_IS_EXPORT_SYMBOL_GPL_pci_ats_supported
-    nv->ats_support = pci_ats_supported(nvl->pci_dev);
-#else
-    nv->ats_support = nvl->pci_dev->ats_enabled;
-#endif
-
-    if (nv->ats_support)
-    {
-        int ret __attribute__ ((unused));
-
-        NV_DEV_PRINTF(NV_DBG_INFO, nv, "ATS supported by this GPU!\n");
-
-#if NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_enable_feature
-#if defined(CONFIG_IOMMU_SVA) && \
-    (defined(NV_IOASID_GET_PRESENT) || defined(NV_MM_PASID_DROP_PRESENT))
-        ret = iommu_dev_enable_feature(nvl->dev, IOMMU_DEV_FEAT_SVA);
-        if (ret == 0)
-        {
-            NV_DEV_PRINTF(NV_DBG_INFO, nv, "Enabled SMMU SVA feature! \n");
-        }
-        else if (ret == -EBUSY)
-        {
-            NV_DEV_PRINTF(NV_DBG_INFO, nv, "SMMU SVA feature already enabled!\n");
-        }
-        else
-        {
-            NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
-                          "Enabling SMMU SVA feature failed! ret: %d\n", ret);
-            nv->ats_support = NV_FALSE;
-        }
-#endif
-#endif // NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_enable_feature
-    }
+//#if NV_IS_EXPORT_SYMBOL_GPL_pci_ats_supported
+//    nv->ats_support = pci_ats_supported(nvl->pci_dev);
+//#else
+//    nv->ats_support = nvl->pci_dev->ats_enabled;
+//#endif
+//
+//    if (nv->ats_support)
+//    {
+//        int ret __attribute__ ((unused));
+//
+//        NV_DEV_PRINTF(NV_DBG_INFO, nv, "ATS supported by this GPU!\n");
+//
+//#if NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_enable_feature
+//#if defined(CONFIG_IOMMU_SVA) && \
+//    (defined(NV_IOASID_GET_PRESENT) || defined(NV_MM_PASID_DROP_PRESENT))
+//        ret = iommu_dev_enable_feature(nvl->dev, IOMMU_DEV_FEAT_SVA);
+//        if (ret == 0)
+//        {
+//            NV_DEV_PRINTF(NV_DBG_INFO, nv, "Enabled SMMU SVA feature! \n");
+//        }
+//        else if (ret == -EBUSY)
+//        {
+//            NV_DEV_PRINTF(NV_DBG_INFO, nv, "SMMU SVA feature already enabled!\n");
+//        }
+//        else
+//        {
+//            NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
+//                          "Enabling SMMU SVA feature failed! ret: %d\n", ret);
+//            nv->ats_support = NV_FALSE;
+//        }
+//#endif
+//#endif // NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_enable_feature
+//    }
 
     if (pci_devid_is_self_hosted(pci_dev->device))
     {
         nv_init_coherent_link_info(nv);
     }
 
-    nv_ats_supported |= nv->ats_support;
+//    nv_ats_supported |= nv->ats_support;
 
     nv_clk_get_handles(nv);
 
@@ -1563,7 +1563,7 @@ nv_pci_probe
         goto err_gpu_lost;
     }
 
-    nv->cpu_numa_node_id = dev_to_node(nvl->dev);
+    //nv->cpu_numa_node_id = dev_to_node(nvl->dev);
 
     if (nv_linux_init_open_q(nvl) != 0)
     {
@@ -1652,12 +1652,12 @@ nv_pci_probe
      * into the suspended state. Hardware register access should not be done
      * after enabling dynamic power management.
      */
-    rm_enable_dynamic_power_management(sp, nv);
+    //rm_enable_dynamic_power_management(sp, nv);
 
     /*
      * This must be the last action in nv_pci_probe(). Do not add code after this line.
      */
-    rm_notify_gpu_addition(sp, nv);
+    //rm_notify_gpu_addition(sp, nv);
 
     nv_kmem_cache_free_stack(sp);
 
@@ -1739,21 +1739,21 @@ nv_pci_remove(struct pci_dev *pci_dev)
 #if NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_disable_feature
 #if defined(CONFIG_IOMMU_SVA) && \
     (defined(NV_IOASID_GET_PRESENT) || defined(NV_MM_PASID_DROP_PRESENT))
-    if (nv->ats_support)
-    {
-        int ret;
+    //if (nv->ats_support)
+    //{
+    //    int ret;
 
-        ret = iommu_dev_disable_feature(nvl->dev, IOMMU_DEV_FEAT_SVA);
-        if (ret == 0)
-        {
-            NV_DEV_PRINTF(NV_DBG_INFO, nv, "Disabled SMMU SVA feature! \n");
-        }
-        else
-        {
-            NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
-                          "Disabling SMMU SVA feature failed! ret: %d\n", ret);
-        }
-    }
+    //    ret = iommu_dev_disable_feature(nvl->dev, IOMMU_DEV_FEAT_SVA);
+    //    if (ret == 0)
+    //    {
+    //        NV_DEV_PRINTF(NV_DBG_INFO, nv, "Disabled SMMU SVA feature! \n");
+    //    }
+    //    else
+    //    {
+    //        NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
+    //                      "Disabling SMMU SVA feature failed! ret: %d\n", ret);
+    //    }
+    //}
 #endif
 #endif // NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_disable_feature
     /*
@@ -1768,7 +1768,7 @@ nv_pci_remove(struct pci_dev *pci_dev)
     down(&nvl->ldata_lock);
     nv->flags |= NV_FLAG_PCI_REMOVE_IN_PROGRESS;
 
-    rm_notify_gpu_removal(sp, nv);
+    //rm_notify_gpu_removal(sp, nv);
 
     /*
      * Sanity check: A removed device shouldn't have a non-zero usage_count.
@@ -1807,7 +1807,7 @@ nv_pci_remove(struct pci_dev *pci_dev)
                 nv_printf(NV_DBG_ERRORS,
                           "NVRM: Failed removal of device %04x:%02x:%02x.%x!\n",
                           NV_PCI_DOMAIN_NUMBER(pci_dev), NV_PCI_BUS_NUMBER(pci_dev),
-                          NV_PCI_SLOT_NUMBER(pci_dev), PCI_FUNC(pci_dev->devfn));  
+                          NV_PCI_SLOT_NUMBER(pci_dev), PCI_FUNC(pci_dev->devfn));
                 WARN_ON(1);
                 goto done;
             }
@@ -1915,7 +1915,7 @@ nv_pci_shutdown(struct pci_dev *pci_dev)
 
         nvidia_modeset_remove(nv->gpu_id);
 
-        nvl->nv_state.is_shutdown = NV_TRUE;
+        //nvl->nv_state.is_shutdown = NV_TRUE;
     }
 
     /* pci_clear_master is not defined for !CONFIG_PCI */
@@ -2096,10 +2096,10 @@ NvBool nv_pci_is_valid_topology_for_direct_pci(
     struct pci_dev *pdev0 = to_pci_dev(nv->dma_dev->dev);
     struct pci_dev *pdev1 = peer;
 
-    if (!nv->coherent)
-    {
-        return NV_FALSE;
-    }
+    //if (!nv->coherent)
+    //{
+    //    return NV_FALSE;
+    //}
 
     switch (NVreg_GrdmaPciTopoCheckOverride) {
         case NV_REG_GRDMA_PCI_TOPO_CHECK_OVERRIDE_ALLOW_ACCESS:
@@ -2147,7 +2147,7 @@ NvBool NV_API_CALL nv_grdma_pci_topology_supported(
     // Skip topo check on coherent platforms since
     // NIC can map over C2C anyway and PCIe topology shouldn't matter.
     //
-    if (nv->coherent)
+    //if (nv->coherent)
     {
         return NV_TRUE;
     }

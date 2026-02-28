@@ -2323,25 +2323,25 @@ static void channel_destroy(uvm_channel_pool_t *pool, uvm_channel_t *channel)
     pool->num_channels--;
 }
 
-// Returns the TSG for a given channel.
-static uvmGpuTsgHandle channel_get_tsg(uvm_channel_t *channel)
-{
-    unsigned tsg_index = 0;
-    uvm_channel_pool_t *pool = channel->pool;
-
-    if (uvm_channel_pool_is_wlc(pool) || uvm_channel_pool_is_lcic(pool)) {
-        if (uvm_channel_pool_is_lcic(pool)) {
-            channel = uvm_channel_lcic_get_paired_wlc(channel);
-            pool = channel->pool;
-        }
-
-        tsg_index = uvm_channel_index_in_pool(channel);
-    }
-
-    UVM_ASSERT(tsg_index < pool->num_tsgs);
-
-    return pool->tsg_handles[tsg_index];
-}
+//// Returns the TSG for a given channel.
+//static uvmGpuTsgHandle channel_get_tsg(uvm_channel_t *channel)
+//{
+//    unsigned tsg_index = 0;
+//    uvm_channel_pool_t *pool = channel->pool;
+//
+//    if (uvm_channel_pool_is_wlc(pool) || uvm_channel_pool_is_lcic(pool)) {
+//        if (uvm_channel_pool_is_lcic(pool)) {
+//            channel = uvm_channel_lcic_get_paired_wlc(channel);
+//            pool = channel->pool;
+//        }
+//
+//        tsg_index = uvm_channel_index_in_pool(channel);
+//    }
+//
+//    UVM_ASSERT(tsg_index < pool->num_tsgs);
+//
+//    return pool->tsg_handles[tsg_index];
+//}
 
 static NV_STATUS internal_channel_create(uvm_channel_t *channel)
 {
@@ -2349,6 +2349,7 @@ static NV_STATUS internal_channel_create(uvm_channel_t *channel)
     UvmGpuChannelAllocParams channel_alloc_params;
     UvmGpuChannelInfo *channel_info = &channel->channel_info;
     uvm_channel_manager_t *manager = channel->pool->manager;
+    uvm_gpu_t *gpu = manager->gpu;
 
     memset(&channel_alloc_params, 0, sizeof(channel_alloc_params));
     channel_alloc_params.numGpFifoEntries = channel_pool_num_gpfifo_entries(channel->pool);
@@ -2363,7 +2364,8 @@ static NV_STATUS internal_channel_create(uvm_channel_t *channel)
         channel_alloc_params.gpPutLoc = UVM_BUFFER_LOCATION_SYS;
     }
 
-    status = uvm_rm_locked_call(nvUvmInterfaceChannelAllocate(channel_get_tsg(channel),
+    //status = uvm_rm_locked_call(nvUvmInterfaceChannelAllocate(channel_get_tsg(channel),
+    status = uvm_rm_locked_call(nvUvmInterfaceChannelAllocate(gpu->rm_address_space,
                                                               &channel_alloc_params,
                                                               &channel->handle,
                                                               channel_info));
@@ -2653,41 +2655,41 @@ static UVM_GPU_CHANNEL_ENGINE_TYPE pool_type_to_engine_type(uvm_channel_pool_typ
     return UVM_GPU_CHANNEL_ENGINE_TYPE_CE;
 }
 
-static void tsg_destroy(uvm_channel_pool_t *pool, uvmGpuTsgHandle tsg_handle)
-{
-    UVM_ASSERT(pool->num_tsgs > 0);
-
-    uvm_rm_locked_call_void(nvUvmInterfaceTsgDestroy(tsg_handle));
-    pool->num_tsgs--;
-}
-
-static NV_STATUS tsg_create(uvm_channel_pool_t *pool, uvmGpuTsgHandle *tsg_handle)
-{
-    NV_STATUS status;
-    UvmGpuTsgAllocParams tsg_alloc_params;
-    uvm_gpu_t *gpu = pool->manager->gpu;
-
-    pool->num_tsgs++;
-
-    tsg_alloc_params.engineType = pool_type_to_engine_type(pool->pool_type);
-    tsg_alloc_params.engineIndex = pool->engine_index;
-
-    status = uvm_rm_locked_call(nvUvmInterfaceTsgAllocate(gpu->rm_address_space, &tsg_alloc_params, tsg_handle));
-    if (status != NV_OK) {
-        UVM_ERR_PRINT("nvUvmInterfaceTsgAllocate() failed: %s, GPU %s, type %s\n",
-                      nvstatusToString(status),
-                      uvm_gpu_name(gpu),
-                      uvm_channel_pool_type_to_string(pool->pool_type));
-        goto error;
-    }
-
-    return NV_OK;
-
-error:
-    tsg_destroy(pool, *tsg_handle);
-
-    return status;
-}
+//static void tsg_destroy(uvm_channel_pool_t *pool, uvmGpuTsgHandle tsg_handle)
+//{
+//    UVM_ASSERT(pool->num_tsgs > 0);
+//
+//    uvm_rm_locked_call_void(nvUvmInterfaceTsgDestroy(tsg_handle));
+//    pool->num_tsgs--;
+//}
+//
+//static NV_STATUS tsg_create(uvm_channel_pool_t *pool, uvmGpuTsgHandle *tsg_handle)
+//{
+//    NV_STATUS status;
+//    UvmGpuTsgAllocParams tsg_alloc_params;
+//    uvm_gpu_t *gpu = pool->manager->gpu;
+//
+//    pool->num_tsgs++;
+//
+//    tsg_alloc_params.engineType = pool_type_to_engine_type(pool->pool_type);
+//    tsg_alloc_params.engineIndex = pool->engine_index;
+//
+//    status = uvm_rm_locked_call(nvUvmInterfaceTsgAllocate(gpu->rm_address_space, &tsg_alloc_params, tsg_handle));
+//    if (status != NV_OK) {
+//        UVM_ERR_PRINT("nvUvmInterfaceTsgAllocate() failed: %s, GPU %s, type %s\n",
+//                      nvstatusToString(status),
+//                      uvm_gpu_name(gpu),
+//                      uvm_channel_pool_type_to_string(pool->pool_type));
+//        goto error;
+//    }
+//
+//    return NV_OK;
+//
+//error:
+//    tsg_destroy(pool, *tsg_handle);
+//
+//    return status;
+//}
 
 static void channel_pool_destroy(uvm_channel_pool_t *pool)
 {
@@ -2699,11 +2701,11 @@ static void channel_pool_destroy(uvm_channel_pool_t *pool)
     uvm_kvfree(pool->channels);
     pool->channels = NULL;
 
-    while (pool->num_tsgs > 0)
-        tsg_destroy(pool, *(pool->tsg_handles + pool->num_tsgs - 1));
+    //while (pool->num_tsgs > 0)
+    //    tsg_destroy(pool, *(pool->tsg_handles + pool->num_tsgs - 1));
 
-    uvm_kvfree(pool->tsg_handles);
-    pool->tsg_handles = NULL;
+    //uvm_kvfree(pool->tsg_handles);
+    //pool->tsg_handles = NULL;
 
     uvm_kvfree(pool->conf_computing.key_rotation.csl_contexts);
     pool->conf_computing.key_rotation.csl_contexts = NULL;
@@ -2847,7 +2849,7 @@ static NV_STATUS channel_pool_add(uvm_channel_manager_t *channel_manager,
     NV_STATUS status;
     unsigned i;
     unsigned num_channels;
-    unsigned num_tsgs;
+    //unsigned num_tsgs;
     uvm_channel_pool_t *pool;
 
     UVM_ASSERT(uvm_pool_type_is_valid(pool_type));
@@ -2859,22 +2861,22 @@ static NV_STATUS channel_pool_add(uvm_channel_manager_t *channel_manager,
     pool->engine_index = engine_index;
     pool->pool_type = pool_type;
 
-    num_tsgs = channel_manager_num_tsgs(channel_manager, pool_type);
-    if (num_tsgs != 0) {
-        pool->tsg_handles = uvm_kvmalloc_zero(sizeof(*pool->tsg_handles) * num_tsgs);
-        if (!pool->tsg_handles) {
-            status = NV_ERR_NO_MEMORY;
-            goto error;
-        }
+    //num_tsgs = channel_manager_num_tsgs(channel_manager, pool_type);
+    //if (num_tsgs != 0) {
+    //    pool->tsg_handles = uvm_kvmalloc_zero(sizeof(*pool->tsg_handles) * num_tsgs);
+    //    if (!pool->tsg_handles) {
+    //        status = NV_ERR_NO_MEMORY;
+    //        goto error;
+    //    }
 
-        for (i = 0; i < num_tsgs; i++) {
-            uvmGpuTsgHandle *tsg_handle = pool->tsg_handles + i;
+    //    for (i = 0; i < num_tsgs; i++) {
+    //        uvmGpuTsgHandle *tsg_handle = pool->tsg_handles + i;
 
-            status = tsg_create(pool, tsg_handle);
-            if (status != NV_OK)
-                goto error;
-        }
-    }
+    //        status = tsg_create(pool, tsg_handle);
+    //        if (status != NV_OK)
+    //            goto error;
+    //    }
+    //}
 
     num_channels = channel_manager_num_channels(channel_manager, pool_type);
 

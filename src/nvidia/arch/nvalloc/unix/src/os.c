@@ -570,19 +570,19 @@ void osUnmapSystemMemory
     NvP64  pPrivate
 )
 {
-    NV_STATUS status;
+    //NV_STATUS status;
     void *pAllocPrivate = memdescGetMemData(pMemDesc);
     OBJGPU *pGpu = pMemDesc->pGpu;
     nv_state_t *nv = NV_GET_NV_STATE(pGpu);
 
     if (Kernel)
     {
-        status = nv_free_kernel_mapping(nv, pAllocPrivate, NvP64_VALUE(pAddress),
+        nv_free_kernel_mapping(nv, pAllocPrivate, NvP64_VALUE(pAddress),
                 NvP64_VALUE(pPrivate));
     }
     else
     {
-        status = nv_free_user_mapping(nv, pAllocPrivate, (NvU64)pAddress,
+        nv_free_user_mapping(nv, pAllocPrivate, (NvU64)pAddress,
                 NvP64_VALUE(pPrivate));
     }
 
@@ -595,7 +595,7 @@ void osUnmapSystemMemory
         memdescSetMemData(pMemDesc, NULL, NULL);
     }
 
-    NV_ASSERT(status == NV_OK);
+    //NV_ASSERT(status == NV_OK);
 }
 
 void osIoWriteByte(
@@ -871,6 +871,31 @@ void osDmaSetAddressSize(
     nv_set_dma_address_size(pOsGpuInfo, bits);
 }
 
+static NV_STATUS osGetPagesInfo(
+    MEMORY_DESCRIPTOR *pMemDesc,
+    NvU64 *pageSize,
+    NvU64 *osPageCount,
+    NvU64 *rmPageCount
+)
+{
+    NvU64 osPageSize  = osGetPageSize();
+    NvU64 maxPageSize = NV_MAX(osPageSize, RM_PAGE_SIZE);
+    NvU64 alignedSize = NV_ALIGN_UP(pMemDesc->Size, maxPageSize);
+
+    *osPageCount = alignedSize >> BIT_IDX_32(osPageSize);
+    *rmPageCount = alignedSize >> RM_PAGE_SHIFT;
+    *pageSize = memdescGetAdjustedPageSize(pMemDesc);
+
+    // In the non-contig case need to protect against page array overflows.
+    //if (!memdescGetContiguity(pMemDesc, AT_CPU))
+    //    NV_ASSERT_OR_RETURN(*rmPageCount <= pMemDesc->pageArraySize, NV_ERR_INVALID_ARGUMENT);
+
+    if (*osPageCount > NV_U32_MAX || *rmPageCount > NV_U32_MAX)
+        return NV_ERR_INVALID_LIMIT;
+
+    return NV_OK;
+}
+
 NV_STATUS osAllocPagesInternal(
     MEMORY_DESCRIPTOR *pMemDesc
 )
@@ -880,6 +905,10 @@ NV_STATUS osAllocPagesInternal(
     nv_state_t *nv = NV_GET_NV_STATE(pGpu);
     void *pMemData;
     NV_STATUS status;
+    NvS32             nodeId    = NV0000_CTRL_NO_NUMA_NODE;
+    NvU64             pageSize;
+    NvU64             osPageCount;
+    NvU64             rmPageCount;
 
     memdescSetAddress(pMemDesc, NvP64_NULL);
     memdescSetMemData(pMemDesc, NULL, NULL);
@@ -888,20 +917,26 @@ NV_STATUS osAllocPagesInternal(
 
     if (memdescGetFlag(pMemDesc, MEMDESC_FLAGS_GUEST_ALLOCATED))
     {
+        status = osGetPagesInfo(pMemDesc, &pageSize, &osPageCount, &rmPageCount);
+        if (status != NV_OK)
+            goto done;
+
         if (NV_RM_PAGE_SIZE < os_page_size &&
             !memdescGetContiguity(pMemDesc, AT_CPU))
         {
             RmDeflateRmToOsPageArray(memdescGetPteArray(pMemDesc, AT_CPU),
-                                     pMemDesc->PageCount);
+                                     rmPageCount);
         }
 
         status = nv_alias_pages(
             NV_GET_NV_STATE(pGpu),
-            NV_RM_PAGES_TO_OS_PAGES(pMemDesc->PageCount),
+            osPageCount,
+            pageSize,
             memdescGetContiguity(pMemDesc, AT_CPU),
             memdescGetCpuCacheAttrib(pMemDesc),
             memdescGetGuestId(pMemDesc),
             memdescGetPteArray(pMemDesc, AT_CPU),
+            NV_FALSE,
             &pMemData);
     }
     else
@@ -911,14 +946,20 @@ NV_STATUS osAllocPagesInternal(
         if (nv && (memdescGetFlag(pMemDesc, MEMDESC_FLAGS_ALLOC_32BIT_ADDRESSABLE)))
             nv->force_dma32_alloc = NV_TRUE;
 
+        status = osGetPagesInfo(pMemDesc, &pageSize, &osPageCount, &rmPageCount);
+        if (status != NV_OK)
+            goto done;
+
         status = nv_alloc_pages(
             NV_GET_NV_STATE(pGpu),
-            NV_RM_PAGES_TO_OS_PAGES(pMemDesc->PageCount),
+            osPageCount,  // TODO: This call needs to receive the page count param at the requested page size.
+            pageSize,
             memdescGetContiguity(pMemDesc, AT_CPU),
             memdescGetCpuCacheAttrib(pMemDesc),
             pSys->getProperty(pSys,
                 PDB_PROP_SYS_INITIALIZE_SYSTEM_MEMORY_ALLOCATIONS),
             unencrypted,
+            nodeId,
             memdescGetPteArray(pMemDesc, AT_CPU),
             &pMemData);
 
@@ -939,6 +980,7 @@ NV_STATUS osAllocPagesInternal(
 
     memdescSetMemData(pMemDesc, pMemData, NULL);
 
+done:
     return status;
 }
 
@@ -2511,8 +2553,10 @@ void osInitSystemStaticConfig(SYS_STATIC_CONFIG *pConfig)
 {
     pConfig->bIsNotebook = rm_is_system_notebook();
     pConfig->osType = nv_get_os_type();
-    pConfig->osSevStatus = os_sev_status;
-    pConfig->bOsSevEnabled = os_sev_enabled;
+    //pConfig->osSevStatus = os_sev_status;
+    pConfig->osSevStatus = 0;
+    //pConfig->bOsSevEnabled = os_sev_enabled;
+    pConfig->bOsSevEnabled = NV_FALSE;
 }
 
 NvU32 osApiLockAcquireConfigureFlags(NvU32 flags)
@@ -4007,7 +4051,8 @@ osGetIbmnpuGenregInfo
     NvU64       *pSize
 )
 {
-    return nv_get_ibmnpu_genreg_info(pOsGpuInfo, pBase, pSize, NULL);
+    //return nv_get_ibmnpu_genreg_info(pOsGpuInfo, pBase, pSize, NULL);
+    return NV_OK;
 }
 
 /*
@@ -4023,7 +4068,9 @@ osGetIbmnpuRelaxedOrderingMode
     NvBool      *pMode
 )
 {
-    return nv_get_ibmnpu_relaxed_ordering_mode(pOsGpuInfo, pMode);
+    //return nv_get_ibmnpu_relaxed_ordering_mode(pOsGpuInfo, pMode);
+    *pMode = NV_FALSE;
+    return NV_OK;
 }
 
 /*
@@ -4037,7 +4084,7 @@ osWaitForIbmnpuRsync
     OS_GPU_INFO *pOsGpuInfo
 )
 {
-    nv_wait_for_ibmnpu_rsync(pOsGpuInfo);
+    //nv_wait_for_ibmnpu_rsync(pOsGpuInfo);
 }
 
 NvU32

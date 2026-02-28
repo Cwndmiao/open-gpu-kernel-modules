@@ -188,3 +188,6 @@
 --undefined=rm_is_iommu_needed_for_sriov
 --undefined=rm_disable_iomap_wc
 --undefined=rm_get_clientnvpcf_power_limits
+--undefined=rm_get_adapter_status_external
+--undefined=rm_gpu_ops_get_external_alloc_phys_addrs
+--undefined=rm_is_altstack_in_use

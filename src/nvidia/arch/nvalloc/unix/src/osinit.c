@@ -1602,6 +1602,7 @@ NvBool RmInitAdapter(
         RmSetDeviceDmaAddressSize(nv, NV_GSP_GPU_MIN_SUPPORTED_DMA_ADDR_WIDTH);
 
         gspFwHandle = nv_get_firmware(nv, NV_FIRMWARE_GSP,
+                                      0,
                                       &gspFw.pBuf,
                                       &gspFw.size);
         if (gspFwHandle == NULL &&
@@ -1622,6 +1623,7 @@ NvBool RmInitAdapter(
             if (nv->enable_firmware_logs)
             {
                 gspFwLogHandle = nv_get_firmware(nv, NV_FIRMWARE_GSP_LOG,
+                                                 0,
                                                  &gspFw.pLogElf,
                                                  &gspFw.logElfSize);
                 if (gspFwLogHandle == NULL)

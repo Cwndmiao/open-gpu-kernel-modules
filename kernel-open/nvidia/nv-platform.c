@@ -62,11 +62,11 @@ nvidia_soc_isr_kthread_bh(
         {
             nv->soc_irq_info[irq_count].bh_pending = NV_FALSE;
         }
-        if (nv->soc_irq_info[irq_count].ref_count == 0)
-        {
-            nv->soc_irq_info[irq_count].ref_count++;
-            enable_irq(nv->soc_irq_info[irq_count].irq_num);
-        }
+        //if (nv->soc_irq_info[irq_count].ref_count == 0)
+        //{
+        //    nv->soc_irq_info[irq_count].ref_count++;
+        //    enable_irq(nv->soc_irq_info[irq_count].irq_num);
+        //}
     }
     nv->current_soc_irq = -1;
     NV_SPIN_UNLOCK_IRQRESTORE(&nvl->soc_isr_lock, flags);
@@ -107,11 +107,11 @@ static irqreturn_t nvidia_soc_isr(int irq, void *arg)
     nv->current_soc_irq = irq;
     for (irq_count = 0; irq_count < nv->num_soc_irqs; irq_count++)
     {
-        if (nv->soc_irq_info[irq_count].ref_count == 1)
-        {
-            nv->soc_irq_info[irq_count].ref_count--;
-            disable_irq_nosync(nv->soc_irq_info[irq_count].irq_num);
-        }
+        //if (nv->soc_irq_info[irq_count].ref_count == 1)
+        //{
+        //    nv->soc_irq_info[irq_count].ref_count--;
+        //    disable_irq_nosync(nv->soc_irq_info[irq_count].irq_num);
+        //}
     }
 
     ret = nvidia_isr(irq, arg);
@@ -129,11 +129,11 @@ static irqreturn_t nvidia_soc_isr(int irq, void *arg)
     {
         for (irq_count = 0; irq_count < nv->num_soc_irqs; irq_count++)
         {
-            if (nv->soc_irq_info[irq_count].ref_count == 0)
-            {
-                nv->soc_irq_info[irq_count].ref_count++;
-                enable_irq(nv->soc_irq_info[irq_count].irq_num);
-            }
+            //if (nv->soc_irq_info[irq_count].ref_count == 0)
+            //{
+            //    nv->soc_irq_info[irq_count].ref_count++;
+            //    enable_irq(nv->soc_irq_info[irq_count].irq_num);
+            //}
         }
         nv->current_soc_irq = -1;
     }
@@ -183,7 +183,7 @@ NvS32 nv_request_soc_irq(
         nv->soc_irq_info[irq_index].irq_data.dpaux_instance = priv_data;
     }
     nv->num_soc_irqs++;
-    nv->soc_irq_info[irq_index].ref_count = 0;
+    //nv->soc_irq_info[irq_index].ref_count = 0;
 
     return ret;
 }
@@ -249,7 +249,7 @@ static void nv_soc_free_irq_by_type(nv_state_t *nv, nv_soc_irq_type_t type)
             nv->soc_irq_info[count].irq_type = 0;
             nv->soc_irq_info[count].irq_num = 0;
             nv->soc_irq_info[count].bh_pending = NV_FALSE;
-            nv->soc_irq_info[count].ref_count = 0;
+            //nv->soc_irq_info[count].ref_count = 0;
             nv->num_soc_irqs--;
         }
     }
@@ -286,19 +286,19 @@ int nv_soc_register_irqs(nv_state_t *nv)
         return rc;
     }
 
-    if (nv->soc_is_dpalt_mode_supported)
-    {
-        /* Type-C port controller to display interrupt*/
-        rc = nv_request_soc_irq(nvl, nv->tcpc2disp_irq, NV_SOC_IRQ_TCPC2DISP_TYPE,
-                nv_default_irq_flags(nv), 0, "tcpc2disp");
-        if (rc != 0)
-        {
-            nv_printf(NV_DBG_ERRORS, "failed to request Tcpc2disp irq (%d)\n", rc);
-            free_irq(nv->interrupt_line, (void *) nvl);
-            free_irq(nv->hdacodec_irq, (void *)nvl);
-            return rc;
-        }
-    }
+    //if (nv->soc_is_dpalt_mode_supported)
+    //{
+    //    /* Type-C port controller to display interrupt*/
+    //    rc = nv_request_soc_irq(nvl, nv->tcpc2disp_irq, NV_SOC_IRQ_TCPC2DISP_TYPE,
+    //            nv_default_irq_flags(nv), 0, "tcpc2disp");
+    //    if (rc != 0)
+    //    {
+    //        nv_printf(NV_DBG_ERRORS, "failed to request Tcpc2disp irq (%d)\n", rc);
+    //        free_irq(nv->interrupt_line, (void *) nvl);
+    //        free_irq(nv->hdacodec_irq, (void *)nvl);
+    //        return rc;
+    //    }
+    //}
 
     for (dpauxindex = 0; dpauxindex < nv->num_dpaux_instance; dpauxindex++)
     {
@@ -315,10 +315,10 @@ int nv_soc_register_irqs(nv_state_t *nv)
             nv_printf(NV_DBG_ERRORS, "failed to request dpaux irq (%d)\n", rc);
             free_irq(nv->interrupt_line, (void *)nvl);
             free_irq(nv->hdacodec_irq, (void *)nvl);
-            if (nv->soc_is_dpalt_mode_supported)
-            {
-                free_irq(nv->tcpc2disp_irq, (void *)nvl);
-            }
+            //if (nv->soc_is_dpalt_mode_supported)
+            //{
+            //    free_irq(nv->tcpc2disp_irq, (void *)nvl);
+            //}
             return rc;
         }
     }
@@ -333,10 +333,10 @@ void nv_soc_free_irqs(nv_state_t *nv)
     nv_soc_free_irq_by_type(nv, NV_SOC_IRQ_DPAUX_TYPE);
     nv_soc_free_irq_by_type(nv, NV_SOC_IRQ_GPIO_TYPE);
 
-    if (nv->soc_is_dpalt_mode_supported)
-    {
-        nv_soc_free_irq_by_type(nv, NV_SOC_IRQ_TCPC2DISP_TYPE);
-    }
+    //if (nv->soc_is_dpalt_mode_supported)
+    //{
+    //    nv_soc_free_irq_by_type(nv, NV_SOC_IRQ_TCPC2DISP_TYPE);
+    //}
 }
 
 static void nv_platform_free_device_dpaux(nv_state_t *nv)
@@ -574,19 +574,19 @@ static NV_STATUS nv_platform_get_iommu_availability(struct platform_device *plat
     struct device_node *iso_np = NULL;
     NV_STATUS status = NV_OK;
 
-    nv->iommus.iso_iommu_present = NV_FALSE;
-    nv->iommus.niso_iommu_present = NV_FALSE;
+    //nv->iommus.iso_iommu_present = NV_FALSE;
+    //nv->iommus.niso_iommu_present = NV_FALSE;
 
     iso_np = of_parse_phandle(np, "iommus", 0);
     if (iso_np && of_device_is_available(iso_np)) {
-        nv->iommus.iso_iommu_present = NV_TRUE;
+        //nv->iommus.iso_iommu_present = NV_TRUE;
     }
 
     niso_np = of_get_child_by_name(np, "nvdisplay-niso");
     if (niso_np) {
         niso_np_with_iommus = of_parse_phandle(niso_np, "iommus", 0);
         if (niso_np_with_iommus && of_device_is_available(niso_np_with_iommus)) {
-            nv->iommus.niso_iommu_present = NV_TRUE;
+            //nv->iommus.niso_iommu_present = NV_TRUE;
         }
     }
 
@@ -613,14 +613,14 @@ static NV_STATUS nv_platform_get_iso_niso_stream_ids(struct platform_device *pla
     int ret = 0;
 
     /* NV_U32_MAX is used to indicate that the platform does not support SMMU */
-    nv->iommus.dispIsoStreamId = NV_U32_MAX;
-    nv->iommus.dispNisoStreamId = NV_U32_MAX;
+    //nv->iommus.dispIsoStreamId = NV_U32_MAX;
+    //nv->iommus.dispNisoStreamId = NV_U32_MAX;
 
     /* Parse ISO StreamID */
     ret = of_property_read_u32(np, "iso_sid", &value);
     if (ret == 0)
     {
-        nv->iommus.dispIsoStreamId = (value & DISP_DT_SMMU_STREAM_ID_MASK);
+        //nv->iommus.dispIsoStreamId = (value & DISP_DT_SMMU_STREAM_ID_MASK);
     }
     else if (ret == -EINVAL)
     {
@@ -638,7 +638,7 @@ static NV_STATUS nv_platform_get_iso_niso_stream_ids(struct platform_device *pla
     ret = of_property_read_u32(np, "niso_sid", &value);
     if (ret == 0)
     {
-        nv->iommus.dispNisoStreamId = (value & DISP_DT_SMMU_STREAM_ID_MASK);
+        //nv->iommus.dispNisoStreamId = (value & DISP_DT_SMMU_STREAM_ID_MASK);
     }
     else if (ret == -EINVAL)
     {
@@ -1039,7 +1039,7 @@ static int nv_platform_device_display_probe(struct platform_device *plat_dev)
          * should really look into using the devm_reset_control_bulk* APIs and
          * see if this is feasible if we're ultimately just getting and
          * asserting/deasserting all of the resets specified in DT together all of
-         * the time, and if there's no scenarios in which we need to only use a 
+         * the time, and if there's no scenarios in which we need to only use a
          * specific set of reset(s) at a given point.
          */
         nvl->hdacodec_reset = devm_reset_control_get(nvl->dev, "hdacodec_reset");

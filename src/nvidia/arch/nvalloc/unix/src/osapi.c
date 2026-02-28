@@ -715,10 +715,10 @@ static NV_STATUS RmAccessRegistry(
                 goto done;
 
             RmStatus = rmGpuGroupLockAcquire(pSubdevice->subDeviceInst,
-                    GPU_LOCK_GRP_SUBDEVICE, 
+                    GPU_LOCK_GRP_SUBDEVICE,
                     GPUS_LOCK_FLAGS_NONE,
-                    RM_LOCK_MODULES_GPU, 
-                    &gpuMask); 
+                    RM_LOCK_MODULES_GPU,
+                    &gpuMask);
             if (RmStatus != NV_OK)
                 return RmStatus;
 
@@ -728,10 +728,10 @@ static NV_STATUS RmAccessRegistry(
         else
         {
             RmStatus = rmGpuGroupLockAcquire(pDevice->deviceInst,
-                    GPU_LOCK_GRP_DEVICE, 
+                    GPU_LOCK_GRP_DEVICE,
                     GPUS_LOCK_FLAGS_NONE,
-                    RM_LOCK_MODULES_GPU, 
-                    &gpuMask); 
+                    RM_LOCK_MODULES_GPU,
+                    &gpuMask);
             if (RmStatus != NV_OK)
                 return RmStatus;
 
@@ -945,10 +945,10 @@ static NV_STATUS RmUpdateDeviceMappingInfo(
             goto done;
 
         status = rmGpuGroupLockAcquire(pSubdevice->subDeviceInst,
-                                       GPU_LOCK_GRP_SUBDEVICE, 
+                                       GPU_LOCK_GRP_SUBDEVICE,
                                        GPUS_LOCK_FLAGS_NONE,
-                                       RM_LOCK_MODULES_GPU, 
-                                       &gpuMask); 
+                                       RM_LOCK_MODULES_GPU,
+                                       &gpuMask);
         if (status != NV_OK)
             goto done;
 
@@ -957,10 +957,10 @@ static NV_STATUS RmUpdateDeviceMappingInfo(
     else
     {
         status = rmGpuGroupLockAcquire(pDevice->deviceInst,
-                                       GPU_LOCK_GRP_DEVICE, 
+                                       GPU_LOCK_GRP_DEVICE,
                                        GPUS_LOCK_FLAGS_NONE,
-                                       RM_LOCK_MODULES_GPU, 
-                                       &gpuMask); 
+                                       RM_LOCK_MODULES_GPU,
+                                       &gpuMask);
         if (status != NV_OK)
             goto done;
 
@@ -2158,6 +2158,26 @@ NV_STATUS rm_get_adapter_status(
     return rmStatus;
 }
 
+NV_STATUS NV_API_CALL rm_get_adapter_status_external(
+    nvidia_stack_t *sp,
+    nv_state_t     *pNv
+)
+{
+    NV_STATUS rmStatus;
+    void *fp;
+
+    NV_ENTER_RM_RUNTIME(sp,fp);
+
+    if (rm_get_adapter_status(pNv, &rmStatus) != NV_OK)
+    {
+        rmStatus = NV_ERR_OPERATING_SYSTEM;
+    }
+
+    NV_EXIT_RM_RUNTIME(sp,fp);
+
+    return rmStatus;
+}
+
 NvBool NV_API_CALL rm_init_rm(
     nvidia_stack_t *sp
 )
@@ -2996,7 +3016,7 @@ NV_STATUS rm_access_registry(
 )
 {
     NV_STATUS RmStatus;
-    NvBool bReadOnly = (AccessType == NVOS38_ACCESS_TYPE_READ_DWORD) || 
+    NvBool bReadOnly = (AccessType == NVOS38_ACCESS_TYPE_READ_DWORD) ||
                        (AccessType == NVOS38_ACCESS_TYPE_READ_BINARY);
 
     // LOCK: acquire API lock
@@ -4317,7 +4337,7 @@ static void rm_set_firmware_logs(
     if (status == NV_OK)
     {
         if ((data == NV_REG_ENABLE_GPU_FIRMWARE_LOGS_ENABLE)
-#if defined(DEBUG) || defined(DEVELOP)         
+#if defined(DEBUG) || defined(DEVELOP)
             || (data == NV_REG_ENABLE_GPU_FIRMWARE_LOGS_ENABLE_ON_DEBUG)
 #endif
            )
@@ -5222,3 +5242,13 @@ void NV_API_CALL rm_dma_buf_put_client_and_device(
     threadStateFree(&threadState, THREAD_STATE_FLAGS_NONE);
     NV_EXIT_RM_RUNTIME(sp,fp);
 }
+
+NvBool NV_API_CALL rm_is_altstack_in_use(void)
+{
+#if defined(__use_altstack__)
+    return NV_TRUE;
+#else
+    return NV_FALSE;
+#endif
+}
+

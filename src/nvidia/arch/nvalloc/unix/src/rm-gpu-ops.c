@@ -661,6 +661,23 @@ rm_gpu_ops_get_external_alloc_ptes(nvidia_stack_t* sp,
 }
 
 NV_STATUS  NV_API_CALL
+rm_gpu_ops_get_external_alloc_phys_addrs(nvidia_stack_t* sp,
+                                         nvgpuAddressSpaceHandle_t vaSpace,
+                                         NvHandle hDupedMemory,
+                                         NvU64 offset,
+                                         NvU64 size,
+                                         nvgpuExternalPhysAddrInfo_t gpuExternalPhysAddrsInfo)
+{
+    NV_STATUS rmStatus;
+    void *fp;
+    NV_ENTER_RM_RUNTIME(sp, fp);
+    rmStatus = nvGpuOpsGetExternalAllocPhysAddrs(vaSpace, hDupedMemory, offset, size,
+                                                 gpuExternalPhysAddrsInfo);
+    NV_EXIT_RM_RUNTIME(sp, fp);
+    return rmStatus;
+}
+
+NV_STATUS  NV_API_CALL
 rm_gpu_ops_retain_channel(nvidia_stack_t* sp,
                           nvgpuAddressSpaceHandle_t vaSpace,
                           NvHandle hClient,

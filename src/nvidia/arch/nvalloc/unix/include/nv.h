@@ -40,6 +40,7 @@
 #include <nvstatus.h>
 #include "nv_stdarg.h"
 #include <nv-caps.h>
+#include <nv-firmware.h>
 #include <nv-ioctl.h>
 #include <nvmisc.h>
 
@@ -493,6 +494,7 @@ typedef struct UvmPmaAllocationOptions_tag          *nvgpuPmaAllocationOptions_t
 typedef struct UvmPmaStatistics_tag                 *nvgpuPmaStatistics_t;
 typedef struct UvmGpuMemoryInfo_tag                 *nvgpuMemoryInfo_t;
 typedef struct UvmGpuExternalMappingInfo_tag        *nvgpuExternalMappingInfo_t;
+typedef struct UvmGpuExternalPhysAddrInfo_tag       *nvgpuExternalPhysAddrInfo_t;
 typedef struct UvmGpuChannelResourceInfo_tag        *nvgpuChannelResourceInfo_t;
 typedef struct UvmGpuChannelInstanceInfo_tag        *nvgpuChannelInstanceInfo_t;
 typedef struct UvmGpuChannelResourceBindParams_tag  *nvgpuChannelResourceBindParams_t;
@@ -695,9 +697,9 @@ typedef enum
 
 NvU32      NV_API_CALL  nv_get_dev_minor         (nv_state_t *);
 void*      NV_API_CALL  nv_alloc_kernel_mapping  (nv_state_t *, void *, NvU64, NvU32, NvU64, void **);
-NV_STATUS  NV_API_CALL  nv_free_kernel_mapping   (nv_state_t *, void *, void *, void *);
+void       NV_API_CALL  nv_free_kernel_mapping   (nv_state_t *, void *, void *, void *);
 NV_STATUS  NV_API_CALL  nv_alloc_user_mapping    (nv_state_t *, void *, NvU64, NvU32, NvU64, NvU32, NvU64 *, void **);
-NV_STATUS  NV_API_CALL  nv_free_user_mapping     (nv_state_t *, void *, NvU64, void *);
+void       NV_API_CALL  nv_free_user_mapping     (nv_state_t *, void *, NvU64, void *);
 NV_STATUS  NV_API_CALL  nv_add_mapping_context_to_file (nv_state_t *, nv_usermap_access_params_t*, NvU32, void *, NvU64, NvU32);
 
 NvU64  NV_API_CALL  nv_get_kern_phys_address     (NvU64);
@@ -707,11 +709,11 @@ nv_state_t*  NV_API_CALL  nv_get_ctl_state       (void);
 
 void   NV_API_CALL  nv_set_dma_address_size      (nv_state_t *, NvU32 );
 
-NV_STATUS  NV_API_CALL  nv_alias_pages           (nv_state_t *, NvU32, NvU32, NvU32, NvU64, NvU64 *, void **);
-NV_STATUS  NV_API_CALL  nv_alloc_pages           (nv_state_t *, NvU32, NvBool, NvU32, NvBool, NvBool, NvU64 *, void **);
+NV_STATUS  NV_API_CALL  nv_alias_pages           (nv_state_t *, NvU32, NvU64, NvU32, NvU32, NvU64, NvU64 *, NvBool, void **);
+NV_STATUS  NV_API_CALL  nv_alloc_pages           (nv_state_t *, NvU32, NvU64, NvBool, NvU32, NvBool, NvBool, NvS32, NvU64 *, void **);
 NV_STATUS  NV_API_CALL  nv_free_pages            (nv_state_t *, NvU32, NvBool, NvU32, void *);
 
-NV_STATUS  NV_API_CALL  nv_register_user_pages   (nv_state_t *, NvU64, NvU64 *, void *, void **);
+NV_STATUS  NV_API_CALL  nv_register_user_pages   (nv_state_t *, NvU64, NvU64 *, void *, void **, NvBool);
 void       NV_API_CALL  nv_unregister_user_pages (nv_state_t *, NvU64, void **, void **);
 
 NV_STATUS NV_API_CALL   nv_register_peer_io_mem  (nv_state_t *, NvU64 *, NvU64, void **);
@@ -719,7 +721,8 @@ void      NV_API_CALL   nv_unregister_peer_io_mem(nv_state_t *, void *);
 
 struct sg_table;
 
-NV_STATUS NV_API_CALL   nv_register_sgt          (nv_state_t *, NvU64 *, NvU64, NvU32, void **, struct sg_table *, void *);
+NV_STATUS NV_API_CALL   nv_register_sgt          (nv_state_t *, NvU64 *, NvU64, NvU32, void **,
+                                                  struct sg_table *, void *, NvBool);
 void      NV_API_CALL   nv_unregister_sgt        (nv_state_t *, struct sg_table **, void **, void *);
 NV_STATUS NV_API_CALL   nv_register_phys_pages   (nv_state_t *, NvU64 *, NvU64, NvU32, void **);
 void      NV_API_CALL   nv_unregister_phys_pages (nv_state_t *, void *);
@@ -770,20 +773,20 @@ NV_STATUS  NV_API_CALL  nv_pci_trigger_recovery  (nv_state_t *);
 NvBool     NV_API_CALL  nv_requires_dma_remap    (nv_state_t *);
 
 NvBool     NV_API_CALL  nv_is_rm_firmware_active(nv_state_t *);
-const void*NV_API_CALL  nv_get_firmware(nv_state_t *, nv_firmware_t, const void **, NvU32 *);
+const void*NV_API_CALL  nv_get_firmware(nv_state_t *, nv_firmware_type_t, nv_firmware_chip_family_t, const void **, NvU32 *);
 void       NV_API_CALL  nv_put_firmware(const void *);
 
 nv_file_private_t* NV_API_CALL nv_get_file_private(NvS32, NvBool, void **);
 void               NV_API_CALL nv_put_file_private(void *);
 
-NV_STATUS NV_API_CALL nv_get_device_memory_config(nv_state_t *, NvU64 *, NvU64 *, NvU32 *, NvU32 *, NvS32 *);
+NV_STATUS NV_API_CALL nv_get_device_memory_config(nv_state_t *, NvU64 *, NvU64 *, NvU64 *, NvU32 *, NvS32 *);
 
-NV_STATUS NV_API_CALL nv_get_ibmnpu_genreg_info(nv_state_t *, NvU64 *, NvU64 *, void**);
-NV_STATUS NV_API_CALL nv_get_ibmnpu_relaxed_ordering_mode(nv_state_t *nv, NvBool *mode);
-
-void      NV_API_CALL nv_wait_for_ibmnpu_rsync(nv_state_t *nv);
-
-void      NV_API_CALL nv_ibmnpu_cache_flush_range(nv_state_t *nv, NvU64, NvU64);
+//NV_STATUS NV_API_CALL nv_get_ibmnpu_genreg_info(nv_state_t *, NvU64 *, NvU64 *, void**);
+//NV_STATUS NV_API_CALL nv_get_ibmnpu_relaxed_ordering_mode(nv_state_t *nv, NvBool *mode);
+//
+//void      NV_API_CALL nv_wait_for_ibmnpu_rsync(nv_state_t *nv);
+//
+//void      NV_API_CALL nv_ibmnpu_cache_flush_range(nv_state_t *nv, NvU64, NvU64);
 
 void      NV_API_CALL nv_p2p_free_platform_data(void *data);
 
@@ -821,9 +824,9 @@ struct drm_gem_object;
 
 NV_STATUS NV_API_CALL nv_dma_import_sgt  (nv_dma_device_t *, struct sg_table *, struct drm_gem_object *);
 void NV_API_CALL nv_dma_release_sgt(struct sg_table *, struct drm_gem_object *);
-NV_STATUS NV_API_CALL nv_dma_import_dma_buf      (nv_dma_device_t *, struct dma_buf *, NvU32 *, void **, struct sg_table **, nv_dma_buf_t **);
-NV_STATUS NV_API_CALL nv_dma_import_from_fd      (nv_dma_device_t *, NvS32, NvU32 *, void **, struct sg_table **, nv_dma_buf_t **);
-void      NV_API_CALL nv_dma_release_dma_buf     (void *, nv_dma_buf_t *);
+NV_STATUS NV_API_CALL nv_dma_import_dma_buf      (nv_dma_device_t *, struct dma_buf *, NvBool, NvU32 *, struct sg_table **, nv_dma_buf_t **);
+NV_STATUS NV_API_CALL nv_dma_import_from_fd      (nv_dma_device_t *, NvS32, NvBool, NvU32 *, struct sg_table **, nv_dma_buf_t **);
+void      NV_API_CALL nv_dma_release_dma_buf     (nv_dma_buf_t *);
 
 void      NV_API_CALL nv_schedule_uvm_isr        (nv_state_t *);
 

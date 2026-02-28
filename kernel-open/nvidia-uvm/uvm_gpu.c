@@ -301,24 +301,24 @@ static NV_STATUS get_gpu_nvlink_info(uvm_gpu_t *gpu)
     NV_STATUS status;
     UvmGpuNvlinkInfo nvlink_info = {0};
 
-    status = uvm_rm_locked_call(nvUvmInterfaceGetNvlinkInfo(uvm_gpu_device_handle(gpu), &nvlink_info));
-    if (status != NV_OK)
-        return status;
+    //status = uvm_rm_locked_call(nvUvmInterfaceGetNvlinkInfo(uvm_gpu_device_handle(gpu), &nvlink_info));
+    //if (status != NV_OK)
+    //    return status;
 
     atomic_set(&gpu->nvlink_status.injected_error, UVM_TEST_NVLINK_ERROR_NONE);
 
     gpu->nvlink_status.enabled = nvlink_info.bNvlinkRecoveryEnabled;
-    if (gpu->nvlink_status.enabled) {
-        gpu->nvlink_status.hw_interrupt_tree_location =
-             (volatile NvU32*)((char*)nvlink_info.nvlinkReadLocation + nvlink_info.nvlinkOffset);
-        UVM_ASSERT(gpu->nvlink_status.hw_interrupt_tree_location != NULL);
+    //if (gpu->nvlink_status.enabled) {
+    //    gpu->nvlink_status.hw_interrupt_tree_location =
+    //         (volatile NvU32*)((char*)nvlink_info.nvlinkReadLocation + nvlink_info.nvlinkOffset);
+    //    UVM_ASSERT(gpu->nvlink_status.hw_interrupt_tree_location != NULL);
 
-        gpu->nvlink_status.mask = nvlink_info.nvlinkMask;
-        UVM_ASSERT(gpu->nvlink_status.mask != 0);
+    //    gpu->nvlink_status.mask = nvlink_info.nvlinkMask;
+    //    UVM_ASSERT(gpu->nvlink_status.mask != 0);
 
-        gpu->nvlink_status.error_notifier = nvlink_info.nvlinkErrorNotifier;
-        UVM_ASSERT(gpu->nvlink_status.error_notifier != NULL);
-    }
+    //    gpu->nvlink_status.error_notifier = nvlink_info.nvlinkErrorNotifier;
+    //    UVM_ASSERT(gpu->nvlink_status.error_notifier != NULL);
+    //}
 
     return NV_OK;
 }

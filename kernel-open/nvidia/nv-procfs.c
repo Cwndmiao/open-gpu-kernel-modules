@@ -197,26 +197,43 @@ nv_procfs_read_power(
 {
     nv_state_t *nv = s->private;
     nvidia_stack_t *sp = NULL;
-    nv_power_info_t power_info;
+    const char *vidmem_power_status;
+    const char *dynamic_power_status;
+    const char *gc6_support;
+    const char *gcoff_support;
+    NvU32 limitRated, limitCurr;
+    NV_STATUS status;
 
     if (nv_kmem_cache_alloc_stack(&sp) != 0)
     {
         return 0;
     }
 
-    rm_get_power_info(sp, nv, &power_info);
-    seq_printf(s, "Runtime D3 status:          %s\n", power_info.dynamic_power_status);
-    seq_printf(s, "Video Memory:               %s\n\n", power_info.vidmem_power_status);
+    dynamic_power_status = rm_get_dynamic_power_management_status(sp, nv);
+    seq_printf(s, "Runtime D3 status:          %s\n", dynamic_power_status);
+
+    vidmem_power_status = rm_get_vidmem_power_status(sp, nv);
+    seq_printf(s, "Video Memory:               %s\n\n", vidmem_power_status);
 
     seq_printf(s, "GPU Hardware Support:\n");
-    seq_printf(s, " Video Memory Self Refresh: %s\n", power_info.gc6_support);
-    seq_printf(s, " Video Memory Off:          %s\n\n", power_info.gcoff_support);
+    gc6_support = rm_get_gpu_gcx_support(sp, nv, NV_TRUE);
+    seq_printf(s, " Video Memory Self Refresh: %s\n", gc6_support);
 
-    seq_printf(s, "S0ix Power Management:\n");
-    seq_printf(s, " Platform Support:          %s\n",
-               nv_platform_supports_s0ix() ? "Supported" : "Not Supported");
-    seq_printf(s, " Status:                    %s\n\n", power_info.s0ix_status);
-    seq_printf(s, "Notebook Dynamic Boost:     %s\n", power_info.db_support);
+    gcoff_support = rm_get_gpu_gcx_support(sp, nv, NV_FALSE);
+    seq_printf(s, " Video Memory Off:          %s\n\n", gcoff_support);
+
+    seq_printf(s, "Power Limits:\n");
+    status = rm_get_clientnvpcf_power_limits(sp, nv, &limitRated, &limitCurr);
+    if (status != NV_OK)
+    {
+        seq_printf(s, " Default:                   N/A milliwatts\n");
+        seq_printf(s, " GPU Boost:                 N/A milliwatts\n");
+    }
+    else
+    {
+        seq_printf(s, " Default:                   %u milliwatts\n", limitRated);
+        seq_printf(s, " GPU Boost:                 %u milliwatts\n", limitCurr);
+    }
 
     nv_kmem_cache_free_stack(sp);
     return 0;
@@ -1008,20 +1025,20 @@ numa_status_read(
     rm_status = rm_get_gpu_numa_info(sp, nv, numa_info);
     if (rm_status == NV_OK && numa_info->nid == NUMA_NO_NODE)
     {
-        // 
+        //
         // RM returns NUMA_NO_NODE when running MIG instances because
         // this rmClient is not subscribed to any MIG partition since
         // it was subscribed to whole GPU only during RMInit and is not
         // updated when MIG partitions are created.
         // Returning error here so that numa_status results in EIO
-        // because of missing support in numa_status to use it for multiple 
+        // because of missing support in numa_status to use it for multiple
         // numa nodes.
-        // 
-        // TODO: add support for multiple numa nodes in numa_status interface 
+        //
+        // TODO: add support for multiple numa nodes in numa_status interface
         // and remove this check, bug 4006012
         //
         rm_status = NV_ERR_NOT_SUPPORTED;
-    } 
+    }
     numa_info->status = nv_get_numa_status(nvl);
 
 done:

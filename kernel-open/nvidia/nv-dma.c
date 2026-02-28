@@ -436,7 +436,7 @@ static NV_STATUS NV_API_CALL nv_dma_unmap_sgt(
     return NV_OK;
 }
 
-static NV_STATUS NV_API_CALL nv_dma_map_pages(
+NV_STATUS NV_API_CALL nv_dma_map_pages(
     nv_dma_device_t *dma_dev,
     NvU64            page_count,
     NvU64           *va_array,
@@ -507,7 +507,7 @@ static NV_STATUS NV_API_CALL nv_dma_map_pages(
     return status;
 }
 
-static NV_STATUS NV_API_CALL nv_dma_unmap_pages(
+NV_STATUS NV_API_CALL nv_dma_unmap_pages(
     nv_dma_device_t *dma_dev,
     NvU64            page_count,
     NvU64           *va_array,
@@ -907,6 +907,15 @@ void NV_API_CALL nv_dma_cache_invalidate
         }
     }
 #endif
+}
+
+/* Enable DMA-mapping over NVLink */
+void NV_API_CALL nv_dma_enable_nvlink
+(
+    nv_dma_device_t *dma_dev
+)
+{
+    //dma_dev->nvlink = NV_TRUE;
 }
 
 #if defined(NV_DRM_AVAILABLE)

@@ -528,6 +528,11 @@ static inline pgprot_t nv_adjust_pgprot(pgprot_t vm_prot)
 #endif
 #endif
 
+//#if defined(NV_GET_NUM_PHYSPAGES_PRESENT)
+#define NV_NUM_PHYSPAGES                get_num_physpages()
+//#else
+//#define NV_NUM_PHYSPAGES                num_physpages
+//#endif
 #define NV_GET_CURRENT_PROCESS()        current->tgid
 #define NV_IN_ATOMIC()                  in_atomic()
 #define NV_COPY_TO_USER(to, from, n)    copy_to_user(to, from, n)
@@ -1085,7 +1090,7 @@ nv_dma_maps_swiotlb(struct device *dev)
 
     /*
      * Commit 2017-11-07 d7b417fa08d ("x86/mm: Add DMA support for
-     * SEV memory encryption") forces SWIOTLB to be enabled when AMD SEV 
+     * SEV memory encryption") forces SWIOTLB to be enabled when AMD SEV
      * is active in all cases.
      */
     if (os_cc_enabled)
@@ -1610,7 +1615,7 @@ static inline struct kmem_cache *nv_kmem_cache_create(const char *name, unsigned
     cache = kmem_cache_create(name_unique, size, align, 0, nv_kmem_ctor_dummy);
     if (name_unique != name)
         kfree(name_unique);
- 
+
     return cache;
 }
 
