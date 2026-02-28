@@ -211,6 +211,8 @@ void uvm_hal_ampere_host_tlb_invalidate_all(uvm_push_t *push,
 
     UVM_ASSERT_MSG(pdb.aperture == UVM_APERTURE_VID || pdb.aperture == UVM_APERTURE_SYS, "aperture: %u", pdb.aperture);
 
+    UVM_ERR_PRINT("cwndmiao debug, uvm_hal_ampere_host_tlb_invalidate_all, pdb= 0x%016llx, depth= %u\n", pdb.address, depth);
+
     if (pdb.aperture == UVM_APERTURE_VID)
         aperture_value = HWCONST(C56F, MEM_OP_C, TLB_INVALIDATE_PDB_APERTURE, VID_MEM);
     else

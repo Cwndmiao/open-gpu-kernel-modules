@@ -29,6 +29,7 @@
 #include "resserv/rs_resource.h"
 #include "tls/tls.h"
 #include "nv_speculation_barrier.h"
+#include "../../../kernel/rmapi/resource_desc.h"
 
 /**
  * Get the RsClient from a client handle without taking locks
@@ -151,6 +152,11 @@ NV_STATUS serverFreeResourceTreeUnderLock(RsServer *pServer, RS_RES_FREE_PARAMS 
     if (status != NV_OK)
         goto done;
 
+    NV_PRINTF(LEVEL_WARNING, "cwndmiao debug, free res hClient= %08x, hParent= %08x, hObject= %08x, name= %s\n",
+            pResourceRef->pClient ? pResourceRef->pClient->hClient : 0,
+            pResourceRef->pParentRef ? pResourceRef->pParentRef->hResource : 0,
+            pResourceRef->hResource,
+            pResourceRef->pResourceDesc ? pResourceRef->pResourceDesc->pClassInfo->name : "Unknown");
     status = clientFreeResource(pResourceRef->pClient, pServer, pFreeParams);
     NV_ASSERT(status == NV_OK);
 
