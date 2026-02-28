@@ -46,6 +46,7 @@ extern "C" {
 #include "mem_mgr/vaspace.h"
 #include "ctrl/ctrl0000/ctrl0000system.h" // NV0000_CTRL_SYSTEM_MAX_ATTACHED_GPUS
 #include "ctrl/ctrl2080/ctrl2080bus.h"
+#include "mapping_reuse/mapping_reuse.h"
 
 #define MAX_PCI_BARS                        8
 
@@ -104,14 +105,34 @@ typedef enum
 #define BUS_MAP_FB_FLAGS_MAP_UNICAST           NVBIT(5)
 #define BUS_MAP_FB_FLAGS_MAP_OFFSET_FIXED      NVBIT(6)
 #define BUS_MAP_FB_FLAGS_PRE_INIT              NVBIT(7)
+#define BUS_MAP_FB_FLAGS_ALLOW_DISCONTIG       NVBIT(8)
+#define BUS_MAP_FB_FLAGS_UNMANAGED_MEM_AREA    NVBIT(9)
+#define BUS_MAP_FB_FLAGS_PAGE_SIZE_4K          NVBIT(10)
+#define BUS_MAP_FB_FLAGS_PAGE_SIZE_64K         NVBIT(11)
+#define BUS_MAP_FB_FLAGS_PAGE_SIZE_2M          NVBIT(12)
+#define BUS_MAP_FB_FLAGS_PAGE_SIZE_512M        NVBIT(13)
+// Reserve 3 bits for future expansion of page size.
+#define BUS_MAP_FB_FLAGS_PAGE_SIZE_RESERVED_2  NVBIT(14)
+#define BUS_MAP_FB_FLAGS_PAGE_SIZE_RESERVED_3  NVBIT(15)
+#define BUS_MAP_FB_FLAGS_PAGE_SIZE_RESERVED_4  NVBIT(16)
 
-#define BUS_MAP_FB_FLAGS_FERMI_INVALID         ~(BUS_MAP_FB_FLAGS_MAP_DOWNWARDS      | \
-                                                 BUS_MAP_FB_FLAGS_DISABLE_ENCRYPTION | \
-                                                 BUS_MAP_FB_FLAGS_READ_ONLY          | \
-                                                 BUS_MAP_FB_FLAGS_WRITE_ONLY         | \
-                                                 BUS_MAP_FB_FLAGS_MAP_UNICAST        | \
-                                                 BUS_MAP_FB_FLAGS_MAP_OFFSET_FIXED   | \
-                                                 BUS_MAP_FB_FLAGS_PRE_INIT)
+#define BUS_MAP_FB_FLAGS_ALL_FLAGS \
+    (BUS_MAP_FB_FLAGS_MAP_RSVD_BAR1         |\
+    BUS_MAP_FB_FLAGS_DISABLE_ENCRYPTION     |\
+    BUS_MAP_FB_FLAGS_MAP_DOWNWARDS          |\
+    BUS_MAP_FB_FLAGS_READ_ONLY              |\
+    BUS_MAP_FB_FLAGS_WRITE_ONLY             |\
+    BUS_MAP_FB_FLAGS_MAP_UNICAST            |\
+    BUS_MAP_FB_FLAGS_MAP_OFFSET_FIXED       |\
+    BUS_MAP_FB_FLAGS_PRE_INIT               |\
+    BUS_MAP_FB_FLAGS_ALLOW_DISCONTIG        |\
+    BUS_MAP_FB_FLAGS_PAGE_SIZE_4K           |\
+    BUS_MAP_FB_FLAGS_PAGE_SIZE_64K          |\
+    BUS_MAP_FB_FLAGS_PAGE_SIZE_2M           |\
+    BUS_MAP_FB_FLAGS_PAGE_SIZE_512M         |\
+    BUS_MAP_FB_FLAGS_UNMANAGED_MEM_AREA)
+
+#define BUS_MAP_FB_FLAGS_FERMI_INVALID         ((~BUS_MAP_FB_FLAGS_ALL_FLAGS) | BUS_MAP_FB_FLAGS_MAP_RSVD_BAR1)
 
 #define BUS_MAP_FB_FLAGS_NV5X_INVALID          ~(BUS_MAP_FB_FLAGS_MAP_RSVD_BAR1 | BUS_MAP_FB_FLAGS_DISABLE_ENCRYPTION)
 
@@ -173,7 +194,67 @@ typedef struct
     PMEMORY_DESCRIPTOR  pRemoteWMBoxMemDesc;
 } KBUS_PCIE_PEER;
 
+typedef struct Bar1MappingType
+{
+    MEMORY_DESCRIPTOR *pMemDesc;
+    NvU32              mappingFlags;
+    NvU32              swizzId;
+    NvU32              refCount;
+} Bar1MappingType;
+
+MAKE_MAP(Bar1MappingTypeSubmap, Bar1MappingType);
+
+typedef struct Bar1MappingTypeSubmapStruct
+{
+    Bar1MappingTypeSubmap mappingSubmap;
+    MEM_DESC_DESTROY_CALLBACK callback;
+} Bar1MappingTypeSubmapStruct;
+
+//
+// This is a 2-level map: first map is keyed by memdesc, and the second map is keyed by offset into
+// the memdesc. The submap-containing struct also contains a callback that frees this entry if memdesc is destroyed.
+//
+MAKE_MAP(Bar1MappingTypeMap, Bar1MappingTypeSubmapStruct);
+
+//
+// This map gets the correct mapping type for any given VA.
+// TODO:  incorporate this into the library
+//
+MAKE_MAP(Bar1MappingVaToTypeMap, Bar1MappingType *);
+
+
+typedef struct Bar1VaInfo
+{
+    NvU64               gfid;
+    RmPhysAddr          physAddr;
+    NvU64               apertureLength;     // Aperture length that is visible to CPU
+    NvU64               mappableLength;     // Total mappable aperture length after WARs
+    struct OBJVASPACE         *pVAS;
+    NvU64               vasFreeSize;        // Cached value of the BAR1 VAS's free size used by PMA
+    NvU64               instBlockBase;
+    MEMORY_DESCRIPTOR  *pInstBlkMemDesc;
+    ReuseMappingDb      reuseDb;
+    Bar1MappingTypeMap  mappingFlagsMap;
+    Bar1MappingVaToTypeMap reverseMap;
+    NvBool              bStaticBar1Enabled;
+    struct
+    {
+        MEMORY_DESCRIPTOR  *pVidMemDesc;
+        MEMORY_DESCRIPTOR  *pDmaMemDesc;
+        NvU64               startOffset;
+        NvU64               size;
+    } staticBar1;
+} Bar1VaInfo;
+
 MAKE_INTRUSIVE_LIST(VirtualBar2MapList, VirtualBar2MapEntry, node);
+
+
+struct Device;
+
+#ifndef __NVOC_CLASS_Device_TYPEDEF__
+#define __NVOC_CLASS_Device_TYPEDEF__
+typedef struct Device Device;
+#endif /* __NVOC_CLASS_Device_TYPEDEF__ */
 
 #ifdef NVOC_KERN_BUS_H_PRIVATE_ACCESS_ALLOWED
 #define PRIVATE_FIELD(x) x
@@ -340,7 +421,8 @@ struct KernelBus {
     NvU8 *pUncachedBar0Window;
     NvU8 *pDefaultBar0Pointer;
     NvU64 physicalBar0WindowSize;
-    struct __nvoc_inner_struc_KernelBus_1__ bar1[64];
+    //struct __nvoc_inner_struc_KernelBus_1__ bar1[64];
+    Bar1VaInfo bar1[64];
     struct __nvoc_inner_struc_KernelBus_2__ bar1PeerInfo;
     struct __nvoc_inner_struc_KernelBus_3__ bar2[64];
     struct __nvoc_inner_struc_KernelBus_4__ virtualBar2[64];
@@ -413,6 +495,34 @@ NV_STATUS __nvoc_objCreateDynamic_KernelBus(KernelBus**, Dynamic*, NvU32, va_lis
 NV_STATUS __nvoc_objCreate_KernelBus(KernelBus**, Dynamic*, NvU32);
 #define __objCreate_KernelBus(ppNewObj, pParent, createFlags) \
     __nvoc_objCreate_KernelBus((ppNewObj), staticCast((pParent), Dynamic), (createFlags))
+
+NV_STATUS kbusGetGpuFbPhysAddressForRdma_IMPL(struct OBJGPU *pGpu, struct KernelBus *pKernelBus, NvBool bForcePcie, NvU64 *pPhysAddr);
+#ifdef __nvoc_kern_bus_h_disabled
+static inline NV_STATUS kbusGetGpuFbPhysAddressForRdma(struct OBJGPU *pGpu, struct KernelBus *pKernelBus, NvBool bForcePcie, NvU64 *pPhysAddr) {
+    NV_ASSERT_FAILED_PRECOMP("KernelBus was disabled!");
+    return NV_ERR_NOT_SUPPORTED;
+}
+#else // __nvoc_kern_bus_h_disabled
+#define kbusGetGpuFbPhysAddressForRdma(pGpu, pKernelBus, bForcePcie, pPhysAddr) kbusGetGpuFbPhysAddressForRdma_IMPL(pGpu, pKernelBus, bForcePcie, pPhysAddr)
+#endif // __nvoc_kern_bus_h_disabled
+
+#ifdef __nvoc_kern_bus_h_disabled
+static inline NV_STATUS kbusMapFbAperture2(struct OBJGPU *pGpu, struct KernelBus *pKernelBus, MEMORY_DESCRIPTOR *pMemDesc, MemoryRange mapRange, MemoryArea *pMemoryArea, NvU32 flags, struct Device *pDevice) {
+    NV_ASSERT_FAILED_PRECOMP("KernelBus was disabled!");
+    return NV_ERR_NOT_SUPPORTED;
+}
+#else // __nvoc_kern_bus_h_disabled
+#define kbusMapFbAperture2(pGpu, pKernelBus, pMemDesc, mapRange, pMemoryArea, flags, pDevice) kbusMapFbAperture2_GM107(pGpu, pKernelBus, pMemDesc, mapRange, pMemoryArea, flags, pDevice)
+#endif // __nvoc_kern_bus_h_disabled
+
+#ifdef __nvoc_kern_bus_h_disabled
+static inline NV_STATUS kbusUnmapFbAperture2(struct OBJGPU *pGpu, struct KernelBus *pKernelBus, PMEMORY_DESCRIPTOR arg3, MemoryArea memArea, NvU32 flags) {
+    NV_ASSERT_FAILED_PRECOMP("KernelBus was disabled!");
+    return NV_ERR_NOT_SUPPORTED;
+}
+#else // __nvoc_kern_bus_h_disabled
+#define kbusUnmapFbAperture2(pGpu, pKernelBus, arg3, memArea, flags) kbusUnmapFbAperture2_GM107(pGpu, pKernelBus, arg3, memArea, flags)
+#endif // __nvoc_kern_bus_h_disabled
 
 #define kbusConstructEngine(pGpu, pKernelBus, arg0) kbusConstructEngine_DISPATCH(pGpu, pKernelBus, arg0)
 #define kbusStatePreInitLocked(pGpu, pKernelBus) kbusStatePreInitLocked_DISPATCH(pGpu, pKernelBus)
@@ -1523,8 +1633,11 @@ static inline NV_STATUS kbusDestroyBar1(OBJGPU *pGpu, struct KernelBus *pKernelB
 #endif //__nvoc_kern_bus_h_disabled
 
 #define kbusDestroyBar1_HAL(pGpu, pKernelBus, gfid) kbusDestroyBar1(pGpu, pKernelBus, gfid)
+#define kbusMapFbAperture2_HAL(pGpu, pKernelBus, pMemDesc, mapRange, pMemoryArea, flags, pDevice) kbusMapFbAperture2(pGpu, pKernelBus, pMemDesc, mapRange, pMemoryArea, flags, pDevice)
+#define kbusUnmapFbAperture2_HAL(pGpu, pKernelBus, arg3, memArea, flags) kbusUnmapFbAperture2(pGpu, pKernelBus, arg3, memArea, flags)
 
 NV_STATUS kbusMapFbAperture_GM107(OBJGPU *pGpu, struct KernelBus *pKernelBus, PMEMORY_DESCRIPTOR arg0, NvU64 offset, NvU64 *pAperOffset, NvU64 *pLength, NvU32 flags, NvHandle hClient);
+NV_STATUS kbusMapFbAperture2_GM107(struct OBJGPU *pGpu, struct KernelBus *pKernelBus, MEMORY_DESCRIPTOR *pMemDesc, MemoryRange mapRange, MemoryArea *pMemoryArea, NvU32 flags, struct Device *pDevice);
 
 #ifdef __nvoc_kern_bus_h_disabled
 static inline NV_STATUS kbusMapFbAperture(OBJGPU *pGpu, struct KernelBus *pKernelBus, PMEMORY_DESCRIPTOR arg0, NvU64 offset, NvU64 *pAperOffset, NvU64 *pLength, NvU32 flags, NvHandle hClient) {
@@ -1538,6 +1651,7 @@ static inline NV_STATUS kbusMapFbAperture(OBJGPU *pGpu, struct KernelBus *pKerne
 #define kbusMapFbAperture_HAL(pGpu, pKernelBus, arg0, offset, pAperOffset, pLength, flags, hClient) kbusMapFbAperture(pGpu, pKernelBus, arg0, offset, pAperOffset, pLength, flags, hClient)
 
 NV_STATUS kbusUnmapFbAperture_GM107(OBJGPU *pGpu, struct KernelBus *pKernelBus, PMEMORY_DESCRIPTOR arg0, NvU64 aperOffset, NvU64 length, NvU32 flags);
+NV_STATUS kbusUnmapFbAperture2_GM107(struct OBJGPU *pGpu, struct KernelBus *pKernelBus, PMEMORY_DESCRIPTOR arg3, MemoryArea memArea, NvU32 flags);
 
 #ifdef __nvoc_kern_bus_h_disabled
 static inline NV_STATUS kbusUnmapFbAperture(OBJGPU *pGpu, struct KernelBus *pKernelBus, PMEMORY_DESCRIPTOR arg0, NvU64 aperOffset, NvU64 length, NvU32 flags) {

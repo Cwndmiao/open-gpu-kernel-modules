@@ -310,7 +310,7 @@ NV_STATUS nvUvmInterfaceAddressSpaceCreate(uvmGpuDeviceHandle device,
                                              (gpuDeviceHandle)device,
                                              vaBase,
                                              vaSize,
-                                             enableAts,
+                                             //enableAts,
                                              (gpuAddressSpaceHandle *)vaSpace,
                                              vaSpaceInfo);
 
@@ -744,7 +744,7 @@ NV_STATUS nvUvmInterfaceDupAllocation(uvmGpuAddressSpaceHandle srcVaSpace,
                                       (gpuAddressSpaceHandle)srcVaSpace,
                                       srcAddress,
                                       (gpuAddressSpaceHandle)dstVaSpace,
-                                      dstVaAlignment,
+                                      //dstVaAlignment,
                                       dstAddress);
 
     nv_kmem_cache_free_stack(sp);
@@ -926,8 +926,8 @@ NV_STATUS nvUvmInterfaceInitAccessCntrInfo(uvmGpuDeviceHandle device,
 
     status = rm_gpu_ops_init_access_cntr_info(sp,
                                               (gpuDeviceHandle)device,
-                                              pAccessCntrInfo,
-                                              accessCntrIndex);
+                                              pAccessCntrInfo//,
+                                              /*accessCntrIndex*/);
 
     nv_kmem_cache_free_stack(sp);
     return status;

@@ -1029,7 +1029,7 @@ kbusGetDeviceCaps_IMPL
         RMCTRL_SET_CAP(tempCaps, NV0080_CTRL_HOST_CAPS, _VIRTUAL_P2P);
 
     /*! DMAs to/from cached memory need to have the cache flushed explicitly */
-    bExplicitCacheFlushRequired = NVCPU_IS_ARM && 
+    bExplicitCacheFlushRequired = NVCPU_IS_ARM &&
                                   (RMCFG_FEATURE_PLATFORM_UNIX || RMCFG_FEATURE_PLATFORM_MODS_UNIX);
     if (bExplicitCacheFlushRequired ||
         (!pCl->getProperty(pCL, PDB_PROP_CL_IS_CHIPSET_IO_COHERENT)))
@@ -1249,3 +1249,56 @@ kbusSendBusInfo_IMPL
     pBusInfo->data = busGetInfoParams.busInfoList[0].data;
     return status;
 }
+
+/**
+ * @brief     Check if the static bar1 is enabled
+ *
+ * @param[in] pGpu
+ * @param[in] pKernelBus
+ */
+NvBool
+kbusIsStaticBar1Enabled_IMPL
+(
+    OBJGPU    *pGpu,
+    KernelBus *pKernelBus
+)
+{
+    //NvU32 gfid;
+
+    //return ((vgpuGetCallingContextGfid(pGpu, &gfid) == NV_OK) &&
+    //        pKernelBus->bar1[gfid].bStaticBar1Enabled);
+    return NV_FALSE;
+}
+
+NV_STATUS
+kbusGetGpuFbPhysAddressForRdma_IMPL
+(
+    OBJGPU    *pGpu,
+    KernelBus *pKernelBus,
+    NvBool     bForcePcie,
+    NvU64     *pPhysAddr
+)
+{
+    if((bForcePcie) &&
+       (!pGpu->getProperty(pGpu, PDB_PROP_GPU_COHERENT_CPU_MAPPING)))
+    {
+        return NV_ERR_NOT_SUPPORTED;
+    }
+
+    //
+    // For forced PCIe mappings on coherent systems, use SPA by default instead of GPA
+    // if the RmGpuDirectRdmaForceSPA regkey is set.
+    // This is a stop-gap measure until hypervisor ensures GPA==SPA.
+    //
+    //if (bForcePcie && pKernelBus->bGrdmaForceSpa)
+    //{
+    //    *pPhysAddr = pKernelBus->grdmaBar1Spa;
+    //}
+    //else
+    {
+        *pPhysAddr = gpumgrGetGpuPhysFbAddr(pGpu);
+    }
+
+    return NV_OK;
+}
+

@@ -6899,7 +6899,8 @@ cleanup:
 NV_STATUS nvGpuOpsSetPageDirectory(struct gpuAddressSpace *vaSpace,
                                    NvU64 physAddress,
                                    unsigned numEntries,
-                                   NvBool bVidMemAperture, NvU32 pasid)
+                                   NvBool bVidMemAperture, NvU32 pasid,
+                                   NvU64 *dmaAddress)
 {
     NV_STATUS status;
     nvGpuOpsLockSet acquiredLocks;
@@ -6990,6 +6991,14 @@ NV_STATUS nvGpuOpsSetPageDirectory(struct gpuAddressSpace *vaSpace,
                              NV0080_CTRL_CMD_DMA_SET_PAGE_DIRECTORY,
                              &params,
                              sizeof(params));
+
+    //
+    // Store page table root DMA Address (GPU Physical Address) for RM client
+    // to use later for operations such as TLB invalidates. It's important that
+    // RM clients must not unmap this address, and instead rely on RM to unmap
+    // it when nvGpuOpsUnsetPageDirectory() is called.
+    //
+    *dmaAddress = memdescGetPtePhysAddr(vaspaceGetPageDirBase(pVAS, pGpu), AT_GPU, 0);
 
     if (vaspaceIsExternallyOwned(pVAS))
     {
@@ -7494,7 +7503,7 @@ getAccessCounterLimitValue(UVM_ACCESS_COUNTER_USE_LIMIT limit, NvU32 *value)
 
 NV_STATUS nvGpuOpsEnableAccessCntr(struct gpuDevice *device,
                                    gpuAccessCntrInfo *pAccessCntrInfo,
-                                   gpuAccessCntrConfig *pAccessCntrConfig)
+                                   const gpuAccessCntrConfig *pAccessCntrConfig)
 {
     NV_STATUS status = NV_OK;
     NVC365_CTRL_ACCESS_CNTR_SET_CONFIG_PARAMS setConfigParams = { 0 };

@@ -2651,16 +2651,7 @@ nvidia_ioctl(
                 goto done;
             }
 
-            //rmStatus = rm_get_gpu_numa_info(sp, nv, api);
-            api->offline_addresses.numEntries =
-                ARRAY_SIZE(api->offline_addresses.addresses),
-
-            rmStatus = rm_get_gpu_numa_info(sp, nv,
-                &(api->nid),
-                &(api->numa_mem_addr),
-                &(api->numa_mem_size),
-                 (api->offline_addresses.addresses),
-                &(api->offline_addresses.numEntries));
+            rmStatus = rm_get_gpu_numa_info(sp, nv, api);
             if (rmStatus != NV_OK)
             {
                 status = -EBUSY;

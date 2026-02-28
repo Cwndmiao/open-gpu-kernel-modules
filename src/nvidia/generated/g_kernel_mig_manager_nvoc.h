@@ -1258,6 +1258,16 @@ static inline NV_STATUS kmigmgrEnableAllLCEs(OBJGPU *arg0, struct KernelMIGManag
 #define kmigmgrEnableAllLCEs(arg0, arg1, bEnableAllLCEs) kmigmgrEnableAllLCEs_IMPL(arg0, arg1, bEnableAllLCEs)
 #endif //__nvoc_kernel_mig_manager_h_disabled
 
+NV_STATUS kmigmgrGetInstanceRefFromDevice_IMPL(OBJGPU *arg1, struct KernelMIGManager *arg_this, Device *arg3, struct MIG_INSTANCE_REF *arg4);
+#ifdef __nvoc_kernel_mig_manager_h_disabled
+static inline NV_STATUS kmigmgrGetInstanceRefFromDevice(OBJGPU *arg1, struct KernelMIGManager *arg_this, Device *arg3, struct MIG_INSTANCE_REF *arg4) {
+    NV_ASSERT_FAILED_PRECOMP("KernelMIGManager was disabled!");
+    return NV_ERR_NOT_SUPPORTED;
+}
+#else // __nvoc_kernel_mig_manager_h_disabled
+#define kmigmgrGetInstanceRefFromDevice(arg1, arg_this, arg3, arg4) kmigmgrGetInstanceRefFromDevice_IMPL(arg1, arg_this, arg3, arg4)
+#endif // __nvoc_kernel_mig_manager_h_disabled
+
 NV_STATUS kmigmgrGetInstanceRefFromClient_IMPL(OBJGPU *arg0, struct KernelMIGManager *arg1, NvHandle hClient, struct MIG_INSTANCE_REF *arg2);
 #ifdef __nvoc_kernel_mig_manager_h_disabled
 static inline NV_STATUS kmigmgrGetInstanceRefFromClient(OBJGPU *arg0, struct KernelMIGManager *arg1, NvHandle hClient, struct MIG_INSTANCE_REF *arg2) {

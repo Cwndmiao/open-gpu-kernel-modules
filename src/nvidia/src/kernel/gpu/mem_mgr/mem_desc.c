@@ -2561,6 +2561,65 @@ void memdescGetPhysAddrsForGpu(MEMORY_DESCRIPTOR *pMemDesc,
     }
 }
 
+/*!
+ *  @brief Return the physical addresses of pMemdesc for use in a PTE or to give to HW
+ *
+ *  @param[in]  pMemDesc            Memory descriptor used
+ *  @param[in]  pGpu                GPU to return the addresses for
+ *  @param[in]  addressTranslation  Address translation identifier
+ *  @param[in]  offset              Offset into memory descriptor
+ *  @param[in]  stride              How much to advance the offset for each
+ *                                  consecutive address
+ *  @param[in]  count               How many addresses to retrieve
+ *  @param[out] pAddresses          Returned array of addresses
+ *
+ */
+void memdescGetPtePhysAddrsForGpu(MEMORY_DESCRIPTOR *pMemDesc,
+                                  OBJGPU *pGpu,
+                                  ADDRESS_TRANSLATION addressTranslation,
+                                  NvU64 offset,
+                                  NvU64 stride,
+                                  NvU64 count,
+                                  RmPhysAddr *pAddresses)
+{
+    //
+    // Get the PTE array that we should use for phys addr lookups based on the
+    // MMU context. (see bug 1625121)
+    //
+    NvU64 i;
+    NvU64 pageIndex;
+    RmPhysAddr *pteArray = memdescGetPteArrayForGpu(pMemDesc, pGpu, addressTranslation);
+    const NvBool contiguous = (memdescGetPteArraySize(pMemDesc, addressTranslation) == 1);
+    //const NvU64 pageArrayGranularityMask = pMemDesc->pageArrayGranularity - 1;
+    //const NvU32 pageArrayGranularityShift = BIT_IDX_64(pMemDesc->pageArrayGranularity);
+    const NvU64 pageArrayGranularityMask = RM_PAGE_SIZE - 1;
+    const NvU32 pageArrayGranularityShift = BIT_IDX_64(RM_PAGE_SIZE);
+
+    NV_ASSERT(!memdescHasSubDeviceMemDescs(pMemDesc));
+    offset += pMemDesc->PteAdjust;
+
+    for (i = 0; i < count; ++i)
+    {
+        if (contiguous)
+        {
+            pAddresses[i] = pteArray[0] + offset;
+        }
+        else
+        {
+            pageIndex = offset >> pageArrayGranularityShift;
+            NV_CHECK_OR_RETURN_VOID(LEVEL_ERROR, pageIndex < pMemDesc->PageCount);
+            pAddresses[i] = pteArray[pageIndex] + (offset & pageArrayGranularityMask);
+        }
+
+        //if (pMemDesc->_flags & MEMDESC_FLAGS_ALLOC_AS_LOCALIZED)
+        //{
+        //    // Set the bit in the physical address itself
+        //    pAddresses[i] |= pMemDesc->localizedMask;
+        //}
+
+        offset += stride;
+    }
+}
 
 /*!
  *  @brief Return the physical addresses of pMemdesc
@@ -2605,6 +2664,31 @@ memdescGetPhysAddr
 {
     RmPhysAddr addr;
     memdescGetPhysAddrs(pMemDesc, addressTranslation, offset, 0, 1, &addr);
+    return addr;
+}
+
+/*!
+ *  @brief Return the physical address of pMemdesc+Offset for
+ *         for a PTE or to give to HW
+ *
+ *  "long description"
+ *
+ *  @param[in]  pMemDesc           Memory descriptor used
+ *  @param[in]  addressTranslation Address translation identifier
+ *  @param[in]  offset             Offset into memory descriptor
+ *
+ *  @returns A physical address
+ */
+RmPhysAddr
+memdescGetPtePhysAddr
+(
+    MEMORY_DESCRIPTOR *pMemDesc,
+    ADDRESS_TRANSLATION addressTranslation,
+    NvU64 offset
+)
+{
+    RmPhysAddr addr;
+    memdescGetPtePhysAddrsForGpu(pMemDesc, pMemDesc->pGpu, addressTranslation, offset, 0, 1, &addr);
     return addr;
 }
 

@@ -317,7 +317,7 @@ static NV_STATUS nv_p2p_put_pages(
          * callback which can free it unlike non-persistent page_table.
          */
         mem_info = container_of(*page_table, nv_p2p_mem_info_t, page_table);
-        status = rm_p2p_put_pages_persistent(sp, mem_info->private, *page_table, mem_info->mig_info);
+        status = rm_p2p_put_pages_persistent(sp, mem_info->private, *page_table/*, mem_info->mig_info*/);
     }
     else
     {
@@ -415,7 +415,7 @@ static int nv_p2p_get_pages(
     NvU8 *gpu_uuid = NULL;
     NvU8 uuid[NVIDIA_P2P_GPU_UUID_LEN] = {0};
     NvBool force_pcie = !!(flags & NVIDIA_P2P_FLAGS_FORCE_BAR1_MAPPING);
-    NvBool cpu_cacheable;
+    NvBool cpu_cacheable = NV_FALSE;
     int rc;
 
     if (!NV_IS_ALIGNED64(virtual_address, NVRM_P2P_PAGESIZE_BIG_64K) ||
@@ -517,11 +517,10 @@ static int nv_p2p_get_pages(
 
         bGetUuid = NV_TRUE;
 
-        status = rm_p2p_get_pages_persistent(sp, virtual_address, length,
-                                             &mem_info->private,
+        status = rm_p2p_get_pages_persistent(sp, virtual_address, length, &mem_info->private,
                                              physical_addresses, &entries,
-                                             force_pcie, *page_table, gpu_info,
-                                             &mem_info->mig_info, &cpu_cacheable);
+                                             /*force_pcie,*/ *page_table, gpu_info//,
+                                             /*&mem_info->mig_info, &cpu_cacheable*/);
         if (status != NV_OK)
         {
             goto failed;
@@ -532,7 +531,7 @@ static int nv_p2p_get_pages(
         // Get regular old-style, non-persistent mappings
         status = rm_p2p_get_pages(sp, p2p_token, va_space,
                 virtual_address, length, physical_addresses, wreqmb_h,
-                rreqmb_h, &entries, &gpu_uuid, *page_table, &cpu_cacheable);
+                rreqmb_h, &entries, &gpu_uuid, *page_table/*, &cpu_cacheable*/);
         if (status != NV_OK)
         {
             goto failed;

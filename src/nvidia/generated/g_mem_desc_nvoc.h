@@ -489,6 +489,9 @@ NV_STATUS memdescCreateSubMem(MEMORY_DESCRIPTOR **ppMemDescNew,
 // Compute the physical address of a byte within a MEMORY_DESCRIPTOR
 RmPhysAddr memdescGetPhysAddr(MEMORY_DESCRIPTOR *pMemDesc, ADDRESS_TRANSLATION addressTranslation, NvU64 offset);
 
+// Compute the physical address of a byte within a MEMORY_DESCRIPTOR for a PTE or HW
+RmPhysAddr memdescGetPtePhysAddr(MEMORY_DESCRIPTOR *pMemDesc, ADDRESS_TRANSLATION addressTranslation, NvU64 offset);
+
 // Compute count physical addresses within a MEMORY_DESCRIPTOR. Starting at the
 // given offset and advancing it by stride for each consecutive address.
 void memdescGetPhysAddrs(MEMORY_DESCRIPTOR *pMemDesc,

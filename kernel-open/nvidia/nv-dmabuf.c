@@ -31,10 +31,9 @@ typedef struct nv_dma_buf_mem_handle
     NvHandle                 h_memory;
     NvU64                    offset;
     NvU64                    size;
-    NvU64    bar1_va;
 
     // RM memdesc specific data
-    //void                    *mem_info;
+    void                    *mem_info;
 
     //
     // Refcount for phys addresses
@@ -43,7 +42,7 @@ typedef struct nv_dma_buf_mem_handle
     NvU64                    phys_refcount;
 
     // Scatterlist of all the memory ranges associated with the buf
-    //MemoryArea               memArea;
+    MemoryArea               memArea;
 } nv_dma_buf_mem_handle_t;
 
 typedef struct nv_dma_buf_file_private
@@ -385,11 +384,11 @@ nv_dma_buf_dup_mem_handles(
     for (i = 0; i < params->numObjects; i++)
     {
         NvHandle h_memory_duped = 0;
-        //void *mem_info = NULL;
-        //nv_memory_type_t memory_type = NV_MEMORY_TYPE_SYSTEM;
-        //NvBool can_mmap;
-        //NvU32 cache_type;
-        //NvBool read_only_mem;
+        void *mem_info = NULL;
+        nv_memory_type_t memory_type = NV_MEMORY_TYPE_SYSTEM;
+        NvBool can_mmap;
+        NvU32 cache_type;
+        NvBool read_only_mem;
 
         if (priv->handles[index].h_memory != 0)
         {
@@ -412,45 +411,44 @@ nv_dma_buf_dup_mem_handles(
                                            params->handles[i],
                                            params->offsets[i],
                                            params->sizes[i],
-                                           &h_memory_duped//,
-                                           //&mem_info,
-                                           //&can_mmap,
-                                           //&cache_type,
-                                           //&read_only_mem,
-                                           //&memory_type
-                                           );
+                                           &h_memory_duped,
+                                           &mem_info,
+                                           &can_mmap,
+                                           &cache_type,
+                                           &read_only_mem,
+                                           &memory_type);
         if (status != NV_OK)
         {
             goto failed;
         }
 
-        //if (priv->map_attrs.cached)
-        //{
-        //    if ((can_mmap      != priv->map_attrs.can_mmap) ||
-        //        (cache_type    != priv->map_attrs.cache_type) ||
-        //        (read_only_mem != priv->map_attrs.read_only_mem) ||
-        //        (memory_type   != priv->map_attrs.memory_type))
-        //    {
-        //        // Creating mixed dma_buf is not supported.
-        //        status = NV_ERR_INVALID_ARGUMENT;
-        //        goto failed;
-        //    }
-        //}
-        //else
-        //{
-        //    // Store the handle's mmap, RO and cache type info.
-        //    priv->map_attrs.can_mmap      = can_mmap;
-        //    priv->map_attrs.cache_type    = cache_type;
-        //    priv->map_attrs.read_only_mem = read_only_mem;
-        //    priv->map_attrs.memory_type   = memory_type;
-        //    priv->map_attrs.cached        = NV_TRUE;
-        //}
+        if (priv->map_attrs.cached)
+        {
+            if ((can_mmap      != priv->map_attrs.can_mmap) ||
+                (cache_type    != priv->map_attrs.cache_type) ||
+                (read_only_mem != priv->map_attrs.read_only_mem) ||
+                (memory_type   != priv->map_attrs.memory_type))
+            {
+                // Creating mixed dma_buf is not supported.
+                status = NV_ERR_INVALID_ARGUMENT;
+                goto failed;
+            }
+        }
+        else
+        {
+            // Store the handle's mmap, RO and cache type info.
+            priv->map_attrs.can_mmap      = can_mmap;
+            priv->map_attrs.cache_type    = cache_type;
+            priv->map_attrs.read_only_mem = read_only_mem;
+            priv->map_attrs.memory_type   = memory_type;
+            priv->map_attrs.cached        = NV_TRUE;
+        }
 
         priv->attached_size += params->sizes[i];
         priv->handles[index].h_memory = h_memory_duped;
         priv->handles[index].offset = params->offsets[i];
         priv->handles[index].size = params->sizes[i];
-        //priv->handles[index].mem_info = mem_info;
+        priv->handles[index].mem_info = mem_info;
         priv->num_objects++;
         index++;
         count++;

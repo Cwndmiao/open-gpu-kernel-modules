@@ -54,6 +54,8 @@ static NV_STATUS _kbusInitP2P_GM107(OBJGPU *, KernelBus *);
 static NV_STATUS _kbusDestroyP2P_GM107(OBJGPU *, KernelBus *);
 static void _kbusLinkP2P_GM107(OBJGPU *, KernelBus *);
 
+static void _kbusDestroyMemdescBar1Cb(OBJGPU *pGpu, void *pCtx, MEMORY_DESCRIPTOR *pMemDesc);
+
 static NvU32 _kbusGetSizeOfBar2PageDir_GM107(NvU64 vaBase, NvU64 vaLimit, NvU64 vaPerEntry, NvU32 entrySize);
 
 static NV_STATUS _kbusBar0TunnelCb_GM107(void *pPrivData, NvU64 addr, void *pData, NvU64 size, NvBool bRead);
@@ -2205,6 +2207,27 @@ kbusUpdateRmAperture_GM107
     return status;
 }
 
+// Helper function to get current GFID.
+static NvU32
+_kbusGetCurrentGfid
+(
+    OBJGPU *pGpu,
+    KernelBus *pKernelBus
+)
+{
+    NvU32             gfid;
+    NvBool            bCallingContextPlugin;
+
+    NV_ASSERT_OR_RETURN(vgpuGetCallingContextGfid(pGpu, &gfid) == NV_OK, INVALID_P2P_GFID);
+    NV_ASSERT_OR_RETURN(vgpuIsCallingContextPlugin(pGpu, &bCallingContextPlugin) == NV_OK, INVALID_P2P_GFID);
+    if (bCallingContextPlugin || !gpuIsWarBug200577889SriovHeavyEnabled(pGpu))
+    {
+        gfid = GPU_GFID_PF;
+    }
+
+    return gfid;
+}
+
 /**
  * @brief This function is used to return the BAR1 VA space.
  *        BAR1 VA space per-GPU, no longer shared
@@ -2404,6 +2427,357 @@ kbusUnmapFbAperture_GM107
     }
 
     gpumgrSetBcEnabledStatus(pGpu, bBcState);
+
+    return rmStatus;
+}
+
+static void
+_kbusDestroyMemdescBar1Cb
+(
+    OBJGPU *pGpu,
+    void *pCtx,
+    MEMORY_DESCRIPTOR *pMemDesc
+)
+{
+    Bar1VaInfo *pBar1VaInfo = (Bar1VaInfo *) pCtx;
+    Bar1MappingTypeSubmapStruct *pSubmap = mapFind(&(pBar1VaInfo->mappingFlagsMap), (NvU64) pMemDesc);
+    if (pSubmap == NULL)
+    {
+        return;
+    }
+
+    // Destroy submap (which should be empty at this point) and remove from parent map.
+    mapDestroy(&pSubmap->mappingSubmap);
+    mapRemove(&(pBar1VaInfo->mappingFlagsMap), pSubmap);
+}
+
+#define NV_BUS_MAPPING_TYPE_INTERNAL_FLAGS_BUS_FLAG 31:0
+#define NV_BUS_MAPPING_TYPE_INTERNAL_FLAGS_SWIZZ_ID 63:32
+
+// Flags affecting mapping reuse
+#define BUS_FLAGS_AFFECTING_MAPPING_MASK \
+    (BUS_MAP_FB_FLAGS_MAP_RSVD_BAR1     |\
+    BUS_MAP_FB_FLAGS_DISABLE_ENCRYPTION |\
+    BUS_MAP_FB_FLAGS_MAP_DOWNWARDS      |\
+    BUS_MAP_FB_FLAGS_READ_ONLY          |\
+    BUS_MAP_FB_FLAGS_WRITE_ONLY)
+
+//
+// Flags not affecting mapping reuse. Fixed offsets aren't tracked by the reuse structure
+// yet so that flag is in this list.
+//
+#define BUS_FLAGS_NOT_AFFECTING_MAPPING_MASK \
+    (BUS_MAP_FB_FLAGS_MAP_UNICAST           |\
+    BUS_MAP_FB_FLAGS_MAP_OFFSET_FIXED       |\
+    BUS_MAP_FB_FLAGS_PRE_INIT               |\
+    BUS_MAP_FB_FLAGS_ALLOW_DISCONTIG        |\
+    BUS_MAP_FB_FLAGS_PAGE_SIZE_4K           |\
+    BUS_MAP_FB_FLAGS_PAGE_SIZE_64K          |\
+    BUS_MAP_FB_FLAGS_PAGE_SIZE_2M           |\
+    BUS_MAP_FB_FLAGS_PAGE_SIZE_512M         |\
+    BUS_MAP_FB_FLAGS_UNMANAGED_MEM_AREA)
+
+ct_assert((BUS_FLAGS_AFFECTING_MAPPING_MASK & BUS_FLAGS_NOT_AFFECTING_MAPPING_MASK) == 0);
+ct_assert((BUS_FLAGS_NOT_AFFECTING_MAPPING_MASK | BUS_FLAGS_AFFECTING_MAPPING_MASK) == BUS_MAP_FB_FLAGS_ALL_FLAGS);
+
+//
+// Note: When static BAR1 is enabled, this function may be called without
+// RMAPI and GPU locks being acquired since we don't expect the
+// GPU state or the memdesc state to change since we're just fetching
+// immutable BAR1 addressses for the handle/memdesc.
+//
+NV_STATUS
+kbusMapFbAperture2_GM107
+(
+    OBJGPU     *pGpu,
+    KernelBus  *pKernelBus,
+    MEMORY_DESCRIPTOR *pMemDesc,
+    MemoryRange mapRange,
+    MemoryArea *pMemArea,
+    NvU32       flags,
+    Device     *pDevice
+)
+{
+    OBJVASPACE      *pVAS;
+    Bar1VaInfo      *pBar1VaInfo;
+    NV_STATUS        rmStatus   = NV_OK;
+    NvU32            gfid       = _kbusGetCurrentGfid(pGpu, pKernelBus);
+    NvBool           bNewSubmap = NV_FALSE;
+    NvBool           bNewType   = NV_FALSE;
+    NvU32            swizzId    = KMIGMGR_SWIZZID_INVALID;
+    NvU64            mappingFlags = 0;
+    NvU64            submemOffset = 0;
+    NvU32            flagsAffectingMapping = BUS_FLAGS_AFFECTING_MAPPING_MASK & flags;
+    MEMORY_DESCRIPTOR           *pRootMemDesc;
+    Bar1MappingTypeSubmapStruct *pSubmap;
+    Bar1MappingType             *pMappingType;
+    // TODO: Remove NO_REUSE on discontig when we support multi-range reuse.
+    NvBool                       bDiscontig = !!(flags & BUS_MAP_FB_FLAGS_ALLOW_DISCONTIG);
+    //NvBool                       bReuse = pKernelBus->bBar1ReuseEnabled && (!bDiscontig);
+    NvBool                       bReuse = NV_FALSE;
+    NvU64                        cachingFlags =
+        (bDiscontig ? 0 : REUSE_MAPPING_DB_MAP_FLAGS_SINGLE_RANGE) |
+        (bReuse     ? 0 : REUSE_MAPPING_DB_MAP_FLAGS_NO_REUSE);
+
+    // BUS_MAP_FB_FLAGS_MAP_OFFSET_FIXED effectively implies we have a preallocated memArea.
+    flags |= (flags & BUS_MAP_FB_FLAGS_MAP_OFFSET_FIXED) ? BUS_MAP_FB_FLAGS_UNMANAGED_MEM_AREA : 0;
+
+    NV_ASSERT((flags & BUS_MAP_FB_FLAGS_FERMI_INVALID) == 0);
+    NV_ASSERT_OR_RETURN(!(flags & BUS_MAP_FB_FLAGS_MAP_OFFSET_FIXED) || pMemArea->numRanges == 1,
+        NV_ERR_INVALID_ARGUMENT);
+    NV_ASSERT_OR_RETURN(gfid != INVALID_P2P_GFID, NV_ERR_INVALID_STATE);
+
+    pBar1VaInfo = &pKernelBus->bar1[gfid];
+    pVAS = pBar1VaInfo->pVAS;
+
+    //
+    // Use root memdesc if the PTE kind is the same. This is a temporary solution to enable reuse
+    // until the reuse structure gains support for PTE kind.
+    //
+    pRootMemDesc = memdescGetRootMemDesc(pMemDesc, &submemOffset);
+    if (memdescGetPteKind(pRootMemDesc) == memdescGetPteKind(pMemDesc))
+    {
+        pMemDesc = pRootMemDesc;
+        mapRange.start += submemOffset;
+    }
+
+    //
+    // Try to get a static BAR1 mapping. If static BAR1 is not enabled
+    // or the allocation goes in the dynamic range, we will get NV_ERR_NOT_SUPPORTED
+    // and fall through to the dynamic map (also used for initial static BAR1 setup itself)
+    //
+    //rmStatus = kbusGetStaticFbAperture_HAL(pGpu, pKernelBus, pMemDesc,
+    //                                       mapRange, pMemArea, flags);
+    rmStatus = NV_ERR_NOT_SUPPORTED;
+
+    if (rmStatus == NV_OK)
+    {
+        // We succeeded in getting a static aperture mapping exit (no cleanup required yet)
+        return rmStatus;
+    }
+    else if (rmStatus != NV_ERR_NOT_SUPPORTED)
+    {
+        NV_PRINTF(LEVEL_ERROR, "static BAR1 reported error\n");
+        return rmStatus;
+    }
+
+    // If not static BAR1, we must have the GPU lock to create a new mapping.
+    NV_ASSERT_OR_RETURN(rmDeviceGpuLockIsOwner(gpuGetInstance(pGpu)),
+                        NV_ERR_INVALID_LOCK_STATE);
+
+    // Get swizzId for use as a key into the mapping struct.
+    if (IS_MIG_IN_USE(pGpu))
+    {
+        if (pDevice != NULL)
+        {
+            MIG_INSTANCE_REF ref;
+            KernelMIGManager *pKernelMIGManager = GPU_GET_KERNEL_MIG_MANAGER(pGpu);
+
+            NV_ASSERT_OR_RETURN(pDevice != NULL, NV_ERR_INVALID_ARGUMENT);
+            NV_ASSERT_OK_OR_RETURN(kmigmgrGetInstanceRefFromDevice(pGpu, pKernelMIGManager,
+                                       pDevice, &ref));
+            swizzId = ref.pKernelMIGGpuInstance->swizzId;
+        }
+        else if (pMemDesc->pHeap != NULL)
+        {
+            KernelMIGManager *pKernelMIGManager = GPU_GET_KERNEL_MIG_MANAGER(pGpu);
+            KERNEL_MIG_GPU_INSTANCE *pCurrKernelMIGGPUInstance = NULL;
+            KERNEL_MIG_GPU_INSTANCE *pKernelMIGGPUInstance = NULL;
+
+            FOR_EACH_VALID_GPU_INSTANCE(pGpu, pKernelMIGManager, pCurrKernelMIGGPUInstance)
+            {
+                if (pCurrKernelMIGGPUInstance->pMemoryPartitionHeap == pMemDesc->pHeap)
+                {
+                    pKernelMIGGPUInstance = pCurrKernelMIGGPUInstance;
+                    break;
+                }
+            }
+            FOR_EACH_VALID_GPU_INSTANCE_END();
+
+            NV_ASSERT_OR_RETURN(pKernelMIGGPUInstance != NULL, NV_ERR_INVALID_STATE);
+            swizzId = pKernelMIGGPUInstance->swizzId;
+        }
+    }
+
+    mappingFlags = DRF_NUM64(_BUS, _MAPPING_TYPE_INTERNAL_FLAGS, _BUS_FLAG, flagsAffectingMapping);
+    mappingFlags = FLD_SET_DRF_NUM64(_BUS, _MAPPING_TYPE_INTERNAL_FLAGS, _SWIZZ_ID, swizzId, mappingFlags);
+
+    rmStatus = NV_OK;
+
+    // TODO: work this into reuse.
+    if(flags & BUS_MAP_FB_FLAGS_UNMANAGED_MEM_AREA)
+    {
+        pMemArea->numRanges = 1;
+        pMemArea->pRanges[0].size = mapRange.size;
+        rmStatus = _kbusMapAperture_GM107(pGpu, /*pKernelBus,*/ pMemDesc, pVAS, mapRange.start,
+            &pMemArea->pRanges[0].start, &pMemArea->pRanges[0].size, flags, 0);
+        goto cleanup;
+    }
+
+    // Find/create the submap corresponding to this memdesc
+    pSubmap = mapFind(&(pBar1VaInfo->mappingFlagsMap), (NvU64) pMemDesc);
+    if (pSubmap == NULL)
+    {
+        pSubmap = mapInsertNew(&(pBar1VaInfo->mappingFlagsMap), (NvU64) pMemDesc);
+        NV_ASSERT_OR_RETURN(pSubmap != NULL, NV_ERR_NO_MEMORY);
+
+        mapInit(&pSubmap->mappingSubmap, portMemAllocatorGetGlobalNonPaged());
+        pSubmap->callback.destroyCallback = _kbusDestroyMemdescBar1Cb;
+        pSubmap->callback.pObject = pBar1VaInfo;
+        memdescAddDestroyCallback(pMemDesc, &pSubmap->callback);
+        bNewSubmap = NV_TRUE;
+    }
+
+    // Find/create the mapping type struct for this set of flags/swizzId.
+    pMappingType = mapFind(&pSubmap->mappingSubmap, (NvU64) mappingFlags);
+    if (pMappingType == NULL)
+    {
+        pMappingType = mapInsertNew(&pSubmap->mappingSubmap, (NvU64) mappingFlags);
+        NV_ASSERT_TRUE_OR_GOTO(rmStatus, pMappingType != NULL, NV_ERR_NO_MEMORY, err_submap);
+        pMappingType->pMemDesc     = pMemDesc;
+        pMappingType->mappingFlags = flagsAffectingMapping;
+        pMappingType->swizzId      = swizzId;
+        pMappingType->refCount     = 0;
+        bNewType = NV_TRUE;
+    }
+
+    if (flags & BUS_MAP_FB_FLAGS_ALLOW_DISCONTIG)
+    {
+        //
+        // Try with single range first, fall through to discontig if cannot get
+        // TODO: remove when multi-range reuse added.
+        //
+        rmStatus = reusemappingdbMap(&pBar1VaInfo->reuseDb, pMappingType,
+            mapRange, pMemArea, REUSE_MAPPING_DB_MAP_FLAGS_SINGLE_RANGE);
+
+        if (rmStatus == NV_OK)
+        {
+            pMappingType->refCount++;
+            goto cleanup;
+        }
+    }
+
+    NV_ASSERT_OK_OR_GOTO(rmStatus, reusemappingdbMap(&pBar1VaInfo->reuseDb, pMappingType,
+            mapRange, pMemArea, cachingFlags), err_mapping);
+
+    pMappingType->refCount++;
+    goto cleanup;
+
+err_mapping:
+    // Cleanup newly created type
+    if (bNewType)
+    {
+        mapRemove(&pSubmap->mappingSubmap, pMappingType);
+    }
+err_submap:
+    // Cleanup newly created submap
+    if (bNewSubmap)
+    {
+        memdescRemoveDestroyCallback(pMemDesc, &pSubmap->callback);
+        mapDestroy(&pSubmap->mappingSubmap);
+        mapRemove(&(pBar1VaInfo->mappingFlagsMap), pSubmap);
+    }
+
+cleanup:
+    //kbusUpdateRusdStatistics(pGpu);
+    return rmStatus;
+}
+
+NV_STATUS
+kbusUnmapFbAperture2_GM107
+(
+    OBJGPU     *pGpu,
+    KernelBus  *pKernelBus,
+    MEMORY_DESCRIPTOR *pMemDesc,
+    MemoryArea memArea,
+    NvU32       flags
+)
+{
+    NV_STATUS        rmStatus    = NV_OK;
+    Bar1VaInfo      *pBar1VaInfo;
+    NvU64            idx;
+    NvU32            gfid = _kbusGetCurrentGfid(pGpu, pKernelBus);
+    MEMORY_DESCRIPTOR           *pRootMemDesc;
+    Bar1MappingTypeSubmapStruct *pSubmap;
+    Bar1MappingType             *pMappingType;
+    Bar1MappingType            **ppMappingType;
+
+    NV_ASSERT_OR_RETURN(gfid != INVALID_P2P_GFID, NV_ERR_INVALID_STATE);
+
+    pBar1VaInfo = &pKernelBus->bar1[gfid];
+
+    // Use root memdesc if the PTE kind is the same
+    pRootMemDesc = memdescGetRootMemDesc(pMemDesc, NULL);
+    if (memdescGetPteKind(pRootMemDesc) == memdescGetPteKind(pMemDesc))
+    {
+        pMemDesc = pRootMemDesc;
+    }
+
+    //rmStatus = kbusDecreaseStaticBar1Refcount_HAL(pGpu, pKernelBus, pMemDesc, &memArea);
+
+    //
+    // If ok, then static BAR1 code has successfully decreased ref count
+    // If not, then it's a dynamic mapping we need to continue unmapping
+    //
+    if (rmStatus == NV_OK)
+    {
+        goto done;
+    }
+    else if (rmStatus != NV_ERR_NOT_SUPPORTED)
+    {
+        NV_PRINTF(LEVEL_ERROR, "static BAR1 reported error\n");
+        goto done;
+    }
+
+    // TODO: work this into reuse.
+    rmStatus = NV_OK;
+    if (flags & BUS_MAP_FB_FLAGS_UNMANAGED_MEM_AREA)
+    {
+        VirtMemAllocator *pDma = GPU_GET_DMA(pGpu);
+        OBJVASPACE       *pVAS = pBar1VaInfo->pVAS;
+
+        // TODO: investigate whether the tegra wbinvd flush is really necessary, seems only useful for SYSMEM_COH
+        memdescFlushCpuCaches(pGpu, pMemDesc);
+        dmaFreeMapping_HAL(pGpu, pDma, pVAS, memArea.pRanges[0].start, pMemDesc, 0, NULL);
+
+        goto done;
+    }
+
+    // All ranges in this area must have the same type, and VA->type must be created on map
+    ppMappingType = mapFind(&pBar1VaInfo->reverseMap, memArea.pRanges[0].start);
+    NV_ASSERT_TRUE_OR_GOTO(rmStatus, ppMappingType != NULL, NV_ERR_INVALID_STATE, done);
+    pMappingType = *ppMappingType;
+
+    // Find submap that has the submap<->type map
+    pSubmap = mapFind(&(pBar1VaInfo->mappingFlagsMap), (NvU64) pMemDesc);
+    NV_ASSERT_TRUE_OR_GOTO(rmStatus, pSubmap != NULL, NV_ERR_INVALID_STATE, done);
+
+    // Unmap each range individually. Non-reused ranges are automatically taken care of.
+    for (idx = 0; idx < memArea.numRanges; idx++)
+    {
+        reusemappingdbUnmap(&pBar1VaInfo->reuseDb, pMappingType, memArea.pRanges[idx]);
+    }
+
+    // Delete map and supermap if we reduce refcount to 0.
+    pMappingType->refCount--;
+    if (pMappingType->refCount == 0)
+    {
+        mapRemove(&pSubmap->mappingSubmap, pMappingType);
+    }
+
+    if (mapCount(&pSubmap->mappingSubmap) == 0)
+    {
+        memdescRemoveDestroyCallback(pMemDesc, &pSubmap->callback);
+        mapDestroy(&pSubmap->mappingSubmap);
+        mapRemove(&(pBar1VaInfo->mappingFlagsMap), pSubmap);
+    }
+done:
+    //kbusUpdateRusdStatistics(pGpu);
+
+    if (!(flags & BUS_MAP_FB_FLAGS_UNMANAGED_MEM_AREA))
+    {
+        portMemFree(memArea.pRanges);
+    }
 
     return rmStatus;
 }

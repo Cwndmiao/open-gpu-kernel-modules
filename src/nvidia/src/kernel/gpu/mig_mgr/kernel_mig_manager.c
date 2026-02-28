@@ -2162,6 +2162,69 @@ kmigmgrEnableAllLCEs_IMPL
 }
 
 /*!
+ * @brief   Retrieves instance(s) associated with a device, if applicable
+ */
+NV_STATUS
+kmigmgrGetInstanceRefFromDevice_IMPL
+(
+    OBJGPU *pGpu,
+    KernelMIGManager *pKernelMIGManager,
+    Device *pDevice,
+    MIG_INSTANCE_REF *pRef
+)
+{
+    NV_STATUS status = NV_OK;
+    RsClient *pRsClient;
+    GPUInstanceSubscription *pGPUInstanceSubscription;
+    ComputeInstanceSubscription *pComputeInstanceSubscription = NULL;
+    Subdevice *pSubdevice;
+    MIG_INSTANCE_REF ref;
+
+    NV_ASSERT_OR_RETURN(pRef != NULL, NV_ERR_INVALID_ARGUMENT);
+    *pRef = kmigmgrMakeNoMIGReference();
+
+    if (!IS_MIG_IN_USE(pGpu))
+    {
+        return NV_ERR_INVALID_STATE;
+    }
+
+    NV_ASSERT_OR_RETURN(pDevice != NULL, NV_ERR_INVALID_ARGUMENT);
+    pRsClient = RES_GET_CLIENT(pDevice);
+
+    NV_CHECK_OK_OR_RETURN(LEVEL_INFO,
+        subdeviceGetByInstance(pRsClient, RES_GET_HANDLE(pDevice), 0, &pSubdevice));
+
+    NV_CHECK_OK_OR_RETURN(LEVEL_INFO,
+        gisubscriptionGetGPUInstanceSubscription(pRsClient, RES_GET_HANDLE(pSubdevice),
+                                                 &pGPUInstanceSubscription));
+
+    //ref.pKernelMIGGpuInstance = gisubscriptionGetMIGGPUInstance(pGPUInstanceSubscription);
+    ref.pKernelMIGGpuInstance = pGPUInstanceSubscription->pKernelMIGGpuInstance;
+
+    status = cisubscriptionGetComputeInstanceSubscription(pRsClient,
+                                                          RES_GET_HANDLE(pGPUInstanceSubscription),
+                                                          &pComputeInstanceSubscription);
+    if (status == NV_OK)
+    {
+        //ref = kmigmgrMakeCIReference(gisubscriptionGetMIGGPUInstance(pGPUInstanceSubscription),
+        //                             cisubscriptionGetMIGComputeInstance(pComputeInstanceSubscription));
+        ref = kmigmgrMakeCIReference(pGPUInstanceSubscription->pKernelMIGGpuInstance,
+                                   pComputeInstanceSubscription->pMIGComputeInstance);
+    }
+    else
+    {
+        //ref = kmigmgrMakeGIReference(gisubscriptionGetMIGGPUInstance(pGPUInstanceSubscription));
+        ref = kmigmgrMakeGIReference(pGPUInstanceSubscription->pKernelMIGGpuInstance);
+        // Quash status, this is optional
+        status = NV_OK;
+    }
+
+    NV_CHECK_OR_RETURN(LEVEL_SILENT, kmigmgrIsMIGReferenceValid(&ref), NV_ERR_INVALID_STATE);
+    *pRef = ref;
+    return status;
+}
+
+/*!
  * @brief   Retrieves instance(s) associated with a client, if applicable
  */
 NV_STATUS
