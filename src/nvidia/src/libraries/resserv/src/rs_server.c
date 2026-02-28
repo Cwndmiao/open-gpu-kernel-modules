@@ -29,6 +29,7 @@
 #include "resserv/rs_resource.h"
 #include "tls/tls.h"
 #include "nv_speculation_barrier.h"
+#include "../../../kernel/rmapi/resource_desc.h"
 
 #if !RS_STANDALONE
 #include "os/os.h"
@@ -235,12 +236,17 @@ NV_STATUS serverFreeResourceTreeUnderLock(RsServer *pServer, RS_RES_FREE_PARAMS 
     if (status != NV_OK)
         return status;
 
+    NV_PRINTF(LEVEL_WARNING, "cwndmiao debug, free res hClient= %08x, hParent= %08x, hObject= %08x, name= %s\n",
+            pResourceRef->pClient ? pResourceRef->pClient->hClient : 0,
+            pResourceRef->pParentRef ? pResourceRef->pParentRef->hResource : 0,
+            pResourceRef->hResource,
+            pResourceRef->pResourceDesc ? pResourceRef->pResourceDesc->pClassInfo->name : "Unknown");
     if (pResourceRef->pResource == NULL)
     {
-        // 
+        //
         // We don't need to acquire the resource lock for a resource
         // that already got freed during resource invalidation.
-        // 
+        //
 
         status = clientFreeResource(pResourceRef->pClient, pServer, pFreeParams);
         NV_ASSERT(status == NV_OK);
@@ -767,7 +773,7 @@ serverAllocResource
         }
         else
         {
-            status = serverAllocLookupSecondClient(pParams->externalClassId, 
+            status = serverAllocLookupSecondClient(pParams->externalClassId,
                                                    pParams->pAllocParams,
                                                    &hSecondClient);
             if (status != NV_OK)
@@ -3559,12 +3565,12 @@ _serverLockDualClientWithLockInfo
 check_locks:
     if (bValidateLocks)
     {
-        status = clientValidateLocks((*ppClientEntry1st)->pClient, pServer, 
+        status = clientValidateLocks((*ppClientEntry1st)->pClient, pServer,
             *ppClientEntry1st);
 
         if ((status == NV_OK) && (hClient1 != hClient2))
         {
-            status = clientValidateLocks((*ppClientEntry2nd)->pClient, pServer, 
+            status = clientValidateLocks((*ppClientEntry2nd)->pClient, pServer,
                 *ppClientEntry2nd);
         }
     }

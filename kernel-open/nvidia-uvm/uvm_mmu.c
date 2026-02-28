@@ -244,6 +244,8 @@ static void phys_mem_deallocate_sysmem(uvm_page_tree_t *tree, uvm_mmu_page_table
 
 static void phys_mem_deallocate(uvm_page_tree_t *tree, uvm_mmu_page_table_alloc_t *ptr)
 {
+    UVM_ERR_PRINT("cwndmiao debug, phys_mem_deallocate, phys_alloc.addr= %llx\n", ptr->addr.address);
+
     if (ptr->addr.aperture == UVM_APERTURE_SYS)
         phys_mem_deallocate_sysmem(tree, ptr);
     else
@@ -1400,6 +1402,7 @@ static NV_STATUS try_get_ptes(uvm_page_tree_t *tree,
     NvU32 used_count = 0;
     NvU32 i;
     uvm_page_directory_t *dirs_used[MAX_OPERATION_DEPTH];
+    uvm_page_directory_t *dirs_touched[5] = { NULL };
 
     uvm_assert_mutex_locked(&tree->lock);
 
@@ -1443,6 +1446,7 @@ static NV_STATUS try_get_ptes(uvm_page_tree_t *tree,
 
         entry = dir->entries + index_to_entry(hal, start_index, dir->depth, page_size);
 
+        dirs_touched[dir->depth] = dir;
         if (dir->depth == hal->page_table_depth(page_size)) {
             page_table_range_init(range, page_size, dir, start_index, end_index);
             break;
@@ -1475,9 +1479,16 @@ static NV_STATUS try_get_ptes(uvm_page_tree_t *tree,
     free_unused_directories(tree, used_count, dirs_used, dir_cache);
     {
         NvU32 i;
-        for (i = 0; i < used_count; i++) {
-            uvm_page_directory_t *dir = dirs_used[i];
-            UVM_ERR_PRINT("cwndmiao debug, page_dir [%llx, %llx] page_size %x, depth= %x, phys_alloc.addr= %llx\n", start, size, page_size, dir->depth, dir->phys_alloc.addr.address);
+        //for (i = 0; i < used_count; i++) {
+        //    uvm_page_directory_t *dir = dirs_used[i];
+        //    UVM_ERR_PRINT("cwndmiao debug, page_dir [%llx, %llx] page_size %x, depth= %x, phys_alloc.addr= %llx\n", start, size, page_size, dir->depth, dir->phys_alloc.addr.address);
+        //}
+        for (i = 0; i < 5; i++) {
+            if (dirs_touched[i] != NULL) {
+                uvm_page_directory_t *dir = dirs_touched[i];
+                UVM_ERR_PRINT("cwndmiao debug, touched page_dir [%llx, %llx] page_size %x, depth= %x, phys_alloc.addr= %llx\n",
+                    start, size, page_size, dir->depth, dir->phys_alloc.addr.address);
+            }
         }
     }
     return write_gpu_state(tree, page_size, invalidate_depth, used_count, dirs_used);
