@@ -2791,7 +2791,7 @@ static NV_STATUS block_zero_new_gpu_chunk(uvm_va_block_t *block,
                                           uvm_tracker_t *tracker)
 {
     NV_STATUS status;
-    uvm_gpu_address_t nv_memset_addr_base, nv_memset_addr;
+    uvm_gpu_address_t memset_addr_base, memset_addr;
     uvm_push_t push;
     uvm_gpu_id_t id;
     uvm_va_block_region_t subregion;
@@ -2869,8 +2869,8 @@ static NV_STATUS block_zero_new_gpu_chunk(uvm_va_block_t *block,
         // We'll push one membar later for all nv_memsets in this loop
         uvm_push_set_flag(&push, UVM_PUSH_FLAG_NEXT_MEMBAR_NONE);
 
-        nv_memset_addr.address = nv_memset_addr_base.address + (subregion.first - chunk_region.first) * PAGE_SIZE;
-        gpu->parent->ce_hal->memset_8(&push, nv_memset_addr, 0, uvm_va_block_region_size(subregion));
+        memset_addr.address = memset_addr_base.address + (subregion.first - chunk_region.first) * PAGE_SIZE;
+        gpu->parent->ce_hal->memset_8(&push, memset_addr, 0, uvm_va_block_region_size(subregion));
     }
 
     // A membar from this GPU is required between this nv_memset and any PTE write
@@ -3855,8 +3855,8 @@ static void block_copy_push(uvm_va_block_t *block,
         gpu_dst_address = block_copy_get_address(block, &copy_state->dst, region.first, gpu);
         gpu_src_address = block_copy_get_address(block, &copy_state->src, region.first, gpu);
 
-        UVM_ERR_PRINT("cwndmiao debug, memcopy [%016llx] -> [%016llx] size= %lx\n",
-                gpu_src_address, gpu_dst_address, uvm_va_block_region_size(region));
+        UVM_ERR_PRINT("cwndmiao debug, memcopy [%016llx] -> [%016llx] size= %llx\n",
+                gpu_src_address.address, gpu_dst_address.address, uvm_va_block_region_size(region));
         gpu->parent->ce_hal->memcopy(push, gpu_dst_address, gpu_src_address, uvm_va_block_region_size(region));
     }
 

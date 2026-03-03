@@ -770,6 +770,7 @@ serverAllocResource
         if (bClientAlloc)
         {
             status = serverAllocClient(pServer, pParams);
+            NV_PRINTF(LEVEL_WARNING, "cwndmiao debug, alloc client, hClient= %08x, status= %08x\n", pParams->hClient, status);
         }
         else
         {

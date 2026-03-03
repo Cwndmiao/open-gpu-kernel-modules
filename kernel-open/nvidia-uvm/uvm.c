@@ -42,6 +42,8 @@
 
 #define NVIDIA_UVM_DEVICE_NAME          "nvidia-uvm"
 
+NV_STATUS uvm_va_space_create(struct address_space *mapping, uvm_va_space_t **va_space_ptr, NvU64 flags);
+
 static dev_t g_uvm_base_dev;
 static struct cdev g_uvm_cdev;
 static const struct file_operations uvm_fops;

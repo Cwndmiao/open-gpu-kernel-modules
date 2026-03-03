@@ -697,7 +697,7 @@ nv_module_init(nv_stack_t **sp)
         goto cap_drv_exit;
     }
 
-    nv_init_rsync_info(); 
+    nv_init_rsync_info();
     nv_detect_conf_compute_platform();
 
     if (!rm_init_rm(*sp))
@@ -2756,6 +2756,7 @@ unlock:
 
         default:
             rmStatus = rm_ioctl(sp, nv, &nvlfp->nvfp, arg_cmd, arg_copy, arg_size);
+            nv_printf(NV_DBG_ERRORS, "cwndmiao debug, rm_ioctl= %08x\n", rmStatus);
             status = ((rmStatus == NV_OK) ? 0 : -EINVAL);
             break;
     }
@@ -4966,7 +4967,7 @@ nvidia_transition_dynamic_power(
         /*
          * Return -EAGAIN so that kernel PM core will not treat this as a fatal error and
          * reschedule the callback again in the future.
-         */ 
+         */
         return -EAGAIN;
     }
 
@@ -6029,7 +6030,7 @@ void NV_API_CALL nv_flush_coherent_cpu_cache_range(nv_state_t *nv, NvU64 cpu_vir
 #if NVCPU_IS_AARCH64
     NvU64 va, cbsize;
     NvU64 end_cpu_virtual = cpu_virtual + size;
-    
+
     nv_printf(NV_DBG_INFO,
             "Flushing CPU virtual range [0x%llx, 0x%llx)\n",
             cpu_virtual, end_cpu_virtual);
