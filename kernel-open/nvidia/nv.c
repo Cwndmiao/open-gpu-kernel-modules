@@ -138,7 +138,7 @@ char *rm_firmware_active = NULL;
 NV_MODULE_STRING_PARAMETER(rm_firmware_active);
 
 #define NV_FIRMWARE_GSP_FILENAME     "nvidia/" NV_VERSION_STRING "/gsp.bin"
-#define NV_FIRMWARE_GSP_LOG_FILENAME "nvidia/" NV_VERSION_STRING "/gsp_log.bin"
+#define NV_FIRMWARE_GSP_LOG_FILENAME "nvidia/" NV_VERSION_STRING "/gsp.bin"
 
 MODULE_FIRMWARE(NV_FIRMWARE_GSP_FILENAME);
 

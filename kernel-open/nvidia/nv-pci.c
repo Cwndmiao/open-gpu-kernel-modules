@@ -1437,6 +1437,7 @@ nv_pci_probe
     nv->subsystem_vendor   = pci_dev->subsystem_vendor;
     nv->os_state           = (void *) nvl;
     nv->dma_dev            = &nvl->dma_dev;
+    nv_printf(NV_DBG_ERRORS, "NVRM: cwndmiao debug, nv= %px, dma_dev= %px\n", nv, nv->dma_dev);
     nv->pci_info.domain    = NV_PCI_DOMAIN_NUMBER(pci_dev);
     nv->pci_info.bus       = NV_PCI_BUS_NUMBER(pci_dev);
     nv->pci_info.slot      = NV_PCI_SLOT_NUMBER(pci_dev);

@@ -824,6 +824,9 @@ static inline nv_dma_device_t* osGetDmaDeviceForMemDesc(
     MEMORY_DESCRIPTOR *pMemDesc
 )
 {
+    NV_PRINTF(LEVEL_WARNING, "cwndmiao debug, osGetDmaDeviceForMemDesc, pOsGpuInfo= %px, niso_dma_dev= %px, dma_dev= %px\n",
+            pOsGpuInfo, pOsGpuInfo->niso_dma_dev, pOsGpuInfo->dma_dev);
+
     return (pOsGpuInfo->niso_dma_dev != NULL) &&
            memdescGetFlag(pMemDesc, MEMDESC_FLAGS_MEMORY_TYPE_DISPLAY_NISO) ?
            pOsGpuInfo->niso_dma_dev : pOsGpuInfo->dma_dev;

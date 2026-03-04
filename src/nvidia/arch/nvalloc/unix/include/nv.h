@@ -309,6 +309,7 @@ typedef enum
     NV_SOC_IRQ_DPAUX_TYPE,
     NV_SOC_IRQ_GPIO_TYPE,
     NV_SOC_IRQ_HDACODEC_TYPE,
+    NV_SOC_IRQ_TCPC2DISP_TYPE,
     NV_SOC_IRQ_INVALID_TYPE
 } nv_soc_irq_type_t;
 
@@ -325,9 +326,10 @@ typedef struct nv_soc_irq_info_s {
     } irq_data;
 } nv_soc_irq_info_t;
 
-#define NV_MAX_SOC_IRQS              6
+#define NV_MAX_SOC_IRQS              10
 #define NV_MAX_DPAUX_NUM_DEVICES     4
-#define NV_MAX_SOC_DPAUX_NUM_DEVICES 2 // From SOC_DEV_MAPPING
+
+#define NV_MAX_SOC_DPAUX_NUM_DEVICES 4 // From SOC_DEV_MAPPING
 
 /*
  * per device state
